@@ -82,13 +82,38 @@ The evaluation OAuth credential was renewed through encrypted transport into
 Key Vault with a matching one-day expiry. None of these checks proves user
 login, OBO, grounded answers, citations or document-level authorization.
 
-T035, T085 and T093 remain incomplete. A legitimate delegated-token request
-returned `AADSTS65001` (`consent_required`, `InteractionRequired`).
-The supported VPN profile import was invoked, but automatic Windows DNS still
-resolved the frontend publicly; application of the private DNS rules is not
-verified. Fresh stock one-command sample deployments and the complete
-classic/hosted conversational acceptance must not be inferred from the
-successful private custom deployment, control-plane or health checks.
+On 2026-10-11 the VPN blocker was resolved using a fresh gateway-exported
+profile with scoped private DNS configuration. The client accepted and
+connected the profile without manual trust or authentication fields. All
+three spoke routes and ten DNS suffix rules were verified; the frontend
+resolved to its private address and returned HTTPS 200. The receipt is
+`.azure/vpn-import-verified-20261011.json`.
+
+The evaluation OAuth credential was renewed with a matching one-day vault
+expiry. The frontend initially generated an HTTP callback behind HTTPS
+ingress. Setting the supported `CHAINLIT_URL` to the canonical HTTPS origin
+corrected the actual Entra redirect; the replacement revision is healthy and
+receives all traffic. Central operator guidance is recorded in
+Azure/AI-Landing-Zones#150, merged at `f8e3c881`. The genuine Entra sign-in page is
+reachable, but a completed user session has not been verified. The earlier
+delegated-token request returned `AADSTS65001` (`consent_required`,
+`InteractionRequired`); an HTTPS redirect does not prove consent or OBO.
+
+T035, T085 and T093 remain incomplete. Fresh stock one-command sample
+deployments and complete classic/hosted conversational acceptance must not be
+inferred from the successful private custom deployment, control-plane or
+health checks. No authenticated grounded response, citations or
+document-level authorization result has been established by these repairs.
+
+Fresh one-command sample attempts at source `ef7417a` failed the embedding
+quota gate: the region had 340/350 Standard units allocated, leaving 10, while
+each evaluation environment requested 20. No existing allocation was credited
+to a new account. Live negative validation also exposed a framework ordering
+defect: azd created an empty resource group before the `preprovision` hook
+rejected the invalid definition. That does not pass S5's strict no-write
+criterion. Source `9b6db1a` adds read-only `preup` schema and binding checks;
+12 focused tests passed using both PowerShell and Bash. Actual no-write
+regression and fresh sample deployments remain separate acceptance gates.
 
 ### Latest corrective-source evidence (2026-10-09)
 
