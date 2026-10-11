@@ -112,8 +112,29 @@ to a new account. Live negative validation also exposed a framework ordering
 defect: azd created an empty resource group before the `preprovision` hook
 rejected the invalid definition. That does not pass S5's strict no-write
 criterion. Source `9b6db1a` adds read-only `preup` schema and binding checks;
-12 focused tests passed using both PowerShell and Bash. Actual no-write
-regression and fresh sample deployments remain separate acceptance gates.
+12 focused tests passed using both PowerShell and Bash.
+
+The subsequent actual Azure regression at exact source `9b6db1a` passed all
+three `azd up` negatives: missing ID, unsupported profile and changed binding
+fail in `preup`, leave complete environment files unchanged, and create no
+resource group. Delayed Activity Log checks show no writes. The expanded
+exact-source suite passed 51 tests and 71 subtests. This verifies S5.
+
+Fresh S7 attempts then used evaluation embedding capacity 5 per mode, without
+changing published defaults. Both quota gates and composed provision previews
+passed, but each single `azd up` failed at the additional Foundry Search service
+with `ServiceQuotaExceeded`: 12/12 Standard Search services were already used.
+No fresh application runtime was deployed. Neither run allocated new model
+deployments; embedding usage remained 340/350. Receipts are retained in
+`.azure/t085-corrective-20261011/`, including `negative-results.json`,
+`exact-source-tests.json`, `capacity-gate.json` and `final-audit.json`.
+
+These attempts left partial billable foundations (57 and 56 resource inventory
+entries), not empty groups. No cleanup or quota increase was performed. No
+existing resources, SKU changes, disabled Search, split recovery or public
+access were substituted for fresh one-command proof. Fresh S7 also retains
+operator-owned reverse VPN peering and authoritative private DNS prerequisites.
+T085 and T093 remain open; S5 success does not establish S7 or user acceptance.
 
 ### Latest corrective-source evidence (2026-10-09)
 
