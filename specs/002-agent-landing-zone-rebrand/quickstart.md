@@ -162,6 +162,23 @@ commands without evidence. Source-pinned receipts and limitations are in
 `.azure/t085-final-20261011/handoff.md` and `final-audit.json`.
 T035, T085 and T093 remain unchecked.
 
+One instrumented Container App recovery subsequently passed both real quota
+gates and completed its ARM foundation at source `fad1ff5`. It did not complete
+application acceptance: `RUN_FROM_JUMPBOX=false` and
+`AZURE_SKIP_NETWORK_ISOLATION_WARNING=true` intentionally deferred isolated
+post-provision configuration. The earlier assumption that warning suppression
+was informational only was incorrect; the documented deferral behavior must
+not be treated as intact one-command acceptance.
+All four Container Apps still use foundation placeholder images. The recovery
+created 101 resources and allocated Standard embedding capacity 5; remaining
+embedding headroom is 5, while eastus Search usage is 3/12. Hosted was not retried.
+Spoke peering is Initiated without matching reverse hub peering. The runner
+preserved incremental output but ultimately forced termination, not a natural
+successful `azd` exit. Recovery receipts are in
+`.azure/t085-recovery-20261011/handoff.md`. No configuration bypass, protected
+VPN mutation, deletion or release publication was performed. New and retained
+partial foundations remain billable; monetary cost has not been measured.
+
 ### Latest corrective-source evidence (2026-10-09)
 
 Both private custom-sample root `azd deploy` executions passed at exact source
