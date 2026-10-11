@@ -1536,7 +1536,8 @@ function Test-AzureSearchSkuQuota {
     param(
         [Parameter(Mandatory)] [string]$SubscriptionId,
         [Parameter(Mandatory)] [string]$Location,
-        [Parameter(Mandatory)] [string]$Sku
+        [Parameter(Mandatory)] [string]$Sku,
+        [ValidateRange(1, 2)] [int]$RequiredHeadroom = 1
     )
     if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($SubscriptionId)) { return }
     $url = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Search/locations/$Location/usages?api-version=2025-05-01"
@@ -1558,6 +1559,11 @@ function Test-AzureSearchSkuQuota {
     if ([int]$target.limit -le 0 -or $available -le 0) {
         Add-Finding -Severity FAIL -Code 'SEARCH_QUOTA_AT_LIMIT' `
             -Message "Azure Search SKU '$Sku' quota in '$Location' is exhausted (used $($target.currentValue) of $($target.limit))." `
+            -Hint "Request a quota increase or pick another region/SKU."
+    }
+    elseif ($available -lt $RequiredHeadroom) {
+        Add-Finding -Severity FAIL -Code 'SEARCH_QUOTA_INSUFFICIENT' `
+            -Message "Azure Search SKU '$Sku' headroom in '$Location' is $available (need >= $RequiredHeadroom)." `
             -Hint "Request a quota increase or pick another region/SKU."
     }
     elseif (([double]$available / [double]$target.limit) -lt 0.1) {
@@ -1665,8 +1671,10 @@ function Test-RegionalReadiness {
     $location = Get-StringValue $P['location']
     $aiFoundryLocation = Get-StringValue $P['aiFoundryLocation']
     $cosmosLocation = Get-StringValue $P['cosmosLocation']
+    $searchLocation = Get-StringValue $P['searchServiceLocation']
     if ([string]::IsNullOrWhiteSpace($aiFoundryLocation)) { $aiFoundryLocation = $location }
     if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { $cosmosLocation = $location }
+    if ([string]::IsNullOrWhiteSpace($searchLocation)) { $searchLocation = $location }
 
     if ([string]::IsNullOrWhiteSpace($location)) {
         Add-Finding -Severity WARN -Code 'REGIONAL_NO_LOCATION' `
@@ -1688,15 +1696,19 @@ function Test-RegionalReadiness {
     $deployContainerEnv = ConvertTo-Bool $(if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
     $searchRaw = Get-StringValue $P['deploySearchService']
     $deploySearch = if ([string]::IsNullOrWhiteSpace($searchRaw)) { $true } else { ConvertTo-Bool $searchRaw }
+    $deployFoundrySearch = $deployAiFoundry -and
+        (Resolve-DeployFlag -P $P -Key 'deployAAfAgentSvc' -Default $true) -and
+        [string]::IsNullOrWhiteSpace((Get-StringValue $P['aiSearchResourceId']))
+    $searchServiceCount = [int]$deploySearch + [int]$deployFoundrySearch
     $deployKeyVault = ConvertTo-Bool $(if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
     $deployStorage = ConvertTo-Bool $(if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
     $deployAppConfig = ConvertTo-Bool $(if ($null -ne $P['deployAppConfig']) { $P['deployAppConfig'] } else { $true })
     $deployLogAnalytics = ConvertTo-Bool $(if ($null -ne $P['deployLogAnalytics']) { $P['deployLogAnalytics'] } else { $true })
 
     # Provider/location support
-    if ($deploySearch) {
+    if ($searchServiceCount -gt 0) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
-            -Location $location -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
+            -Location $searchLocation -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
     }
     if ($deployCosmos) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
@@ -1781,9 +1793,9 @@ function Test-RegionalReadiness {
         if ($deployAiFoundry) {
             Test-CognitiveServicesQuotaHeadroom -SubscriptionId $resolvedSubId -Location $aiFoundryLocation
         }
-        if ($deploySearch) {
+        if ($searchServiceCount -gt 0) {
             # main.bicep hardcodes the Search SKU to 'standard'; mirror that here.
-            Test-AzureSearchSkuQuota -SubscriptionId $resolvedSubId -Location $location -Sku 'standard'
+            Test-AzureSearchSkuQuota -SubscriptionId $resolvedSubId -Location $searchLocation -Sku 'standard' -RequiredHeadroom $searchServiceCount
         }
     }
 

@@ -136,6 +136,18 @@ access were substituted for fresh one-command proof. Fresh S7 also retains
 operator-owned reverse VPN peering and authoritative private DNS prerequisites.
 T085 and T093 remain open; S5 success does not establish S7 or user acceptance.
 
+The next bounded attempts selected the documented `AZURE_SEARCH_LOCATION=eastus`
+override, where 11 of 12 Standard Search slots were available. Both previews
+passed, but foundation preflight incorrectly queried the exhausted primary
+region instead. The retry resource groups contained zero resources and zero
+deployments; receipts are retained in `.azure/t085-eastus-20261011/`.
+The corrective foundation check now uses the effective Search region for
+provider availability and quota, and counts both enabled Search services,
+excluding the Foundry-associated service when an existing Search ID is supplied
+or Agents/Foundry are disabled. No quota gate or deployment feature is bypassed.
+Local regressions cover overrides, fallback and allocation counts; these are
+not evidence of a completed fresh Azure deployment.
+
 ### Latest corrective-source evidence (2026-10-09)
 
 Both private custom-sample root `azd deploy` executions passed at exact source
