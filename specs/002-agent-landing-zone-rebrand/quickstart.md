@@ -148,6 +148,20 @@ or Agents/Foundry are disabled. No quota gate or deployment feature is bypassed.
 Local regressions cover overrides, fallback and allocation counts; these are
 not evidence of a completed fresh Azure deployment.
 
+At exact corrective source `fad1ff5`, both actual Azure-aware foundation and
+umbrella gates passed with zero failures, as did both composed previews.
+Two pristine root `azd up` invocations then exceeded their 5,400-second
+execution bounds. Their final exit codes and interrupted output were not
+captured; neither command was repeated. Read-only audit found both new groups
+empty, with no group deployments, Search usage unchanged at 1/12 in eastus
+and embedding unchanged at 340/350 in the primary region. These receipts
+verify the corrected regional gates, not application acceptance.
+The retained earlier partial foundations now contain 66 and 65 inventory
+entries and remain billable; their growth is not attributed to these timed-out
+commands without evidence. Source-pinned receipts and limitations are in
+`.azure/t085-final-20261011/handoff.md` and `final-audit.json`.
+T035, T085 and T093 remain unchecked.
+
 ### Latest corrective-source evidence (2026-10-09)
 
 Both private custom-sample root `azd deploy` executions passed at exact source
