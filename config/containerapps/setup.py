@@ -155,8 +155,12 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
                 time.sleep(2)
 
 
-def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential):
-    """Update a single container app registry configuration."""
+def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential,
+                                *, preserve_other_registries: bool = False):
+    """Update registry auth; custom callers can retain unrelated registries.
+
+    The default retains the existing bundled setup behavior.
+    """
     start_time = time.time()
     logging.info(f"[{name}] Starting Container App update process")
     logging.debug(f"[{name}] Parameters: subscription={subscription_id}, rg={resource_group}, acr={acr_server}")
@@ -188,7 +192,11 @@ def update_single_container_app(subscription_id, resource_group, name, acr_serve
 
         # Update registry configuration
         logging.info(f"[{name}] Updating registry configuration with identity: {desired_identity}")
-        app.configuration.registries = [
+        retained = [
+            reg for reg in (app.configuration.registries or [])
+            if (reg.get("server") if isinstance(reg, dict) else getattr(reg, "server", None)) != acr_server
+        ] if preserve_other_registries else []
+        app.configuration.registries = retained + [
             {"server": acr_server, "identity": desired_identity}
         ]
         
