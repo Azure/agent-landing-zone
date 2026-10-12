@@ -82,13 +82,102 @@ The evaluation OAuth credential was renewed through encrypted transport into
 Key Vault with a matching one-day expiry. None of these checks proves user
 login, OBO, grounded answers, citations or document-level authorization.
 
-T035, T085 and T093 remain incomplete. A legitimate delegated-token request
-returned `AADSTS65001` (`consent_required`, `InteractionRequired`).
-The supported VPN profile import was invoked, but automatic Windows DNS still
-resolved the frontend publicly; application of the private DNS rules is not
-verified. Fresh stock one-command sample deployments and the complete
-classic/hosted conversational acceptance must not be inferred from the
-successful private custom deployment, control-plane or health checks.
+On 2026-10-11 the VPN blocker was resolved using a fresh gateway-exported
+profile with scoped private DNS configuration. The client accepted and
+connected the profile without manual trust or authentication fields. All
+three spoke routes and ten DNS suffix rules were verified; the frontend
+resolved to its private address and returned HTTPS 200. The receipt is
+`.azure/vpn-import-verified-20261011.json`.
+
+The evaluation OAuth credential was renewed with a matching one-day vault
+expiry. The frontend initially generated an HTTP callback behind HTTPS
+ingress. Setting the supported `CHAINLIT_URL` to the canonical HTTPS origin
+corrected the actual Entra redirect; the replacement revision is healthy and
+receives all traffic. Central operator guidance is recorded in
+Azure/AI-Landing-Zones#150, merged at `f8e3c881`. The genuine Entra sign-in page is
+reachable, but a completed user session has not been verified. The earlier
+delegated-token request returned `AADSTS65001` (`consent_required`,
+`InteractionRequired`); an HTTPS redirect does not prove consent or OBO.
+
+T035, T085 and T093 remain incomplete. Fresh stock one-command sample
+deployments and complete classic/hosted conversational acceptance must not be
+inferred from the successful private custom deployment, control-plane or
+health checks. No authenticated grounded response, citations or
+document-level authorization result has been established by these repairs.
+
+Fresh one-command sample attempts at source `ef7417a` failed the embedding
+quota gate: the region had 340/350 Standard units allocated, leaving 10, while
+each evaluation environment requested 20. No existing allocation was credited
+to a new account. Live negative validation also exposed a framework ordering
+defect: azd created an empty resource group before the `preprovision` hook
+rejected the invalid definition. That does not pass S5's strict no-write
+criterion. Source `9b6db1a` adds read-only `preup` schema and binding checks;
+12 focused tests passed using both PowerShell and Bash.
+
+The subsequent actual Azure regression at exact source `9b6db1a` passed all
+three `azd up` negatives: missing ID, unsupported profile and changed binding
+fail in `preup`, leave complete environment files unchanged, and create no
+resource group. Delayed Activity Log checks show no writes. The expanded
+exact-source suite passed 51 tests and 71 subtests. This verifies S5.
+
+Fresh S7 attempts then used evaluation embedding capacity 5 per mode, without
+changing published defaults. Both quota gates and composed provision previews
+passed, but each single `azd up` failed at the additional Foundry Search service
+with `ServiceQuotaExceeded`: 12/12 Standard Search services were already used.
+No fresh application runtime was deployed. Neither run allocated new model
+deployments; embedding usage remained 340/350. Receipts are retained in
+`.azure/t085-corrective-20261011/`, including `negative-results.json`,
+`exact-source-tests.json`, `capacity-gate.json` and `final-audit.json`.
+
+These attempts left partial billable foundations (57 and 56 resource inventory
+entries), not empty groups. No cleanup or quota increase was performed. No
+existing resources, SKU changes, disabled Search, split recovery or public
+access were substituted for fresh one-command proof. Fresh S7 also retains
+operator-owned reverse VPN peering and authoritative private DNS prerequisites.
+T085 and T093 remain open; S5 success does not establish S7 or user acceptance.
+
+The next bounded attempts selected the documented `AZURE_SEARCH_LOCATION=eastus`
+override, where 11 of 12 Standard Search slots were available. Both previews
+passed, but foundation preflight incorrectly queried the exhausted primary
+region instead. The retry resource groups contained zero resources and zero
+deployments; receipts are retained in `.azure/t085-eastus-20261011/`.
+The corrective foundation check now uses the effective Search region for
+provider availability and quota, and counts both enabled Search services,
+excluding the Foundry-associated service when an existing Search ID is supplied
+or Agents/Foundry are disabled. No quota gate or deployment feature is bypassed.
+Local regressions cover overrides, fallback and allocation counts; these are
+not evidence of a completed fresh Azure deployment.
+
+At exact corrective source `fad1ff5`, both actual Azure-aware foundation and
+umbrella gates passed with zero failures, as did both composed previews.
+Two pristine root `azd up` invocations then exceeded their 5,400-second
+execution bounds. Their final exit codes and interrupted output were not
+captured; neither command was repeated. Read-only audit found both new groups
+empty, with no group deployments, Search usage unchanged at 1/12 in eastus
+and embedding unchanged at 340/350 in the primary region. These receipts
+verify the corrected regional gates, not application acceptance.
+The retained earlier partial foundations now contain 66 and 65 inventory
+entries and remain billable; their growth is not attributed to these timed-out
+commands without evidence. Source-pinned receipts and limitations are in
+`.azure/t085-final-20261011/handoff.md` and `final-audit.json`.
+T035, T085 and T093 remain unchecked.
+
+One instrumented Container App recovery subsequently passed both real quota
+gates and completed its ARM foundation at source `fad1ff5`. It did not complete
+application acceptance: `RUN_FROM_JUMPBOX=false` and
+`AZURE_SKIP_NETWORK_ISOLATION_WARNING=true` intentionally deferred isolated
+post-provision configuration. The earlier assumption that warning suppression
+was informational only was incorrect; the documented deferral behavior must
+not be treated as intact one-command acceptance.
+All four Container Apps still use foundation placeholder images. The recovery
+created 101 resources and allocated Standard embedding capacity 5; remaining
+embedding headroom is 5, while eastus Search usage is 3/12. Hosted was not retried.
+Spoke peering is Initiated without matching reverse hub peering. The runner
+preserved incremental output but ultimately forced termination, not a natural
+successful `azd` exit. Recovery receipts are in
+`.azure/t085-recovery-20261011/handoff.md`. No configuration bypass, protected
+VPN mutation, deletion or release publication was performed. New and retained
+partial foundations remain billable; monetary cost has not been measured.
 
 ### Latest corrective-source evidence (2026-10-09)
 
