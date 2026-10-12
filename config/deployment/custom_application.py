@@ -15,8 +15,9 @@ from uuid import uuid4
 import yaml
 
 from config.appdefinition import AppDefinitionError, load_definition, validate_definition
-from config.appdefinition.loader import KIND_HOSTED_AGENT
+from config.appdefinition.loader import KIND_CONTAINER_APP, KIND_HOSTED_AGENT, component_service_name
 from config.appdefinition.roles import assign_hosted_roles
+from config.containerapps.registry import configure_service_registry
 from config.deployment.composition import is_truthy
 from config.deployment.hosted_image import (
     build_source_image,
@@ -139,6 +140,8 @@ def deploy_service(definition_path: str, name: str, environment: Mapping[str, st
     ):
         raise ValueError("Custom hosted service requires an explicit agent name.")
     image = prepare_image(components[0], service, definition.folder, environment)
+    if components[0]["kind"] == KIND_CONTAINER_APP:
+        configure_service_registry(component_service_name(definition, components[0]), image, environment)
     try:
         if image:
             rendered = copy.deepcopy(project)

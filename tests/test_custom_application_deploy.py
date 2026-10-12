@@ -135,6 +135,7 @@ def test_deployment_consumes_pin_and_restores_original_yaml(tmp_path, failure):
     original = path.read_bytes()
 
     def run(args, **kwargs):
+        registry.assert_called_once_with("web", f"private.azurecr.io/web@{DIGEST}", ENV)
         rendered = yaml.safe_load(path.read_text())
         service = rendered["services"]["web"]
         assert service["image"] == f"private.azurecr.io/web@{DIGEST}"
@@ -146,7 +147,8 @@ def test_deployment_consumes_pin_and_restores_original_yaml(tmp_path, failure):
             raise subprocess.CalledProcessError(1, args)
         return subprocess.CompletedProcess(args, 0)
 
-    with patch.object(deploy.subprocess, "run", side_effect=run):
+    with patch.object(deploy.subprocess, "run", side_effect=run), \
+            patch.object(deploy, "configure_service_registry") as registry:
         if failure:
             with pytest.raises(subprocess.CalledProcessError):
                 assert deploy.deploy_service(str(definition_path), "web", ENV) == (
@@ -154,7 +156,31 @@ def test_deployment_consumes_pin_and_restores_original_yaml(tmp_path, failure):
                 )
         else:
             deploy.deploy_service(str(definition_path), "web", ENV)
+    registry.assert_called_once_with("web", f"private.azurecr.io/web@{DIGEST}", ENV)
     assert path.read_bytes() == original
+
+
+def test_registry_failure_stops_custom_rollout_before_yaml_overlay(tmp_path):
+    app = tmp_path / "sample"
+    shutil.copytree(ROOT / "samples" / "custom-app" / "containerapp", app)
+    path = app / "azure.yaml"
+    original = path.read_bytes()
+    with patch.object(deploy, "prepare_image", return_value=f"private.azurecr.io/web@{DIGEST}"), \
+            patch.object(deploy, "configure_service_registry", side_effect=RuntimeError("registry denied")), \
+            patch.object(deploy.subprocess, "run") as run:
+        with pytest.raises(RuntimeError, match="registry denied"):
+            deploy.deploy_service(str(app / "app-definition.json"), "web", ENV)
+    run.assert_not_called()
+    assert path.read_bytes() == original
+
+
+def test_bundled_definition_never_enters_custom_registry_configuration():
+    with patch.object(deploy, "configure_service_registry") as registry, \
+            patch.object(deploy, "prepare_image") as image:
+        with pytest.raises(ValueError, match="bundled component"):
+            deploy.deploy_service(str(ROOT / "app-definition.json"), "ui", ENV)
+    registry.assert_not_called()
+    image.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", ["none", "deploy", "identity", "roles"])
@@ -170,6 +196,7 @@ def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, f
     instance = SimpleNamespace(principal_id="verified-principal", agent_version="7")
     with patch.object(deploy, "prepare_image", return_value=image), \
             patch.object(deploy.subprocess, "run") as run, \
+            patch.object(deploy, "configure_service_registry") as registry, \
             patch.object(deploy, "discover_instance", return_value=instance) as discover, \
             patch.object(deploy, "assign_hosted_roles") as roles:
         if failure == "deploy":
@@ -193,4 +220,5 @@ def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, f
             roles.assert_called_once_with(
                 definition["components"][0], instance.principal_id, ENV,
             )
+        registry.assert_not_called()
     assert (app / "azure.yaml").read_bytes() == original
