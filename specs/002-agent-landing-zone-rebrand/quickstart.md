@@ -30,6 +30,69 @@ environment per scenario and delete it afterwards with `azd down --purge`.
 
 ## Acceptance by release
 
+### Authorized private recovery boundary (2026-10-13)
+
+The two new private validation foundations completed ARM provisioning at source
+`cf957243164450b33c3e61699d385541b7360231`; their original local first
+`azd up` failures remain in the receipts. Continuing these environments is
+recovery, not proof of pristine single-command S7 deployment.
+
+After explicit authorization, the four Application Insights/Log Analytics
+resources were associated additively with the shared AMPLS. Existing members,
+DNS records, access modes, endpoints, locks and RBAC were preserved. Both
+private authenticated workspace queries returned HTTP 200 with validated
+TLS/SNI. Both provision previews and shipped post-provision hooks then passed.
+Operator OS DNS still resolves Monitor publicly, and a private-endpoint
+`actionsRequired=Recreate` advisory remains; this is not blanket runtime
+telemetry acceptance.
+
+The Container sample recovery deploy passed. Its live Healthy revision uses
+the exact immutable build digest, has only the declared resource-scoped
+grants, and returns the complete provisioned platform-output contract over
+private HTTPS, including `schemaVersion=1` and `network.isolated=true`.
+The Hosted build passed, but the first agent version failed registry
+authentication. Its actual instance had no role assignments; the custom
+deployment path attempted profile reconciliation only after successful child
+deploy. Inspection of the installed `azure.ai.agents` beta.13 provider at
+upstream commit `16f49c2c61e5fe95cd18db52e508beb7c439424a` also found no
+per-agent AcrPull assignment between version creation and its activation
+wait, despite current documentation describing automatic assignment.
+Moving reconciliation earlier cannot by itself solve first deployment when
+the instance identity does not yet exist. A subsequent read-only audit found
+the supported foundation prerequisite: the official provider uses a
+project-identity AcrPull grant, and the existing foundation template already
+declares that grant when `prepareHostedAgent` or `deployHostedAgent` is true.
+Both selectors were false for the custom Hosted definition because
+preparation considered only the bundled orchestrator topology. The declared
+project and account identities had no registry grant, while the registry
+environment bindings were correct. The correction in progress is to prepare
+the required Hosted foundation from the selected custom components, retaining
+classic topology and not deploying the bundled orchestrator. This correction
+is committed on the feature branch at
+`0238734d39a7870d4ac9b0b19fe2f8f5e8e634cb`; it is not yet integrated or
+Azure-accepted. Focused composition/deployment regressions passed 145 tests
+and 19 subtests, and the parent independently reran the custom composition
+and deployment tests: 33 tests and 8 subtests passed. The existing preparation
+selector also gates an operator Project Manager assignment; its actual
+authorization and preview delta must be verified before applying the fix.
+Exact per-instance runtime profiles remain a separate reconciliation before smoke.
+No polling race, manual grant, alternate runtime identity, OIDC connection
+workaround or blind retry is recorded as acceptance.
+
+The private trio login page returned HTTP 200, anonymous user access returned
+401 and OAuth redirected to Entra. A visible ephemeral browser was stopped
+when legitimate user sign-in was unavailable. No completed user session,
+OBO invocation, grounded answer, citation or document allow/deny result is
+claimed. T035, T085 and T093 remain open, and same-definition repetition has
+not run while the Hosted deployment is failing.
+
+Sanitized local receipts are retained under
+`.azure/t085-fresh-20261012/ampls-supported-20261013/`, with Container proof in
+the parent `runtime-verification.json`, and under
+`.azure/695-current-ui-boundary.json` and
+`.azure/695-user-browser-acceptance.json`. Private environment and resource
+names are intentionally omitted here.
+
 ### Integrated-source and private-hosted evidence (2026-10-10)
 
 The acceptance fixes are integrated into `develop`: platform #774 at
