@@ -527,7 +527,11 @@ function Test-ExistingHostedOperatorAccess {
     $permissions = @()
     foreach ($assignment in @($assignments)) {
         if (-not $assignment -or $assignment.principalId -ne $principal -or $assignment.condition) { continue }
-        $definition = Invoke-AzCli -Arguments @('role', 'definition', 'list', '--name', $assignment.roleDefinitionId, '-o', 'json')
+        # CLI --name accepts the role UUID, not the ARM roleDefinitionId:
+        # passing the full ID returns an empty successful list.
+        $roleId = ([string]$assignment.roleDefinitionId -split '/')[-1]
+        if ($roleId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { continue }
+        $definition = Invoke-AzCli -Arguments @('role', 'definition', 'list', '--name', $roleId, '-o', 'json')
         foreach ($role in @($definition)) {
             if ($role) { $permissions += @($role.permissions) }
         }

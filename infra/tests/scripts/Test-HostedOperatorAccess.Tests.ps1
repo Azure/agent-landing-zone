@@ -19,6 +19,7 @@ function Invoke-AzCli {
     $script:RoleCalls++
     if ($Arguments[0] -ne 'role' -or $Arguments[2] -ne 'list') { throw 'Only read-only role inventory is allowed.' }
     if ($Arguments[1] -eq 'assignment') { return $script:Assignments }
+    if ($Arguments[4] -ne '00000000-0000-0000-0000-000000000001') { throw 'Role definitions must be requested by UUID, not full ARM ID.' }
     return @(@{ permissions = $script:Permissions })
 }
 function Assert-Finding([string]$Code) {
@@ -36,7 +37,7 @@ $parameters = @{
 }
 foreach ($case in 'existing', 'missing', 'management-only', 'excluded', 'conditional', 'wrong-principal', 'wrong-scope') {
     $script:Findings = [System.Collections.Generic.List[pscustomobject]]::new()
-    $script:Assignments = @(@{ principalId = $operator; roleDefinitionId = 'role-test'; condition = $null })
+    $script:Assignments = @(@{ principalId = $operator; roleDefinitionId = '/subscriptions/sub-test/providers/Microsoft.Authorization/roleDefinitions/00000000-0000-0000-0000-000000000001'; condition = $null })
     $script:Permissions = @(@{ actions = @('*'); notActions = @(); dataActions = @('Microsoft.CognitiveServices/*'); notDataActions = @() })
     $inputParameters = $parameters.Clone()
     switch ($case) {
@@ -60,7 +61,7 @@ if ($script:RoleCalls) { throw 'Legacy/default callers must not gain new read-on
 Write-Host 'PASS compatible default skips existing-authorization gate.'
 $script:ProjectId = ''
 $parameters.grantHostedAgentProjectManager = $false
-$script:Assignments = @(@{ principalId = $operator; roleDefinitionId = 'owner-test'; condition = $null })
+$script:Assignments = @(@{ principalId = $operator; roleDefinitionId = '/subscriptions/sub-test/providers/Microsoft.Authorization/roleDefinitions/00000000-0000-0000-0000-000000000001'; condition = $null })
 $script:Permissions = @(@{ actions = @('*'); notActions = @(); dataActions = @(); notDataActions = @() })
 $script:Findings = [System.Collections.Generic.List[pscustomobject]]::new()
 Test-HostedAgentConfiguration -P $parameters
