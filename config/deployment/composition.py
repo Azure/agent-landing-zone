@@ -665,6 +665,10 @@ def compose_parameters(
         )
 
     parameters["prepareHostedAgent"] = {"value": prepare_hosted}
+    if prepare_hosted and not hosted:
+        # Custom Hosted preparation requires foundation pull, not additional
+        # operator privilege. Bundled/foundation callers retain their default.
+        parameters["grantHostedAgentProjectManager"] = {"value": False}
     parameters["deployHostedAgent"] = {"value": deploy_hosted}
     parameters["deployCosmosDb"] = {
         "value": mode is DeploymentMode.CLASSIC

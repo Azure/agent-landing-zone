@@ -84,6 +84,7 @@ class CustomAppCompositionTests(unittest.TestCase):
                 composed = compose_parameters(source_parameters(), environment)
                 parameters = composed["parameters"]
                 self.assertTrue(parameters["prepareHostedAgent"]["value"])
+                self.assertFalse(parameters["grantHostedAgentProjectManager"]["value"])
                 self.assertFalse(parameters["deployHostedAgent"]["value"])
                 self.assertEqual(
                     composed, compose_parameters(source_parameters(), environment)
@@ -91,6 +92,7 @@ class CustomAppCompositionTests(unittest.TestCase):
                 # Only prerequisite selection and its two public metadata
                 # values change: not models, capacity, services or topology.
                 parameters["prepareHostedAgent"] = baseline["parameters"]["prepareHostedAgent"]
+                parameters["grantHostedAgentProjectManager"] = baseline["parameters"]["grantHostedAgentProjectManager"]
                 settings = parameters["additionalAppConfigurationSettings"]["value"]
                 for setting in settings:
                     if setting["name"] in {"PREPARE_HOSTED_AGENT", "HOSTED_AGENT_PREPARED"}:
@@ -108,6 +110,10 @@ class CustomAppCompositionTests(unittest.TestCase):
                 )
                 self.assertFalse(composed["parameters"]["prepareHostedAgent"]["value"])
                 self.assertFalse(composed["parameters"]["deployHostedAgent"]["value"])
+                self.assertEqual(
+                    source_parameters()["parameters"]["grantHostedAgentProjectManager"],
+                    composed["parameters"]["grantHostedAgentProjectManager"],
+                )
 
     def test_mixed_components_prepare_but_infra_only_definition_does_not(self) -> None:
         container = json.loads(
@@ -126,6 +132,8 @@ class CustomAppCompositionTests(unittest.TestCase):
                     )
                     self.assertEqual(expected, composed["parameters"]["prepareHostedAgent"]["value"])
                     self.assertFalse(composed["parameters"]["deployHostedAgent"]["value"])
+                    if expected:
+                        self.assertFalse(composed["parameters"]["grantHostedAgentProjectManager"]["value"])
                     apps = composed["parameters"]["containerAppsList"]["value"]
                     self.assertEqual(3 + (container in components), len(apps))
 
@@ -149,6 +157,19 @@ class CustomAppCompositionTests(unittest.TestCase):
         self.assertEqual("orchestrator", settings["CHAT_BACKEND"])
         self.assertEqual("", settings["HOSTED_AGENT_BASE_URL"])
         self.assertEqual(3, len(json.loads(settings["CONTAINER_APPS"])))
+
+    def test_bundled_hosted_keeps_operator_grant_default(self) -> None:
+        for topology in ("hosted-panel", "hosted-no-panel"):
+            with self.subTest(topology=topology):
+                composed = compose_parameters(source_parameters(), {
+                    "DEPLOYMENT_TOPOLOGY": topology,
+                    "HOSTED_AGENT_RESOURCE_SCOPE": "api://agent/.default",
+                })
+                self.assertTrue(composed["parameters"]["prepareHostedAgent"]["value"])
+                self.assertEqual(
+                    source_parameters()["parameters"]["grantHostedAgentProjectManager"],
+                    composed["parameters"]["grantHostedAgentProjectManager"],
+                )
 
 
 if __name__ == "__main__":
