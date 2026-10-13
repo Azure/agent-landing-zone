@@ -12,6 +12,7 @@ from config.continuity.settings import public_settings as continuity_public_sett
 from config.deployment.composition import (
     APP_CONFIG_LABEL,
     DeploymentMode,
+    requires_hosted_foundation,
     resolve_mode,
     resolve_runtime_mode,
     validate_hosted_prerequisites,
@@ -131,6 +132,9 @@ def build_settings(
     hosted = mode is not DeploymentMode.CLASSIC
     resource_group = _required(environment, "AZURE_RESOURCE_GROUP")
     resource_token = _required(environment, "RESOURCE_TOKEN")
+    prepare_hosted = requires_hosted_foundation(
+        environment, hosted_orchestration=hosted
+    )
 
     app_names = {
         "frontend": f"ca-{resource_token}-frontend",
@@ -199,12 +203,13 @@ def build_settings(
 
     return {
         "DEPLOY_HOSTED_AGENT_ORCHESTRATION": str(runtime_hosted).lower(),
-        "PREPARE_HOSTED_AGENT": str(hosted).lower(),
+        "PREPARE_HOSTED_AGENT": str(prepare_hosted).lower(),
         "DEPLOY_HOSTED_AGENT": (
             environment.get("DEPLOY_HOSTED_AGENT") or "false"
         ).strip().lower(),
         "HOSTED_AGENT_PREPARED": (
-            environment.get("HOSTED_AGENT_PREPARED") or str(hosted)
+            environment.get("HOSTED_AGENT_PREPARED")
+            or str(prepare_hosted)
         ).strip().lower(),
         "DEPLOY_ADMINISTRATIVE_PANEL": str(
             runtime_mode is DeploymentMode.HOSTED_PANEL

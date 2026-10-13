@@ -194,17 +194,42 @@ def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, f
     original = (app / "azure.yaml").read_bytes()
     image = f"private.azurecr.io/agent@{DIGEST}"
     instance = SimpleNamespace(principal_id="verified-principal", agent_version="7")
-    with patch.object(deploy, "prepare_image", return_value=image), \
-            patch.object(deploy.subprocess, "run") as run, \
-            patch.object(deploy, "configure_service_registry") as registry, \
-            patch.object(deploy, "discover_instance", return_value=instance) as discover, \
-            patch.object(deploy, "assign_hosted_roles") as roles:
+    events = []
+
+    def run_once(args, **kwargs):
+        events.append("deploy")
+        rendered = yaml.safe_load((app / "azure.yaml").read_text())
+        assert rendered["services"]["agent"]["image"] == image
+        assert rendered["services"]["agent"]["docker"] == {"imagePassthrough": True}
+        assert args == ["azd", "deploy", "agent", "--environment", "offline", "--no-prompt"]
+        assert kwargs["cwd"] == app
+        assert kwargs["check"] is True
         if failure == "deploy":
-            run.side_effect = subprocess.CalledProcessError(1, ["azd"])
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0)
+
+    def verify_instance(*args, **kwargs):
+        events.append("identity")
         if failure == "identity":
-            discover.side_effect = RuntimeError("identity mismatch")
+            raise RuntimeError("identity mismatch")
+        return instance
+
+    def assign_profiles(component, principal, environment):
+        events.append("profiles")
+        # Initial runtime can have zero profiles. Reconcile only the instance
+        # discovered after deployment, never the foundation pull identity.
+        assert principal == instance.principal_id
+        assert component == definition["components"][0]
+        assert environment == ENV
+        assert (app / "azure.yaml").read_bytes() == original
         if failure == "roles":
-            roles.side_effect = RuntimeError("assignment denied")
+            raise RuntimeError("assignment denied")
+
+    with patch.object(deploy, "prepare_image", return_value=image), \
+            patch.object(deploy.subprocess, "run", side_effect=run_once) as run, \
+            patch.object(deploy, "configure_service_registry") as registry, \
+            patch.object(deploy, "discover_instance", side_effect=verify_instance) as discover, \
+            patch.object(deploy, "assign_hosted_roles", side_effect=assign_profiles) as roles:
         if failure == "none":
             assert deploy.deploy_service(str(definition_path), "agent", ENV) == image
         else:
@@ -221,4 +246,11 @@ def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, f
                 definition["components"][0], instance.principal_id, ENV,
             )
         registry.assert_not_called()
+        run.assert_called_once()
+    expected = ["deploy"]
+    if failure != "deploy":
+        expected.append("identity")
+    if failure not in {"deploy", "identity"}:
+        expected.append("profiles")
+    assert events == expected
     assert (app / "azure.yaml").read_bytes() == original
