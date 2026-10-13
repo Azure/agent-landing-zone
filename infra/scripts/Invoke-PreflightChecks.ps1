@@ -477,12 +477,96 @@ function Test-Topology {
     }
 }
 
+function Test-ExistingHostedOperatorAccess {
+    param([hashtable]$P)
+
+    if ($SkipAzureLookups) {
+        Add-Finding -Severity INFO -Code 'HOSTED_OPERATOR_ACCESS_NOT_VERIFIED' `
+            -Message 'Existing Hosted operator authorization requires live role verification before apply.'
+        return
+    }
+    $values = Get-AzdEnvValues
+    $scope = (Get-StringValue $values['AZURE_AI_PROJECT_RESOURCE_ID']).Trim()
+    $principal = (Get-StringValue $P['principalId']).Trim()
+    $subscription = (Get-StringValue $values['AZURE_SUBSCRIPTION_ID']).Trim()
+    $group = (Get-StringValue $values['AZURE_RESOURCE_GROUP']).Trim()
+    $prefix = "/subscriptions/$subscription/resourceGroups/$group/providers/Microsoft.CognitiveServices/accounts/"
+    $newProject = [string]::IsNullOrWhiteSpace($scope)
+    if (-not $principal -or -not $subscription -or
+        (-not $newProject -and (-not $group -or
+            -not $scope.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            $scope -notmatch '/accounts/[^/]+/projects/[^/]+$'))) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_SCOPE_REQUIRED' `
+            -Message 'Suppressing Project Manager requires a bound existing project and executor principal.' `
+            -Hint 'Hydrate the selected environment and verify existing scoped authorization before provisioning. No operator role will be granted automatically.'
+        return
+    }
+    if ($newProject) {
+        # Before the first foundation exists, check inherited management
+        # access. The unchanged deployAiFoundry executor role already grants
+        # Cognitive Services User data access on its new account. This is not
+        # a new Project Manager grant or an invented existing permission.
+        $scope = "/subscriptions/$subscription"
+        if ($group) { $scope += "/resourceGroups/$group" }
+    }
+    $assignments = Invoke-AzCli -Arguments @('role', 'assignment', 'list', '--scope', $scope,
+        '--include-inherited', '--assignee-object-id', $principal, '--fill-principal-name', 'false', '-o', 'json')
+    $requirements = @(
+        @{ Kind = 'actions'; Exclude = 'notActions'; Operation = 'Microsoft.CognitiveServices/accounts/projects/read' }
+        @{ Kind = 'dataActions'; Exclude = 'notDataActions'; Operation = 'Microsoft.CognitiveServices/accounts/AIServices/agents/read' }
+        @{ Kind = 'dataActions'; Exclude = 'notDataActions'; Operation = 'Microsoft.CognitiveServices/accounts/AIServices/agents/write' }
+    )
+    if ($newProject) {
+        $requirements = @($requirements | Where-Object Kind -eq 'actions')
+        if (-not (Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true)) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_ACCESS_REQUIRED' `
+                -Message 'New project operator data authorization requires the declared Foundry foundation executor role; no Project Manager grant will be substituted.'
+            return
+        }
+    }
+    $permissions = @()
+    foreach ($assignment in @($assignments)) {
+        if (-not $assignment -or $assignment.principalId -ne $principal -or $assignment.condition) { continue }
+        # CLI --name accepts the role UUID, not the ARM roleDefinitionId:
+        # passing the full ID returns an empty successful list.
+        $roleId = ([string]$assignment.roleDefinitionId -split '/')[-1]
+        if ($roleId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { continue }
+        $definition = Invoke-AzCli -Arguments @('role', 'definition', 'list', '--name', $roleId, '-o', 'json')
+        foreach ($role in @($definition)) {
+            if ($role) { $permissions += @($role.permissions) }
+        }
+    }
+    $missing = @($requirements | Where-Object {
+        $requirement = $_
+        -not @($permissions | Where-Object {
+            $allow = @($_.($requirement.Kind) | Where-Object { $requirement.Operation -like $_ }).Count -gt 0
+            $deny = @($_.($requirement.Exclude) | Where-Object { $requirement.Operation -like $_ }).Count -gt 0
+            $allow -and -not $deny
+        }).Count
+    })
+    if ($missing.Count) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_ACCESS_REQUIRED' `
+            -Message 'Required existing operator project/agent permissions are missing or could not be verified.' `
+            -Hint 'Have an authorized administrator review scoped operator permissions; this preparation does not grant Project Manager or change Entra consent.'
+    } else {
+        Add-Finding -Severity PASS -Code 'HOSTED_OPERATOR_ACCESS_VERIFIED' `
+            -Message $(if ($newProject) {
+                'Inherited operator project read verified; new account data authorization is supplied by the unchanged declared Cognitive Services User executor role, not Project Manager.'
+            } else {
+                'Existing scoped operator project read and agent read/write permissions verified; no Project Manager assignment requested.'
+            })
+    }
+}
+
 function Test-HostedAgentConfiguration {
     param([hashtable]$P)
 
     $prepareHostedAgent = Resolve-DeployFlag -P $P -Key 'prepareHostedAgent' -Default $false
     $deployHostedAgent = Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false
     if (-not ($prepareHostedAgent -or $deployHostedAgent)) { return }
+    if (-not (Resolve-DeployFlag -P $P -Key 'grantHostedAgentProjectManager' -Default $true)) {
+        Test-ExistingHostedOperatorAccess -P $P
+    }
 
     $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
     if (-not $deployAiFoundry) {

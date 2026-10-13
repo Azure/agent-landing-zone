@@ -135,6 +135,12 @@ try {
             Add-Pass "$parameterName defaults to false."
         }
     }
+    if ($template.parameters.grantHostedAgentProjectManager.type -ne 'bool' -or
+        $template.parameters.grantHostedAgentProjectManager.defaultValue -ne $true) {
+        Add-Failure 'Operator Project Manager gate must be a compatible boolean defaulting to true.'
+    } else {
+        Add-Pass 'Operator Project Manager gate preserves legacy foundation defaults.'
+    }
 
     $prerequisiteExpression = [string]$template.variables._hostedAgentPrerequisitesEnabled
     $missingPrerequisiteTokens = @(
@@ -194,9 +200,9 @@ try {
     $crossServiceJson = $template.resources.assignCrossServiceRoles | ConvertTo-Json -Depth 100 -Compress
     foreach ($check in @(
             @{
-                Name = 'Executor receives Foundry Project Manager when preparation or deployment is selected.'
+                Name = 'Executor receives Foundry Project Manager only when its independent grant gate and Hosted preparation are selected.'
                 Json = $executorJson
-                Required = @("variables('_hostedAgentPrerequisitesEnabled')", 'AzureAIProjectManager')
+                Required = @("variables('_hostedAgentPrerequisitesEnabled')", "parameters('grantHostedAgentProjectManager')", 'AzureAIProjectManager')
             },
             @{
                 Name = 'Foundry project identity receives a registry-mode-compatible pull role when preparation or deployment is selected.'
@@ -211,6 +217,11 @@ try {
         else {
             Add-Pass $check.Name
         }
+    }
+    if ($crossServiceJson.Contains("parameters('grantHostedAgentProjectManager')")) {
+        Add-Failure 'Operator grant gate must never suppress project managed identity registry pull.'
+    } else {
+        Add-Pass 'Project managed identity registry pull is independent of operator grants.'
     }
 
     $source = Get-Content -LiteralPath $MainFile -Raw

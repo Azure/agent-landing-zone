@@ -399,6 +399,9 @@ param deployAcrTaskAgentPool bool = true
 @description('Prepare accelerator-neutral Microsoft Foundry hosted-agent prerequisites without requesting downstream agent deployment. Provisions the required project and registry RBAC and exposes project, registry, network, and private-build handoff values. deployHostedAgent implies this behavior. Defaults to false.')
 param prepareHostedAgent bool = false
 
+@description('Grant the deployment executor Foundry Project Manager when Hosted prerequisites are selected. Defaults to true for compatible foundation callers. Set false when the executor already has required project authorization; this never disables the project managed identity registry pull grant.')
+param grantHostedAgentProjectManager bool = true
+
 @description('Request the downstream Microsoft Foundry hosted-agent deployment handoff. Implies prepareHostedAgent behavior and requires hostedAgent.version to be an immutable OCI digest. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
 
@@ -3391,7 +3394,7 @@ var _executorRoles = concat(
         principalType: principalType
       }
     ],
-    _hostedAgentPrerequisitesEnabled ? [
+    (_hostedAgentPrerequisitesEnabled && grantHostedAgentProjectManager) ? [
       {
         principalId: principalId
         roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AzureAIProjectManager.guid)

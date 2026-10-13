@@ -53,6 +53,7 @@
     "deployAiFoundry":                      { "value": "true" },
     "deployAAfAgentSvc":                    { "value": "${DEPLOY_AAF_AGENT_SVC=true}" },
     "prepareHostedAgent":                   { "value": "${PREPARE_HOSTED_AGENT=false}" },
+    "grantHostedAgentProjectManager":       { "value": "${GRANT_HOSTED_AGENT_PROJECT_MANAGER=true}" },
     "deployHostedAgent":                    { "value": "${DEPLOY_HOSTED_AGENT=false}" },
     "hostedAgent":                          { "value": {
       "name": "${HOSTED_AGENT_NAME=agent-app-orchestrator}",
