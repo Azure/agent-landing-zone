@@ -168,6 +168,18 @@ class HostedAccessTests(unittest.TestCase):
             (access.Role.MODEL, PREFIX + "Microsoft.CognitiveServices/accounts/test-model"),
             (access.Role.SECRET, SECRET),
         ], [(grant.role, grant.scope) for grant in plan.grants])
+
+    def test_custom_instance_discovery_is_read_only_and_validates_actual_name(self):
+        self.azure.live["name"] = self.azure.version["name"] = "sample-hosted-agent"
+        instance = access.discover_instance(
+            {**ENV, "DEPLOYMENT_TOPOLOGY": "classic"}, name="sample-hosted-agent", run=self.azure,
+        )
+        self.assertEqual(PRINCIPAL, instance.principal_id)
+        self.assertEqual("7", instance.agent_version)
+        self.assertFalse(any(call[:2] == ["appconfig", "kv"] for call in self.azure.calls))
+        self.assertEqual([], self.azure.writes)
+        with self.assertRaisesRegex(access.AccessError, "name does not match"):
+            access.discover_instance(ENV, name="wrong-agent", run=self.azure)
         self.assertEqual([], self.azure.writes)
         self.assertTrue(all("secret" not in call[:2] for call in self.azure.calls))
 

@@ -287,10 +287,19 @@ def _account_metadata(run: RunAzure, scope: str, subscription: str, group: str) 
     return account
 
 
-def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> AccessPlan:
-    """Discover and validate the entire closed plan before any write."""
-    if resolve_mode(environment) is DeploymentMode.CLASSIC:
-        return AccessPlan(classic=True)
+@dataclass(frozen=True)
+class HostedInstance:
+    subscription: str
+    resource_group: str
+    principal_id: str
+    agent_name: str
+    agent_version: str
+
+
+def discover_instance(
+    environment: Mapping[str, str], *, name: str | None = None, run: RunAzure = run_az,
+) -> HostedInstance:
+    """Resolve a live routed identity bound to the declared Foundry project."""
     sub = _guid(environment.get("AZURE_SUBSCRIPTION_ID"))
     group = _string(environment.get("AZURE_RESOURCE_GROUP"))
     if not re.fullmatch(NAME, group):
@@ -303,7 +312,7 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     _bound_scope(project, PROJECT_PATH, sub, group)
     project_name = project.rsplit("/", 1)[1]
     endpoint = _endpoint(endpoint, ".services.ai.azure.com", rf"/api/projects/{re.escape(project_name)}/?")
-    name = _consistent(environment, ("HOSTED_AGENT_NAME",), agent.get("name", environment.get("HOSTED_AGENT_NAME") or HOSTED_AGENT_NAME_DEFAULT))
+    name = name if name is not None else _consistent(environment, ("HOSTED_AGENT_NAME",), agent.get("name", environment.get("HOSTED_AGENT_NAME") or HOSTED_AGENT_NAME_DEFAULT))
     if not re.fullmatch(NAME, name):
         raise AccessError("Invalid expected hosted agent name.")
     account_id = project.rsplit("/", 2)[0]
@@ -343,7 +352,18 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     if deployed.get("name") != name or str(deployed.get("version")) != version or definition.get("kind") != "hosted":
         raise AccessError("Retrieved version is not the expected hosted agent.")
     # Protocol extensions cannot skip identity/name/version validation.
+    return HostedInstance(sub, group, principal, name, version)
 
+
+def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> AccessPlan:
+    """Discover and validate the entire closed plan before any write."""
+    if resolve_mode(environment) is DeploymentMode.CLASSIC:
+        return AccessPlan(classic=True)
+    instance = discover_instance(environment, run=run)
+    sub, group, principal, name, version = (
+        instance.subscription, instance.resource_group, instance.principal_id,
+        instance.agent_name, instance.agent_version,
+    )
     config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io")
     store_name = urlsplit(config_endpoint).hostname.split(".")[0]
     prefix = f"/subscriptions/{sub}/resourceGroups/{group}/providers/"

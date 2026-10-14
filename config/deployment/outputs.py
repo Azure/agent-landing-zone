@@ -227,6 +227,10 @@ def publish(endpoint: str, settings: Mapping[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from config.appdefinition import AppDefinitionError, load_selected_definition, validate_definition
+    from config.appdefinition.roles import RoleAssignmentError, discover_component_identities
+    from config.deployment.composition import DeploymentMode, DeploymentTopologyError, resolve_mode
+
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--check-foundation",
@@ -243,9 +247,17 @@ def main(argv: list[str] | None = None) -> int:
         require_foundation(os.environ)
         if args.check_foundation:
             return 0
-        document = build_platform_outputs(os.environ)
+        identities = None
+        if not (os.environ.get(IDENTITIES_ENV) or "").strip():
+            definition = validate_definition(load_selected_definition(os.environ))
+            identities = discover_component_identities(
+                definition, os.environ,
+                hosted_orchestration=resolve_mode(os.environ) is not DeploymentMode.CLASSIC,
+            )
+        document = build_platform_outputs(os.environ, identities)
         validate_platform_outputs(document)
-    except (FoundationMissingError, PlatformOutputsError) as error:
+    except (FoundationMissingError, PlatformOutputsError, AppDefinitionError,
+            RoleAssignmentError, DeploymentTopologyError) as error:
         print(str(error), file=sys.stderr)
         return 1
     settings = platform_settings(document)

@@ -32,6 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'infra') 'scripts') 'ModelQuota.ps1')
 
 $script:FailureCount = 0
 $script:WarningCount = 0
@@ -443,14 +444,19 @@ function Test-ModelReadiness {
         $usageList = @()
     }
 
+    $existing = @(Get-ExistingModelDeployments -Location $Location -SubscriptionId $SubscriptionId -ReadAzureJson {
+        param([string[]]$Arguments)
+        Invoke-AzJson -Arguments $Arguments -AllowFailure
+    } -OnWarning {
+        param([string]$Message)
+        Write-PreflightCheck -Status WARN -Name 'models:existing-target' -Message $Message
+    })
     foreach ($deployment in @($Models)) {
         $model = $deployment.model
         $modelName = $model.name
         $modelVersion = $model.version
         $skuName = $deployment.sku.name
-        $capacity = [double]$deployment.sku.capacity
         $checkName = "model:$modelName"
-
         $available = @($modelList | Where-Object {
             $_.model.name -eq $modelName -and
             ([string]::IsNullOrWhiteSpace($modelVersion) -or $_.model.version -eq $modelVersion) -and
@@ -463,18 +469,31 @@ function Test-ModelReadiness {
             Write-PreflightCheck -Status FAIL -Name $checkName -Message "$modelName $modelVersion with sku $skuName is not listed in $Location."
         }
 
-        $usageName = "OpenAI.$skuName.$modelName"
+    }
+
+    try {
+        $requests = @(Get-ModelQuotaRequirements -Models $Models -ExistingDeployments $existing)
+    } catch {
+        Write-PreflightCheck -Status FAIL -Name 'models:quota' -Message $_.Exception.Message
+        return
+    }
+    foreach ($request in $requests) {
+        $usageName = $request.QuotaName
         $quota = @($usageList | Where-Object { $_.name.value -eq $usageName } | Select-Object -First 1)
         if ($quota.Count -eq 0) {
-            Write-PreflightCheck -Status WARN -Name "${checkName}:quota" -Message "quota item $usageName was not returned."
+            Write-PreflightCheck -Status WARN -Name "models:quota:$usageName" -Message "quota item $usageName was not returned."
             continue
         }
 
         $remaining = [double]$quota[0].limit - [double]$quota[0].currentValue
-        if ($remaining -ge $capacity) {
-            Write-PreflightCheck -Status PASS -Name "${checkName}:quota" -Message "$remaining quota units remaining; deployment requests $capacity."
+        $requested = $request.DesiredCapacity
+        $credit = $request.ExistingCredit
+        $additional = $request.AdditionalCapacity
+        $message = "$remaining quota units remaining; desired $requested, verified existing credit $credit, additional allocation $additional."
+        if ($additional -eq 0 -or $remaining -ge $additional) {
+            Write-PreflightCheck -Status PASS -Name "models:quota:$usageName" -Message $message
         } else {
-            Write-PreflightCheck -Status FAIL -Name "${checkName}:quota" -Message "$remaining quota units remaining; deployment requests $capacity."
+            Write-PreflightCheck -Status FAIL -Name "models:quota:$usageName" -Message $message
         }
     }
 }

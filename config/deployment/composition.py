@@ -506,6 +506,35 @@ def _setting(name: str, value: str) -> dict[str, str]:
 CUSTOM_CONTAINER_APP_ROLES = ["AcrPull"]
 
 
+def requires_hosted_foundation(
+    environment: Mapping[str, str], *, hosted_orchestration: bool
+) -> bool:
+    """Select shared Hosted prerequisites independently of bundled routing.
+
+    Custom Hosted components need the foundation's project-identity registry
+    pull grant before deployment. Their per-instance runtime profiles remain
+    reconciled by custom deployment; this never selects the bundled agent.
+    """
+    from config.appdefinition.loader import (
+        DEFINITION_ENV,
+        KIND_HOSTED_AGENT,
+        effective_components,
+        load_selected_definition,
+    )
+
+    if hosted_orchestration:
+        return True
+    if not (environment.get(DEFINITION_ENV) or "").strip():
+        return False
+    definition = load_selected_definition(environment)
+    return not definition.bundled and any(
+        component.get("kind") == KIND_HOSTED_AGENT
+        for component in effective_components(
+            definition, hosted_orchestration=hosted_orchestration
+        )
+    )
+
+
 def custom_container_apps(
     environment: Mapping[str, str],
     existing_apps: list[object],
@@ -579,6 +608,9 @@ def compose_parameters(
 
     mode = resolve_mode(environment)
     hosted = mode is not DeploymentMode.CLASSIC
+    prepare_hosted = requires_hosted_foundation(
+        environment, hosted_orchestration=hosted
+    )
     panel = mode is DeploymentMode.HOSTED_PANEL
     preserve_classic_runtime = hosted and is_truthy(
         environment.get(PRESERVE_CLASSIC_RUNTIME)
@@ -632,7 +664,11 @@ def compose_parameters(
             require_image_digest=False,
         )
 
-    parameters["prepareHostedAgent"] = {"value": hosted}
+    parameters["prepareHostedAgent"] = {"value": prepare_hosted}
+    if prepare_hosted and not hosted:
+        # Custom Hosted preparation requires foundation pull, not additional
+        # operator privilege. Bundled/foundation callers retain their default.
+        parameters["grantHostedAgentProjectManager"] = {"value": False}
     parameters["deployHostedAgent"] = {"value": deploy_hosted}
     parameters["deployCosmosDb"] = {
         "value": mode is DeploymentMode.CLASSIC
@@ -741,9 +777,9 @@ def compose_parameters(
                 "DEPLOY_HOSTED_AGENT_ORCHESTRATION",
                 str(runtime_hosted).lower(),
             ),
-            _setting("PREPARE_HOSTED_AGENT", str(hosted).lower()),
+            _setting("PREPARE_HOSTED_AGENT", str(prepare_hosted).lower()),
             _setting("DEPLOY_HOSTED_AGENT", str(deploy_hosted).lower()),
-            _setting("HOSTED_AGENT_PREPARED", str(hosted).lower()),
+            _setting("HOSTED_AGENT_PREPARED", str(prepare_hosted).lower()),
             _setting(
                 "DEPLOY_ADMINISTRATIVE_PANEL",
                 str(runtime_mode is DeploymentMode.HOSTED_PANEL).lower(),

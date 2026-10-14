@@ -343,7 +343,6 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     resource_token = (environment.get("RESOURCE_TOKEN") or "").strip()
     for value, name in (
         (resource_group, "AZURE_RESOURCE_GROUP"),
-        (account_name, "DATABASE_ACCOUNT_NAME"),
         (resource_token, "RESOURCE_TOKEN"),
     ):
         if not value:
@@ -351,13 +350,33 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
                 f"DEPLOY_ADMINISTRATIVE_PANEL is true but {name} is not set; "
                 "cannot assign panel Cosmos RBAC."
             )
+    database_name = (environment.get("DATABASE_NAME") or "").strip()
+    if not account_name and (environment.get("APP_CONFIG_ENDPOINT") or "").strip():
+        endpoint = environment["APP_CONFIG_ENDPOINT"].strip()
+        for key in ("DATABASE_ACCOUNT_NAME", "DATABASE_NAME"):
+            value = _run_az([
+                "appconfig", "kv", "show", "--endpoint", endpoint,
+                "--key", key, "--label", LABEL, "--auth-mode", "login",
+                "--query", "value", "--output", "tsv",
+            ]).strip()
+            if not value:
+                raise PanelRbacError(f"App Configuration {key} is empty; cannot assign panel Cosmos RBAC.")
+            if key == "DATABASE_ACCOUNT_NAME":
+                account_name = value
+            elif not database_name:
+                database_name = value
+    if not account_name:
+        raise PanelRbacError(
+            "DEPLOY_ADMINISTRATIVE_PANEL is true but DATABASE_ACCOUNT_NAME is not set; "
+            "cannot assign panel Cosmos RBAC."
+        )
     subscription_id = resolve_subscription_id(environment)
     if not subscription_id:
         raise PanelRbacError(
             "DEPLOY_ADMINISTRATIVE_PANEL is true but AZURE_SUBSCRIPTION_ID "
             "could not be determined; cannot assign panel Cosmos RBAC."
         )
-    database_name = (environment.get("DATABASE_NAME") or "").strip() or account_name
+    database_name = database_name or account_name
 
     app_names = {
         FRONTEND_APP_SERVICE_NAME: f"ca-{resource_token}-frontend",

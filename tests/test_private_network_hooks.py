@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,7 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh")
 BASH = shutil.which("bash")
+JQ = shutil.which("jq")
 VALUES = """NETWORK_ISOLATION="true"
+ACR_TASK_AGENT_POOL="test-pool"
 DEPLOYMENT_TOPOLOGY="classic"
 APP_CONFIG_ENDPOINT="https://config.azconfig.io"
 AZURE_RESOURCE_GROUP="test-group"
@@ -54,7 +58,8 @@ function azd {
         throw 'Unexpected repeated environment read before deployment'
     }
     New-Item -ItemType File -Path (Join-Path $env:FAKE_ROOT 'env-read') | Out-Null
-    Get-Content -LiteralPath (Join-Path $env:FAKE_ROOT 'values.txt')
+    $valuesFile = if (($args -join ' ') -match '--output json') { 'values.json' } else { 'values.txt' }
+    Get-Content -LiteralPath (Join-Path $env:FAKE_ROOT $valuesFile)
     $global:LASTEXITCODE = [int]$env:FAKE_AZD_EXIT
 }
 function git {
@@ -109,7 +114,11 @@ SH_CLIS = {
 [ "${FAKE_AZD_FAIL:-0}" = 1 ] && exit 1
 [ -f "$FAKE_ROOT/env-read" ] && { echo unexpected-env-read >> "$FAKE_TRACE"; exit 95; }
 touch "$FAKE_ROOT/env-read"
-cat "$FAKE_ROOT/values.txt"
+if [[ "$*" == *"--output json"* ]]; then
+  cat "$FAKE_ROOT/values.json"
+else
+  cat "$FAKE_ROOT/values.txt"
+fi
 exit "$FAKE_AZD_EXIT"
 """,
     "python3": """#!/usr/bin/env bash
@@ -146,6 +155,7 @@ exit 0
     "jq": r"""#!/usr/bin/env bash
 field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -n1; }
 case "$*" in
+  *to_entries*) exec "$REAL_JQ" "$@" ;;
   *deploy_hosted_agent_orchestration*|*deploy_administrative_panel*) echo false ;;
   *'.topology'*) echo classic ;;
   *'.components | '*) echo 'agent-app-ui agent-app-orchestrator agent-app-ingestion' ;;
@@ -185,6 +195,16 @@ class HookExecutionTests(unittest.TestCase):
             (root / "azure.yaml").write_text("name: agent-landing-zone\n", encoding="utf-8")
             shutil.copyfile(ROOT / "app-definition.json", root / "app-definition.json")
             (root / "values.txt").write_text(values, encoding="utf-8")
+            parsed_values = {}
+            for line in values.splitlines():
+                match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"', line)
+                if not match:
+                    structured_values = values
+                    break
+                parsed_values[match[1]] = match[2]
+            else:
+                structured_values = json.dumps(parsed_values) if parsed_values else values
+            (root / "values.json").write_text(structured_values, encoding="utf-8")
             (root / "topology.json").write_text(TOPOLOGY, encoding="utf-8")
             (root / "probe.py").write_text(PROBE_DRIVER, encoding="utf-8")
             trace = root / "trace.txt"
@@ -195,6 +215,7 @@ class HookExecutionTests(unittest.TestCase):
                 "RUN_FROM_JUMPBOX": "", "AZURE_SKIP_NETWORK_ISOLATION_WARNING": "",
                 "PYTHONPATH": "", "USE_CAPP_API_KEY": "", "FOUNDRY_IQ_MCP_ENABLED": "",
                 "REAL_PYTHON": sys.executable, "REAL_REPO": str(ROOT),
+                "REAL_JQ": JQ or "",
                 "FAKE_REAL_PROBE": "1" if real_probe else "0",
                 "FAKE_ENDPOINT_FAIL": "1" if endpoint_fail else "0",
                 "FAKE_AZD_EXIT": str(azd_exit),
@@ -273,6 +294,22 @@ class HookExecutionTests(unittest.TestCase):
                 self.assertEqual([], events, output)
                 self.assertIn("Run azd provision first", output)
 
+        for build_mode, allowed in (("acr-task", False), ("local", True)):
+            with self.subTest(shell=shell, build_mode=build_mode, pool_missing=True):
+                values = VALUES.replace('ACR_TASK_AGENT_POOL="test-pool"', 'ACR_TASK_AGENT_POOL=""')
+                result, events = self.run_hook(
+                    shell, "preDeploy", 0, values=values,
+                    process_env={"BUILD_MODE": build_mode},
+                )
+                output = result.stdout + result.stderr
+                self.assertIn("probe", events, output)
+                if allowed:
+                    self.assertIn("azure-boundary", events, output)
+                else:
+                    self.assertEqual(1, result.returncode, output)
+                    self.assertNotIn("azure-boundary", events, output)
+                    self.assertIn("ACR_TASK_AGENT_POOL is empty", output)
+
     def integrated_cases(self, shell: str) -> None:
         for hook in ("postProvision", "preDeploy"):
             for extra, process, endpoint_fail, expected in (
@@ -326,7 +363,7 @@ class HookExecutionTests(unittest.TestCase):
     def test_powershell_hooks(self) -> None:
         self.check_cases("powershell")
 
-    @unittest.skipUnless(BASH, "bash is not installed")
+    @unittest.skipUnless(BASH and JQ, "bash and jq are required")
     def test_shell_hooks(self) -> None:
         self.check_cases("bash")
 
@@ -334,7 +371,7 @@ class HookExecutionTests(unittest.TestCase):
     def test_powershell_shared_helper(self) -> None:
         self.integrated_cases("powershell")
 
-    @unittest.skipUnless(BASH, "bash is not installed")
+    @unittest.skipUnless(BASH and JQ, "bash and jq are required")
     def test_shell_shared_helper(self) -> None:
         self.integrated_cases("bash")
 

@@ -79,6 +79,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ModelQuota.ps1')
 
 # --------------------------------------------------------------------------
 # Emergency bypass
@@ -476,12 +477,96 @@ function Test-Topology {
     }
 }
 
+function Test-ExistingHostedOperatorAccess {
+    param([hashtable]$P)
+
+    if ($SkipAzureLookups) {
+        Add-Finding -Severity INFO -Code 'HOSTED_OPERATOR_ACCESS_NOT_VERIFIED' `
+            -Message 'Existing Hosted operator authorization requires live role verification before apply.'
+        return
+    }
+    $values = Get-AzdEnvValues
+    $scope = (Get-StringValue $values['AZURE_AI_PROJECT_RESOURCE_ID']).Trim()
+    $principal = (Get-StringValue $P['principalId']).Trim()
+    $subscription = (Get-StringValue $values['AZURE_SUBSCRIPTION_ID']).Trim()
+    $group = (Get-StringValue $values['AZURE_RESOURCE_GROUP']).Trim()
+    $prefix = "/subscriptions/$subscription/resourceGroups/$group/providers/Microsoft.CognitiveServices/accounts/"
+    $newProject = [string]::IsNullOrWhiteSpace($scope)
+    if (-not $principal -or -not $subscription -or
+        (-not $newProject -and (-not $group -or
+            -not $scope.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            $scope -notmatch '/accounts/[^/]+/projects/[^/]+$'))) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_SCOPE_REQUIRED' `
+            -Message 'Suppressing Project Manager requires a bound existing project and executor principal.' `
+            -Hint 'Hydrate the selected environment and verify existing scoped authorization before provisioning. No operator role will be granted automatically.'
+        return
+    }
+    if ($newProject) {
+        # Before the first foundation exists, check inherited management
+        # access. The unchanged deployAiFoundry executor role already grants
+        # Cognitive Services User data access on its new account. This is not
+        # a new Project Manager grant or an invented existing permission.
+        $scope = "/subscriptions/$subscription"
+        if ($group) { $scope += "/resourceGroups/$group" }
+    }
+    $assignments = Invoke-AzCli -Arguments @('role', 'assignment', 'list', '--scope', $scope,
+        '--include-inherited', '--assignee-object-id', $principal, '--fill-principal-name', 'false', '-o', 'json')
+    $requirements = @(
+        @{ Kind = 'actions'; Exclude = 'notActions'; Operation = 'Microsoft.CognitiveServices/accounts/projects/read' }
+        @{ Kind = 'dataActions'; Exclude = 'notDataActions'; Operation = 'Microsoft.CognitiveServices/accounts/AIServices/agents/read' }
+        @{ Kind = 'dataActions'; Exclude = 'notDataActions'; Operation = 'Microsoft.CognitiveServices/accounts/AIServices/agents/write' }
+    )
+    if ($newProject) {
+        $requirements = @($requirements | Where-Object Kind -eq 'actions')
+        if (-not (Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true)) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_ACCESS_REQUIRED' `
+                -Message 'New project operator data authorization requires the declared Foundry foundation executor role; no Project Manager grant will be substituted.'
+            return
+        }
+    }
+    $permissions = @()
+    foreach ($assignment in @($assignments)) {
+        if (-not $assignment -or $assignment.principalId -ne $principal -or $assignment.condition) { continue }
+        # CLI --name accepts the role UUID, not the ARM roleDefinitionId:
+        # passing the full ID returns an empty successful list.
+        $roleId = ([string]$assignment.roleDefinitionId -split '/')[-1]
+        if ($roleId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { continue }
+        $definition = Invoke-AzCli -Arguments @('role', 'definition', 'list', '--name', $roleId, '-o', 'json')
+        foreach ($role in @($definition)) {
+            if ($role) { $permissions += @($role.permissions) }
+        }
+    }
+    $missing = @($requirements | Where-Object {
+        $requirement = $_
+        -not @($permissions | Where-Object {
+            $allow = @($_.($requirement.Kind) | Where-Object { $requirement.Operation -like $_ }).Count -gt 0
+            $deny = @($_.($requirement.Exclude) | Where-Object { $requirement.Operation -like $_ }).Count -gt 0
+            $allow -and -not $deny
+        }).Count
+    })
+    if ($missing.Count) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_OPERATOR_ACCESS_REQUIRED' `
+            -Message 'Required existing operator project/agent permissions are missing or could not be verified.' `
+            -Hint 'Have an authorized administrator review scoped operator permissions; this preparation does not grant Project Manager or change Entra consent.'
+    } else {
+        Add-Finding -Severity PASS -Code 'HOSTED_OPERATOR_ACCESS_VERIFIED' `
+            -Message $(if ($newProject) {
+                'Inherited operator project read verified; new account data authorization is supplied by the unchanged declared Cognitive Services User executor role, not Project Manager.'
+            } else {
+                'Existing scoped operator project read and agent read/write permissions verified; no Project Manager assignment requested.'
+            })
+    }
+}
+
 function Test-HostedAgentConfiguration {
     param([hashtable]$P)
 
     $prepareHostedAgent = Resolve-DeployFlag -P $P -Key 'prepareHostedAgent' -Default $false
     $deployHostedAgent = Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false
     if (-not ($prepareHostedAgent -or $deployHostedAgent)) { return }
+    if (-not (Resolve-DeployFlag -P $P -Key 'grantHostedAgentProjectManager' -Default $true)) {
+        Test-ExistingHostedOperatorAccess -P $P
+    }
 
     $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
     if (-not $deployAiFoundry) {
@@ -1187,7 +1272,7 @@ function Get-VmSkuInfo {
         [Parameter(Mandatory)] [string]$VmSize
     )
     if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($VmSize)) { return $null }
-    $skus = Invoke-AzCliRaw -Arguments @('vm', 'list-skus', '--location', $Location, '--size', $VmSize, '--all', '-o', 'json')
+    $skus = Invoke-AzCliRaw -Arguments @('vm', 'list-skus', '--location', $Location, '--size', $VmSize, '--resource-type', 'virtualMachines', '--all', '-o', 'json')
     if (-not $skus) { return $null }
     $match = @($skus | Where-Object { $_.name -eq $VmSize -and $_.resourceType -eq 'virtualMachines' } | Select-Object -First 1)
     if (-not $match) { return $null }
@@ -1379,7 +1464,10 @@ function Test-ModelQuota {
     $deployments = @($ModelDeployments | Where-Object { $_ -ne $null })
     if ($deployments.Count -eq 0) { return }
 
-    $usage = Invoke-AzCliRaw -Arguments @('cognitiveservices', 'usage', 'list', '--location', $Location, '-o', 'json')
+    $selectedSubscription = if ($SubscriptionId) { $SubscriptionId } else { $env:AZURE_SUBSCRIPTION_ID }
+    $usageArguments = @('cognitiveservices', 'usage', 'list', '--location', $Location, '-o', 'json')
+    if ($selectedSubscription) { $usageArguments += @('--subscription', $selectedSubscription) }
+    $usage = Invoke-AzCliRaw -Arguments $usageArguments
     if (-not $usage) {
         Add-Finding -Severity WARN -Code 'MODEL_QUOTA_LOOKUP' `
             -Message "Could not read Cognitive Services usage/quota for '$Location'." `
@@ -1387,28 +1475,38 @@ function Test-ModelQuota {
         return
     }
 
+    $deployments = @($deployments | Where-Object { $_.model.format -eq 'OpenAI' })
+    if ($deployments.Count -eq 0) { return }
+    $selectedEnvironment = Get-AzdEnvValues
+    $existing = @(Get-ExistingModelDeployments -Location $Location -SubscriptionId $selectedSubscription `
+        -ProjectResourceId $selectedEnvironment['AZURE_AI_PROJECT_RESOURCE_ID'] `
+        -ResourceGroup $selectedEnvironment['AZURE_RESOURCE_GROUP'] -ReadAzureJson {
+        param([string[]]$Arguments)
+        Invoke-AzCliRaw -Arguments ($Arguments + @('-o', 'json'))
+    } -OnWarning {
+        param([string]$Message)
+        Add-Finding -Severity WARN -Code 'MODEL_QUOTA_EXISTING_TARGET' -Message $Message
+    })
+    try {
+        $requests = @(Get-ModelQuotaRequirements -Models $deployments -ExistingDeployments $existing)
+    } catch {
+        Add-Finding -Severity FAIL -Code 'MODEL_QUOTA_INVALID' -Message $_.Exception.Message
+        return
+    }
     $failures = @()
-    foreach ($d in $deployments) {
-        # Only OpenAI-format deployments report quota via usage list
-        $fmt = $null
-        if ($d.PSObject.Properties.Name -contains 'model' -and $d.model) {
-            $fmt = $d.model.format
-        }
-        if ($fmt -ne 'OpenAI') { continue }
-
-        $modelName = [string]$d.model.name
-        $skuName = [string]$d.sku.name
-        $capacity = [double]$d.sku.capacity
-        $quotaName = "OpenAI.$skuName.$modelName"
-
+    foreach ($request in $requests) {
+        $quotaName = $request.QuotaName
         $quota = @($usage | Where-Object { $_.name.value -eq $quotaName } | Select-Object -First 1)
         if (-not $quota) {
             $failures += "No quota entry '$quotaName' in $Location."
             continue
         }
-        $available = [double]$quota.limit - [double]$quota.currentValue
-        if ($available -lt $capacity) {
-            $failures += "$quotaName needs $capacity, $available available (used $($quota.currentValue) / limit $($quota.limit))."
+        $available = [double]$quota[0].limit - [double]$quota[0].currentValue
+        $message = "$quotaName desired $($request.DesiredCapacity), verified existing credit $($request.ExistingCredit), additional allocation $($request.AdditionalCapacity); $available available."
+        if ($request.AdditionalCapacity -gt 0 -and $available -lt $request.AdditionalCapacity) {
+            $failures += $message
+        } else {
+            Add-Finding -Severity PASS -Code 'MODEL_QUOTA_SUFFICIENT' -Message $message
         }
     }
 
@@ -1522,7 +1620,8 @@ function Test-AzureSearchSkuQuota {
     param(
         [Parameter(Mandatory)] [string]$SubscriptionId,
         [Parameter(Mandatory)] [string]$Location,
-        [Parameter(Mandatory)] [string]$Sku
+        [Parameter(Mandatory)] [string]$Sku,
+        [ValidateRange(1, 2)] [int]$RequiredHeadroom = 1
     )
     if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($SubscriptionId)) { return }
     $url = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Search/locations/$Location/usages?api-version=2025-05-01"
@@ -1544,6 +1643,11 @@ function Test-AzureSearchSkuQuota {
     if ([int]$target.limit -le 0 -or $available -le 0) {
         Add-Finding -Severity FAIL -Code 'SEARCH_QUOTA_AT_LIMIT' `
             -Message "Azure Search SKU '$Sku' quota in '$Location' is exhausted (used $($target.currentValue) of $($target.limit))." `
+            -Hint "Request a quota increase or pick another region/SKU."
+    }
+    elseif ($available -lt $RequiredHeadroom) {
+        Add-Finding -Severity FAIL -Code 'SEARCH_QUOTA_INSUFFICIENT' `
+            -Message "Azure Search SKU '$Sku' headroom in '$Location' is $available (need >= $RequiredHeadroom)." `
             -Hint "Request a quota increase or pick another region/SKU."
     }
     elseif (([double]$available / [double]$target.limit) -lt 0.1) {
@@ -1651,8 +1755,10 @@ function Test-RegionalReadiness {
     $location = Get-StringValue $P['location']
     $aiFoundryLocation = Get-StringValue $P['aiFoundryLocation']
     $cosmosLocation = Get-StringValue $P['cosmosLocation']
+    $searchLocation = Get-StringValue $P['searchServiceLocation']
     if ([string]::IsNullOrWhiteSpace($aiFoundryLocation)) { $aiFoundryLocation = $location }
     if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { $cosmosLocation = $location }
+    if ([string]::IsNullOrWhiteSpace($searchLocation)) { $searchLocation = $location }
 
     if ([string]::IsNullOrWhiteSpace($location)) {
         Add-Finding -Severity WARN -Code 'REGIONAL_NO_LOCATION' `
@@ -1674,15 +1780,19 @@ function Test-RegionalReadiness {
     $deployContainerEnv = ConvertTo-Bool $(if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
     $searchRaw = Get-StringValue $P['deploySearchService']
     $deploySearch = if ([string]::IsNullOrWhiteSpace($searchRaw)) { $true } else { ConvertTo-Bool $searchRaw }
+    $deployFoundrySearch = $deployAiFoundry -and
+        (Resolve-DeployFlag -P $P -Key 'deployAAfAgentSvc' -Default $true) -and
+        [string]::IsNullOrWhiteSpace((Get-StringValue $P['aiSearchResourceId']))
+    $searchServiceCount = [int]$deploySearch + [int]$deployFoundrySearch
     $deployKeyVault = ConvertTo-Bool $(if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
     $deployStorage = ConvertTo-Bool $(if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
     $deployAppConfig = ConvertTo-Bool $(if ($null -ne $P['deployAppConfig']) { $P['deployAppConfig'] } else { $true })
     $deployLogAnalytics = ConvertTo-Bool $(if ($null -ne $P['deployLogAnalytics']) { $P['deployLogAnalytics'] } else { $true })
 
     # Provider/location support
-    if ($deploySearch) {
+    if ($searchServiceCount -gt 0) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
-            -Location $location -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
+            -Location $searchLocation -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
     }
     if ($deployCosmos) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
@@ -1767,9 +1877,9 @@ function Test-RegionalReadiness {
         if ($deployAiFoundry) {
             Test-CognitiveServicesQuotaHeadroom -SubscriptionId $resolvedSubId -Location $aiFoundryLocation
         }
-        if ($deploySearch) {
+        if ($searchServiceCount -gt 0) {
             # main.bicep hardcodes the Search SKU to 'standard'; mirror that here.
-            Test-AzureSearchSkuQuota -SubscriptionId $resolvedSubId -Location $location -Sku 'standard'
+            Test-AzureSearchSkuQuota -SubscriptionId $resolvedSubId -Location $searchLocation -Sku 'standard' -RequiredHeadroom $searchServiceCount
         }
     }
 

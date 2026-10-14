@@ -63,6 +63,9 @@ case "$APP_DEFINITION_PATH" in
     /*) ;;
     *) APP_DEFINITION_PATH="$PROJECT_ROOT/$APP_DEFINITION_PATH" ;;
 esac
+if [ -d "$APP_DEFINITION_PATH" ]; then
+    APP_DEFINITION_PATH="$APP_DEFINITION_PATH/app-definition.json"
+fi
 if [ ! -f "$APP_DEFINITION_PATH" ]; then
     echo "${YELLOW}Error: AGENTLZ_APP_DEFINITION points to $APP_DEFINITION_PATH, which does not exist.${NC}"
     exit 1

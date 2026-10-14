@@ -1901,6 +1901,20 @@
         "allowedValues": []
       },
       {
+        "name": "grantHostedAgentProjectManager",
+        "kind": "input",
+        "type": {
+          "representation": "built-in",
+          "name": "bool"
+        },
+        "required": false,
+        "default": {
+          "representation": "literal",
+          "value": true
+        },
+        "allowedValues": []
+      },
+      {
         "name": "hostedAgent",
         "kind": "input",
         "type": {
@@ -5492,6 +5506,7 @@
       ],
       "consumerSurfaces": [
         "input:deployHostedAgent",
+        "input:grantHostedAgentProjectManager",
         "input:hostedAgent",
         "input:hostedAgentContainerRegistryEndpoint",
         "input:hostedAgentContainerRegistryResourceId",
@@ -5502,7 +5517,8 @@
         "output:HOSTED_AGENT_PREPARED"
       ],
       "identityRbacAssertions": [
-        "Bicep prepares project and registry RBAC but does not create the downstream data-plane agent identity/version."
+        "Bicep prepares project and registry RBAC but does not create the downstream data-plane agent identity/version.",
+        "Operator Project Manager is independently gated with a compatible true default; disabling it preserves project managed identity registry pull."
       ],
       "networkAssertions": [
         "The handoff reports whether private build is required and supplies subnet/jumpbox/agent-pool values."

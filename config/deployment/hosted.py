@@ -5,11 +5,52 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from pathlib import Path
 import sys
 from urllib.parse import urlsplit, urlunsplit
 
+import yaml
 
 MAX_SMOKE_OUTPUT = 1024 * 1024
+
+
+def service_protocol(project: Path, service_name: str) -> str:
+    """Choose a supported greeting protocol from the selected service."""
+    document = yaml.safe_load(project.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or not isinstance(document.get("services"), dict):
+        raise ValueError("Custom hosted project must declare services.")
+    service = document["services"][service_name]
+    if not isinstance(service, dict) or not isinstance(service.get("protocols"), list):
+        raise ValueError("Custom hosted service must declare protocols.")
+    protocols = {
+        entry["protocol"] for entry in service["protocols"]
+        if isinstance(entry, dict) and isinstance(entry.get("protocol"), str)
+    }
+    for protocol in ("invocations", "responses"):
+        if protocol in protocols:
+            return protocol
+    raise ValueError("Custom hosted service must declare invocations or responses for its greeting smoke.")
+
+
+def validate_responses_smoke_output(output: str) -> None:
+    """Validate raw Responses HTTP JSON or SSE without accepting progress text."""
+    if len(output) > MAX_SMOKE_OUTPUT:
+        raise ValueError("Smoke response exceeds the bounded validation size.")
+    body = output.replace("\r\n", "\n").strip()
+    if body.startswith("HTTP/"):
+        headers, separator, body = body.partition("\n\n")
+        status = headers.splitlines()[0].split()
+        if not separator or len(status) < 2 or not status[1].isdigit() or not 200 <= int(status[1]) < 300:
+            raise ValueError("Hosted greeting returned an unsuccessful HTTP response; body omitted.")
+    if body.lstrip().startswith("{"):
+        try:
+            response = json.loads(body)
+        except ValueError:
+            raise ValueError("Malformed Responses greeting; body omitted.") from None
+        if not isinstance(response, dict) or response.get("object") != "response":
+            raise ValueError("Invalid Responses greeting envelope; body omitted.")
+        body = json.dumps({"type": "response.completed", "response": response})
+    validate_smoke_output(body)
 
 
 def _smoke_events(output: str) -> list[dict]:
@@ -136,15 +177,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--invocations-endpoint")
+    mode.add_argument("--service-protocol", type=Path, metavar="AZURE_YAML")
+    parser.add_argument("--service-name")
+    mode.add_argument("--validate-responses-smoke", action="store_true")
     mode.add_argument(
         "--validate-smoke", action="store_true",
         help="Validate captured greeting Responses SSE/JSON events from stdin; no network calls.",
     )
     args = parser.parse_args(argv)
-    if args.validate_smoke:
+    if args.service_protocol:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
         try:
-            validate_smoke_output(sys.stdin.read(MAX_SMOKE_OUTPUT + 1))
+            if not args.service_name:
+                raise ValueError("--service-name is required.")
+            print(service_protocol(args.service_protocol, args.service_name))
+        except (KeyError, TypeError, OSError, ValueError, yaml.YAMLError):
+            logging.error("Could not resolve the custom hosted service greeting protocol.")
+            return 1
+        return 0
+    if args.validate_smoke or args.validate_responses_smoke:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+        try:
+            validator = validate_responses_smoke_output if args.validate_responses_smoke else validate_smoke_output
+            validator(sys.stdin.read(MAX_SMOKE_OUTPUT + 1))
         except ValueError as exc:
             logging.error("%s", exc)
             return 1

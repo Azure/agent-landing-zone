@@ -399,6 +399,9 @@ param deployAcrTaskAgentPool bool = true
 @description('Prepare accelerator-neutral Microsoft Foundry hosted-agent prerequisites without requesting downstream agent deployment. Provisions the required project and registry RBAC and exposes project, registry, network, and private-build handoff values. deployHostedAgent implies this behavior. Defaults to false.')
 param prepareHostedAgent bool = false
 
+@description('Grant the deployment executor Foundry Project Manager when Hosted prerequisites are selected. Defaults to true for compatible foundation callers. Set false when the executor already has required project authorization; this never disables the project managed identity registry pull grant.')
+param grantHostedAgentProjectManager bool = true
+
 @description('Request the downstream Microsoft Foundry hosted-agent deployment handoff. Implies prepareHostedAgent behavior and requires hostedAgent.version to be an immutable OCI digest. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
 
@@ -3391,7 +3394,7 @@ var _executorRoles = concat(
         principalType: principalType
       }
     ],
-    _hostedAgentPrerequisitesEnabled ? [
+    (_hostedAgentPrerequisitesEnabled && grantHostedAgentProjectManager) ? [
       {
         principalId: principalId
         roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AzureAIProjectManager.guid)
@@ -4023,6 +4026,8 @@ output ACR_TASK_AGENT_POOL string = _deployAcrTaskAgentPool ? acrTaskAgentPoolNa
 // ──────────────────────────────────────────────────────────────────────
 #disable-next-line BCP318
 output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.properties.endpoint : ''
+@description('Application Key Vault URI for downstream bootstrap. Empty when Key Vault is not deployed.')
+output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''
 output RETRIEVAL_BACKEND string = retrievalBackend
 output FOUNDRY_IQ_PATTERN string = foundryIqPattern
 output KNOWLEDGE_BASE_NAME string = retrievalBackend == 'foundry_iq' ? knowledgeBaseName : ''
@@ -4081,10 +4086,14 @@ output CONTAINER_APP_INTERNAL_FQDN string = (_deployContainerApps && length(cont
 output DEPLOY_HOSTED_AGENT bool = deployHostedAgent
 @description('True when hosted-agent prerequisites were selected through prepareHostedAgent or deployHostedAgent. This does not indicate that a hosted agent version exists.')
 output HOSTED_AGENT_PREPARED bool = _hostedAgentPrerequisitesEnabled
-output AZURE_AI_PROJECT_RESOURCE_ID string = _hostedAgentPrerequisitesEnabled ? aiFoundryProjectResourceId : ''
-output AZURE_AI_PROJECT_ENDPOINT string = _hostedAgentPrerequisitesEnabled ? aiFoundryProjectEndpoint : ''
-output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = _hostedAgentPrerequisitesEnabled ? _hostedAgentContainerRegistryResourceId : ''
-output AZURE_CONTAINER_REGISTRY_ENDPOINT string = _hostedAgentPrerequisitesEnabled ? _hostedAgentContainerRegistryEndpoint : ''
+@description('Provisioned Foundry project ID for application deployment, including custom applications in classic topology.')
+output AZURE_AI_PROJECT_RESOURCE_ID string = (deployAiFoundry || _hostedAgentPrerequisitesEnabled) ? aiFoundryProjectResourceId : ''
+@description('Provisioned Foundry project endpoint, independent of bundled hosted-agent selection.')
+output AZURE_AI_PROJECT_ENDPOINT string = (deployAiFoundry || _hostedAgentPrerequisitesEnabled) ? aiFoundryProjectEndpoint : ''
+@description('Provisioned registry ID, or the declared external hosted-agent registry when hosted prerequisites are selected.')
+output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = (deployContainerRegistry || _hostedAgentPrerequisitesEnabled) ? _hostedAgentContainerRegistryResourceId : ''
+@description('Provisioned registry login server for application builds and immutable image deployment.')
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = (deployContainerRegistry || _hostedAgentPrerequisitesEnabled) ? _hostedAgentContainerRegistryEndpoint : ''
 #disable-next-line BCP318
 output HOSTED_AGENT_DEPLOYMENT object = {
   enabled: deployHostedAgent

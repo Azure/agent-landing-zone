@@ -91,11 +91,18 @@ No baseline is generated or extended automatically by normal CI.
 
 Stored in `.quality/exceptions.json`. Fields: `id`, `module_id`, `symbol`,
 `handler_fingerprint`, `caught_types`, `boundary`, `reason`, `failure_outcome`,
-`diagnostic_path`, `evidence_tests`, `review`, `review_by_stage`.
+`diagnostic_path`, `evidence_tests`, `review`, `review_by_stage`, `state`,
+`expires_on`.
 
-Lifecycle: proposed -> maintainer-approved -> active -> retired. Only active,
-exact-source-matching records are consumed. Changed catch breadth or changed
-failure outcome invalidates approval. No wildcard handler approval. Expired,
+Lifecycle under revised Q5 (ADR-0020): proposed -> active -> retired.
+`maintainer-approved` remains accepted legacy metadata, not a prerequisite and
+not a consumable state. `active` means eligible for technical validation, not
+independent approval. `review` is nonempty provenance, not approval authority.
+Candidate registry updates are validated by protected technical rules; changing
+the registry alone is not a blocking policy change. Only active,
+exact-source-matching records with passing bound evidence are consumed. Changed
+catch breadth or failure outcome invalidates the prior fingerprint. No wildcard
+handler allowance. Expired,
 stale and unused records fail rather than silently extending an exemption.
 
 `failure_outcome` distinguishes propagation, explicit failure translation,

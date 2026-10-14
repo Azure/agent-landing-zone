@@ -208,6 +208,7 @@ Baseline: Bicep `v2.6.1` at `64195c01b70974fa7256c2f54a0035fb06804139`; Terrafor
 | `foundryIqStorageFolderPath` | `input` | `built-in` | `string` | `false` | `literal` | `""` | `[]` |
 | `gatewaySubnetName` | `input` | `built-in` | `string` | `false` | `literal` | `"gateway-subnet"` | `[]` |
 | `gatewaySubnetPrefix` | `input` | `built-in` | `string` | `false` | `literal` | `"192.168.2.192/26"` | `[]` |
+| `grantHostedAgentProjectManager` | `input` | `built-in` | `bool` | `false` | `literal` | `true` | `[]` |
 | `hostedAgent` | `input` | `definition` | `#/definitions/hostedAgentConfigurationType` | `false` | `literal` | `{"name":"","image":"","version":"","startupCommand":"","runtime":{"cpu":"1","memory":"1Gi"},"protocols":[{"protocol":"responses","version":"2.0.0"}]}` | `[]` |
 | `hostedAgentContainerRegistryEndpoint` | `input` | `built-in` | `string` | `false` | `literal` | `""` | `[]` |
 | `hostedAgentContainerRegistryResourceId` | `input` | `built-in` | `string` | `false` | `literal` | `""` | `[]` |
@@ -612,6 +613,7 @@ Baseline: Bicep `v2.6.1` at `64195c01b70974fa7256c2f54a0035fb06804139`; Terrafor
 ### `hosted-agent-handoff`
 
 - `input:deployHostedAgent`
+- `input:grantHostedAgentProjectManager`
 - `input:hostedAgent`
 - `input:hostedAgentContainerRegistryEndpoint`
 - `input:hostedAgentContainerRegistryResourceId`

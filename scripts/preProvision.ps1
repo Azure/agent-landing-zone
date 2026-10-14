@@ -53,6 +53,7 @@ $manifestSource = Join-Path $projectRoot "manifest.json"
 #-------------------------------------------------------------------------------
 $appDefinitionPath = if ($env:AGENTLZ_APP_DEFINITION) { $env:AGENTLZ_APP_DEFINITION } else { Join-Path $projectRoot 'app-definition.json' }
 if (-not [IO.Path]::IsPathRooted($appDefinitionPath)) { $appDefinitionPath = Join-Path $projectRoot $appDefinitionPath }
+if (Test-Path -LiteralPath $appDefinitionPath -PathType Container) { $appDefinitionPath = Join-Path $appDefinitionPath 'app-definition.json' }
 if (-not (Test-Path -LiteralPath $appDefinitionPath -PathType Leaf)) {
     Write-Host "Error: AGENTLZ_APP_DEFINITION points to $appDefinitionPath, which does not exist." -ForegroundColor Red
     exit 1

@@ -25,6 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 $scriptPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath '..\scripts\Invoke-PreflightChecks.ps1'
 $scriptPath = (Resolve-Path -Path $scriptPath).Path
+. (Join-Path (Split-Path -Parent $scriptPath) 'ModelQuota.ps1')
 $raw = Get-Content -Path $scriptPath -Raw
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($raw, [ref]$null, [ref]$null)
 
@@ -126,6 +127,33 @@ try {
 }
 finally {
     Remove-Item -Path $paramsFile -ErrorAction SilentlyContinue
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'VM SKU lookup is restricted to virtual machines' -ForegroundColor Cyan
+$originalAzCliRaw = ${function:Invoke-AzCliRaw}
+try {
+    function Invoke-AzCliRaw {
+        param([string[]]$Arguments)
+        $script:VmSkuArguments = $Arguments
+        return @([pscustomobject]@{
+            name = 'Standard_D2s_v3'
+            resourceType = 'virtualMachines'
+            capabilities = @([pscustomobject]@{ name = 'vCPUs'; value = '2' })
+            restrictions = @()
+            family = 'standardDSv3Family'
+        })
+    }
+    $sku = Get-VmSkuInfo -Location 'westus3' -VmSize 'Standard_D2s_v3'
+    $typeIndex = [Array]::IndexOf($script:VmSkuArguments, '--resource-type')
+    Assert-True 'SKU request filters virtualMachines server-side' (
+        $typeIndex -ge 0 -and $script:VmSkuArguments[$typeIndex + 1] -eq 'virtualMachines'
+    )
+    Assert-True 'Filtered SKU keeps vCPU and availability facts' (
+        $sku.Name -eq 'Standard_D2s_v3' -and $sku.VCpus -eq 2
+    )
+} finally {
+    ${function:Invoke-AzCliRaw} = $originalAzCliRaw
 }
 
 # --------------------------------------------------------------------------
@@ -628,6 +656,56 @@ $script:SkipAzureLookups = $false
 $script:SkipRegional = $false
 Test-RegionalReadiness -P @{ location = '' }
 Assert-True 'REGIONAL_NO_LOCATION WARN raised' (Test-FindingPresent 'REGIONAL_NO_LOCATION')
+
+# --------------------------------------------------------------------------
+Write-Host 'Search quota checks the effective region and complete resource count' -ForegroundColor Cyan
+function Invoke-AzCliRaw {
+    param([string[]]$Arguments)
+    return @{ value = @(@{ name = @{ value = 'standard' }; limit = 12; currentValue = $script:SearchUsage }) }
+}
+$script:SearchUsage = 11
+Reset-Findings
+Test-AzureSearchSkuQuota -SubscriptionId 'offline' -Location 'eastus' -Sku 'standard' -RequiredHeadroom 2
+Assert-True 'One slot rejects two requested Search services' (Test-FindingPresent 'SEARCH_QUOTA_INSUFFICIENT')
+$script:SearchUsage = 10
+Reset-Findings
+Test-AzureSearchSkuQuota -SubscriptionId 'offline' -Location 'eastus' -Sku 'standard' -RequiredHeadroom 2
+Assert-True 'Two slots permit two requested Search services' (Test-FindingAbsent 'SEARCH_QUOTA_INSUFFICIENT')
+
+function az { }
+function Get-CurrentAzureSubscriptionId { return 'offline' }
+function Test-CognitiveServicesQuotaHeadroom { }
+function Test-CosmosAvailabilityZone { }
+function Test-ProviderLocation {
+    param($ProviderNamespace, $ResourceType, $Location, $DisplayName, $CodePrefix)
+    if ($ProviderNamespace -eq 'Microsoft.Search') { $script:SearchProviderLocation = $Location }
+}
+function Test-AzureSearchSkuQuota {
+    param($SubscriptionId, $Location, $Sku, $RequiredHeadroom)
+    $script:SearchQuotaLocation = $Location
+    $script:SearchRequiredCount = $RequiredHeadroom
+}
+foreach ($case in @(
+    @{ override = 'eastus'; general = $true; agents = $true; existing = ''; expected = 2; region = 'eastus' },
+    @{ override = ''; general = $true; agents = $false; existing = ''; expected = 1; region = 'westus3' },
+    @{ override = ' '; general = $false; agents = $true; existing = ''; expected = 1; region = 'westus3' },
+    @{ override = 'eastus'; general = $true; agents = $true; existing = '/existing/search'; expected = 1; region = 'eastus' },
+    @{ override = 'eastus'; general = $true; agents = $true; foundry = $false; existing = ''; expected = 1; region = 'eastus' },
+    @{ override = 'eastus'; general = $false; agents = $false; existing = ''; expected = 0; region = '' }
+)) {
+    $script:SearchQuotaLocation = ''
+    $script:SearchProviderLocation = ''
+    $script:SearchRequiredCount = 0
+    Test-RegionalReadiness -P @{
+        location = 'westus3'; searchServiceLocation = $case.override
+        deploySearchService = $case.general; deployAAfAgentSvc = $case.agents
+        deployAiFoundry = if ($case.ContainsKey('foundry')) { $case.foundry } else { $true }
+        aiSearchResourceId = $case.existing; deployJumpbox = $false
+    }
+    Assert-True "Search count $($case.expected) is checked" ($script:SearchRequiredCount -eq $case.expected)
+    Assert-True "Search quota region is '$($case.region)'" ($script:SearchQuotaLocation -eq $case.region) "Actual: '$script:SearchQuotaLocation'"
+    Assert-True "Search provider region is '$($case.region)'" ($script:SearchProviderLocation -eq $case.region) "Actual: '$script:SearchProviderLocation'"
+}
 
 # --------------------------------------------------------------------------
 Write-Host ''

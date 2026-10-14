@@ -142,18 +142,30 @@ def add_ai_foundry_account_api_key_to_key_vault(
     account_name: str,
     vault_uri: str,
     secret_name: str
-) -> None:
-    """Fetches the AI Foundry Account API key and stores it in Azure Key Vault."""
+) -> bool:
+    """Store an evaluation API key only when the account allows local authentication."""
     try:
+        account = mgmt_client.accounts.get(resource_group, account_name)
+        if account.properties.disable_local_auth is True:
+            logging.info(
+                "Local authentication is disabled for account %s; "
+                "evaluation API-key injection is not applicable. Use Microsoft Entra ID.",
+                account_name,
+            )
+            return False
         logging.info("🔑 Fetching AI Foundry Account API key for account %s ...", account_name)
         keys = mgmt_client.accounts.list_keys(resource_group, account_name)
         api_key = keys.key1
+        if not api_key:
+            raise ValueError("The Foundry account returned an empty evaluation API key.")
         logging.info("🔒 Storing API key in Key Vault at %s ...", vault_uri)
         kv_client = KeyVaultClient(vault_uri)
         kv_client.set_secret(secret_name, api_key)
         logging.info("✅ Secret %s set successfully in Key Vault.", secret_name)
+        return True
     except Exception as e:
         logging.error("❗️ Failed to set secret in Key Vault: %s", e)
+        sys.exit(1)
 
 # ── Blocklist Logic ──────────────────────────────────
 def configure_blocklist(client: CognitiveServicesManagementClient, resource_group: str, account_name: str, bl_def: Dict[str, Any], bl_name: str) -> None:
@@ -316,14 +328,16 @@ def main() -> None:
     # Store API key in Key Vault
     logging.info("🔑 Adding AI Foundry Account API Key to Key Vault …")
     key_vault_uri = cfg(app_conf, "KEY_VAULT_URI")
-    add_ai_foundry_account_api_key_to_key_vault(
+    secret_stored = add_ai_foundry_account_api_key_to_key_vault(
         client,
         resource_group,
         account_name,
         key_vault_uri,
         SECRET_NAME
     )
-    logging.info("✅ RAI blocklist, policy, deployment association, and secret injection complete.")
+    logging.info("✅ RAI blocklist, policy, and deployment association complete.")
+    if secret_stored:
+        logging.info("✅ Evaluation API-key injection complete.")
 
 if __name__ == "__main__":
     main()
