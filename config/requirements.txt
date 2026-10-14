@@ -1,7 +1,7 @@
 # general
 
 azure-identity==1.25.3
-azure-appconfiguration==1.9.0
+azure-appconfiguration==1.10.0
 
 # app container apps
 
