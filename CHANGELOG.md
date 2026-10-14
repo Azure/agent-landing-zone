@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Added
+- Add opt-in persistent firewall DNS proxy configuration through
+  `ENABLE_FIREWALL_DNS_PROXY`, defaulting to `false` without changing client DNS.
+- Gate network-isolated native Foundry IQ Blob ingestion on the exact Search
+  shared private links being approved and successfully provisioned. Pending
+  links fail with administrator approval instructions; no unrelated or
+  target-side connections are approved automatically.
+- Honor explicit empty native Blob ingestion permission options for deliberately
+  shared, non-ADLS sources while retaining protected defaults and rejecting
+  unsupported or ambiguous configurations.
+
+### Changed
+- Pin UI v3.3.0 for ingestion-aware upload controls and early server-side
+  attachment rejection when the ingestion application is disabled. Text chat,
+  authentication and retrieval remain available.
+- Complete build-subnet-only HTTPS egress for the pinned Microsoft npm feeds
+  and package-download CDN without requiring firewall DNS proxy.
+- Make the ingestion Container App an independent, explicit deployment choice.
+  Fresh supported native-ingestion deployments omit it; existing and custom
+  deployments retain their prior component choices. Disabling deployment does
+  not delete existing applications or document data.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Offline platform, panel and Search regressions, exact application source
+  binding and release-contract checks, and compiled foundation contracts.
+- UI source, installed-wheel and offline container regressions with all quality
+  gates passing; strict central documentation build.
+- Azure deployment and live-environment validation were intentionally omitted.
+
 ## [v4.2.3] - 2026-10-14
 
 ### Fixed

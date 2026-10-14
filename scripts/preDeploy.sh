@@ -179,9 +179,11 @@ done < <(jq -r '.components[].name' "$app_definition_path")
 deployment_topology_value="$(get_azd_value "$repo_root" "DEPLOYMENT_TOPOLOGY")"
 deploy_hosted_value="$(get_azd_value "$repo_root" "DEPLOY_HOSTED_AGENT_ORCHESTRATION")"
 deploy_panel_value="$(get_azd_value "$repo_root" "DEPLOY_ADMINISTRATIVE_PANEL")"
+deploy_ingestion_value="$(get_azd_value "$repo_root" "DEPLOY_INGESTION_CONTAINER_APP")"
 [ -n "$deployment_topology_value" ] && export DEPLOYMENT_TOPOLOGY="$deployment_topology_value"
 [ -n "$deploy_hosted_value" ] && export DEPLOY_HOSTED_AGENT_ORCHESTRATION="$deploy_hosted_value"
 [ -n "$deploy_panel_value" ] && export DEPLOY_ADMINISTRATIVE_PANEL="$deploy_panel_value"
+[ -n "$deploy_ingestion_value" ] && export DEPLOY_INGESTION_CONTAINER_APP="$deploy_ingestion_value"
 
 command -v python3 >/dev/null 2>&1 || { red "python3 is required to resolve the Agent Landing Zone deployment topology."; exit 1; }
 topology_json="$(cd "$repo_root" && python3 -m config.deployment.topology --describe)" || {
@@ -190,7 +192,7 @@ topology_json="$(cd "$repo_root" && python3 -m config.deployment.topology --desc
 }
 hosted_mode="$(printf "%s" "$topology_json" | jq -er '.deploy_hosted_agent_orchestration | if type == "boolean" then tostring else error("invalid hosted mode") end')" &&
 administrative_panel="$(printf "%s" "$topology_json" | jq -er '.deploy_administrative_panel | if type == "boolean" then tostring else error("invalid panel mode") end')" &&
-deployment_mode="$(printf "%s" "$topology_json" | jq -er '.topology | select(. == "classic" or . == "hosted-no-panel")')" &&
+deployment_mode="$(printf "%s" "$topology_json" | jq -er '.topology | select(. == "classic" or . == "hosted-no-panel" or . == "hosted-panel")')" &&
 selected_components="$(printf "%s" "$topology_json" | jq -er '.components | if type == "array" and length > 0 then join(" ") else error("invalid component selection") end')" || {
   red "Resolved topology JSON is incomplete or invalid; refusing to select a deployment path."
   exit 1

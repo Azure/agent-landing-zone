@@ -8,7 +8,7 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "b8bd441d578e840de2bc5189afdb3693131cfd71" },
+      "source": { "commit": "858ed4205d866b7bfbff43ca9ed20ab812baa24e" },
       "profiles": ["blob-delegator"],
       "ingress": "external"
     },

@@ -11,11 +11,14 @@ from typing import Mapping
 from config.continuity.settings import public_settings as continuity_public_settings
 from config.deployment.composition import (
     APP_CONFIG_LABEL,
+    DEPLOY_INGESTION_CONTAINER_APP,
     DeploymentMode,
     requires_hosted_foundation,
     resolve_mode,
+    resolve_ingestion_selection,
     resolve_runtime_mode,
     validate_hosted_prerequisites,
+    validate_ingestion_selection,
 )
 from util.azure_cli import resolve_az_command
 
@@ -129,6 +132,8 @@ def build_settings(
     require_hosted_endpoint: bool = False,
 ) -> dict[str, str]:
     mode = resolve_mode(environment)
+    deploy_ingestion = resolve_ingestion_selection(environment)
+    validate_ingestion_selection(environment, deploy_ingestion)
     hosted = mode is not DeploymentMode.CLASSIC
     resource_group = _required(environment, "AZURE_RESOURCE_GROUP")
     resource_token = _required(environment, "RESOURCE_TOKEN")
@@ -162,8 +167,9 @@ def build_settings(
     frontend = _container_app(
         resource_group, app_names["frontend"], required=True
     )
-    dataingest = _container_app(
-        resource_group, app_names["dataingest"], required=True
+    dataingest = (
+        _container_app(resource_group, app_names["dataingest"], required=True)
+        if deploy_ingestion else {"fqdn": "", "principalId": ""}
     )
     orchestrator = (
         _container_app(
@@ -181,14 +187,15 @@ def build_settings(
             "principalId": frontend["principalId"],
             "fqdn": frontend["fqdn"],
         },
-        {
+    ]
+    if deploy_ingestion:
+        container_apps.append({
             "name": app_names["dataingest"],
             "serviceName": "dataingest",
             "canonical_name": "DATA_INGEST_APP",
             "principalId": dataingest["principalId"],
             "fqdn": dataingest["fqdn"],
-        },
-    ]
+        })
     if runtime_mode is DeploymentMode.CLASSIC:
         container_apps.insert(
             0,
@@ -202,6 +209,11 @@ def build_settings(
         )
 
     return {
+        DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),
+        **(
+            {"SEARCH_RAG_INDEX_NAME": environment["SEARCH_RAG_INDEX_NAME"].strip()}
+            if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip() else {}
+        ),
         "DEPLOY_HOSTED_AGENT_ORCHESTRATION": str(runtime_hosted).lower(),
         "PREPARE_HOSTED_AGENT": str(prepare_hosted).lower(),
         "DEPLOY_HOSTED_AGENT": (
@@ -221,7 +233,9 @@ def build_settings(
         "ORCHESTRATOR_BASE_URL": (
             f"https://{orchestrator['fqdn']}" if orchestrator["fqdn"] else ""
         ),
-        "INGESTION_BASE_URL": f"https://{dataingest['fqdn']}",
+        "INGESTION_BASE_URL": (
+            f"https://{dataingest['fqdn']}" if dataingest["fqdn"] else ""
+        ),
         "HOSTED_AGENT_BASE_URL": hosted_base_url,
         "HOSTED_AGENT_RESOURCE_SCOPE": hosted_scope,
         "HOSTED_AGENT_IMAGE_VERSION": (
@@ -234,14 +248,16 @@ def build_settings(
             f"https://{orchestrator['fqdn']}" if orchestrator["fqdn"] else ""
         ),
         "FRONTEND_APP_ENDPOINT": f"https://{frontend['fqdn']}",
-        "DATA_INGEST_APP_ENDPOINT": f"https://{dataingest['fqdn']}",
+        "DATA_INGEST_APP_ENDPOINT": (
+            f"https://{dataingest['fqdn']}" if dataingest["fqdn"] else ""
+        ),
         "ORCHESTRATOR_APP_NAME": (
             app_names["orchestrator"]
             if runtime_mode is DeploymentMode.CLASSIC
             else ""
         ),
         "FRONTEND_APP_NAME": app_names["frontend"],
-        "DATA_INGEST_APP_NAME": app_names["dataingest"],
+        "DATA_INGEST_APP_NAME": app_names["dataingest"] if deploy_ingestion else "",
         "CONTAINER_APPS": json.dumps(
             container_apps, separators=(",", ":")
         ),
