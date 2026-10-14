@@ -12,6 +12,20 @@
   agent with a default of `false`; it requires an orchestrator image containing
   the coordinated verified TLS transport correction.
 
+## [v4.2.2] - 2026-10-08
+
+### Changed
+- Updated the pinned `agent-app-ui` release from v3.2.0 to v3.2.1.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.2.1 |
+| agent-app-orchestrator | v5.2.0 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v4.2.1] - 2026-10-08
 
 ### Changed
