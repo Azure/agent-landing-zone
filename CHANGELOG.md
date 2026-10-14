@@ -1,16 +1,39 @@
 # Changelog
 
-## [Unreleased]
+## [v4.2.3] - 2026-10-14
 
 ### Fixed
+- Update the UI to v3.2.2 for Hosted `api-version=v1` requests, both supported
+  conversation identifier envelopes, and classic-only history registration.
+- Update the orchestrator to v5.2.1 for explicit null-label configuration
+  selection and opt-in verified App Configuration and Key Vault transport.
 - Export the deployed application Key Vault URI from the foundation and pass it
   to the bundled hosted agent, avoiding environment-specific vault hardcoding
   during configuration bootstrap.
+- Preserve structured deployment environment values, validate custom application
+  definitions before provisioning, and publish provisioned identity client IDs.
+- Correct custom Container Apps registry identity wiring, custom Hosted
+  foundation preparation, and operator role-definition UUID lookup.
+- Correct effective-region Search and incremental model quota preflight,
+  Foundry local-auth handling, and administrative-panel database settings.
 
 ### Added
 - Pass the opt-in `APP_CONFIG_TLS_COMPATIBILITY` bootstrap control to the hosted
-  agent with a default of `false`; it requires an orchestrator image containing
-  the coordinated verified TLS transport correction.
+  agent with a default of `false`; enabling it requires `KEY_VAULT_URI` and
+  preserves existing identity, certificate verification, and hostname validation.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.2.2 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Offline component regression and protected CI checks, application binding and
+  release-contract tests, and foundation template compilation and size checks.
+- Azure deployment and environment validation were intentionally omitted.
 
 ## [v4.2.2] - 2026-10-08
 
