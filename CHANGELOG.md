@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Export the deployed application Key Vault URI from the foundation and pass it
+  to the bundled hosted agent, avoiding environment-specific vault hardcoding
+  during configuration bootstrap.
+
+### Added
+- Pass the opt-in `APP_CONFIG_TLS_COMPATIBILITY` bootstrap control to the hosted
+  agent with a default of `false`; it requires an orchestrator image containing
+  the coordinated verified TLS transport correction.
+
 ## [v4.2.1] - 2026-10-08
 
 ### Changed

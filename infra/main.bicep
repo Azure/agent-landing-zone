@@ -4026,6 +4026,8 @@ output ACR_TASK_AGENT_POOL string = _deployAcrTaskAgentPool ? acrTaskAgentPoolNa
 // ──────────────────────────────────────────────────────────────────────
 #disable-next-line BCP318
 output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.properties.endpoint : ''
+@description('Application Key Vault URI for downstream bootstrap. Empty when Key Vault is not deployed.')
+output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''
 output RETRIEVAL_BACKEND string = retrievalBackend
 output FOUNDRY_IQ_PATTERN string = foundryIqPattern
 output KNOWLEDGE_BASE_NAME string = retrievalBackend == 'foundry_iq' ? knowledgeBaseName : ''
