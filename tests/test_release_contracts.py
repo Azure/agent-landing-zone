@@ -366,6 +366,24 @@ class LifecycleParityTests(unittest.TestCase):
             self.assertIn("--target", content, relative_path)
             self.assertNotIn("-m venv", content, relative_path)
 
+    def test_hosted_configuration_bootstrap_uses_foundation_vault_uri(self) -> None:
+        import yaml
+
+        foundation = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+        self.assertIn(
+            "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''",
+            foundation,
+        )
+        project = yaml.safe_load(
+            (ROOT / "hosted-agent" / "azure.yaml").read_text(encoding="utf-8")
+        )
+        environment = project["services"]["orchestrator-agent"]["env"]
+        self.assertEqual("${KEY_VAULT_URI}", environment["KEY_VAULT_URI"])
+        self.assertEqual(
+            "${APP_CONFIG_TLS_COMPATIBILITY=false}",
+            environment["APP_CONFIG_TLS_COMPATIBILITY"],
+        )
+
     def test_postprovision_preserves_search_user_assigned_identity(self) -> None:
         content = (ROOT / "scripts" / "postProvision.ps1").read_text(
             encoding="utf-8-sig"
