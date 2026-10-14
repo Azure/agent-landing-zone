@@ -57,6 +57,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from util.azure_cli import resolve_az_command
+from config.deployment.composition import resolve_ingestion_selection
 
 
 LABEL = "agent-lz"
@@ -380,8 +381,9 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
 
     app_names = {
         FRONTEND_APP_SERVICE_NAME: f"ca-{resource_token}-frontend",
-        DATA_INGEST_APP_SERVICE_NAME: f"ca-{resource_token}-dataingest",
     }
+    if resolve_ingestion_selection(environment):
+        app_names[DATA_INGEST_APP_SERVICE_NAME] = f"ca-{resource_token}-dataingest"
     principal_ids = {
         service_name: resolve_container_app_principal_id(resource_group, app_name)
         for service_name, app_name in app_names.items()
@@ -389,6 +391,8 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
 
     created = 0
     for grant in panel_container_grants():
+        if grant.service_name not in principal_ids:
+            continue
         scope = container_scope_path(
             subscription_id,
             resource_group,

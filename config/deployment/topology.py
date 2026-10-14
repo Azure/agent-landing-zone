@@ -25,6 +25,7 @@ from typing import Mapping
 
 from config.deployment.composition import (
     APP_CONFIG_LABEL,
+    DEPLOY_INGESTION_CONTAINER_APP,
     DeploymentMode,
     DeploymentTopologyError,
     HOSTED_CUTOVER_COMPLETE,
@@ -36,13 +37,16 @@ from config.deployment.composition import (
     materialized_settings,
     resolve_explicit_topology,
     resolve_mode,
+    resolve_ingestion_selection,
     resolve_runtime_mode,
     resolve_topology,
     validate_hosted_prerequisites,
+    validate_ingestion_selection,
 )
 from util.azure_cli import resolve_az_command
 
 _PERSISTED_KEYS = (
+    DEPLOY_INGESTION_CONTAINER_APP,
     "DEPLOYMENT_TOPOLOGY",
     "DEPLOY_HOSTED_AGENT_ORCHESTRATION",
     "DEPLOY_ADMINISTRATIVE_PANEL",
@@ -61,6 +65,7 @@ _LOCAL_RUNTIME_MARKERS = (
 class TopologyResolution:
     mode: DeploymentMode
     preserve_classic_runtime: bool = False
+    deploy_ingestion: bool = True
 
 
 def _local_migration_state(
@@ -214,8 +219,10 @@ def read_persisted_settings(endpoint: str | None) -> dict[str, str]:
     if returncode != 0:
         raise DeploymentTopologyError(
             "Unable to read the existing deployment topology from App "
-            f"Configuration; topology selection cannot safely continue: "
-            f"{stderr or stdout}"
+            "Configuration; topology/application selection cannot safely continue. "
+            "Restore access, or set explicit DEPLOYMENT_TOPOLOGY and "
+            f"{DEPLOY_INGESTION_CONTAINER_APP} after reviewing migration "
+            f"requirements: {stderr or stdout}"
         )
     try:
         values = json.loads(stdout or "[]")
@@ -239,7 +246,9 @@ def resolve_environment_topology(
     subscription_id: str | None = None,
     app_config_endpoint: str | None = None,
 ) -> DeploymentMode:
-    return resolve_environment_plan(
+    # Compatibility API returns only topology. Lifecycle hooks use the full
+    # plan so application selection cannot be discarded there.
+    return _resolve_environment_plan(
         environment,
         resource_group_name=resource_group_name,
         subscription_id=subscription_id,
@@ -253,6 +262,58 @@ def resolve_environment_plan(
     resource_group_name: str | None = None,
     subscription_id: str | None = None,
     app_config_endpoint: str | None = None,
+) -> TopologyResolution:
+    """Resolve component selection with the shared topology detection path."""
+    explicit_ingestion = (
+        DEPLOY_INGESTION_CONTAINER_APP in environment
+        or resolve_ingestion_selection(environment, existing=False)
+    )
+    # A materialized selection needs no new detection or data-plane lookups.
+    if explicit_ingestion:
+        enabled = resolve_ingestion_selection(environment)
+        validate_ingestion_selection(environment, enabled)
+        plan = _resolve_environment_plan(
+            environment,
+            resource_group_name=resource_group_name,
+            subscription_id=subscription_id,
+            app_config_endpoint=app_config_endpoint,
+        )
+    else:
+        exists = resource_group_exists(resource_group_name, subscription_id)
+        has_runtime_state = any(
+            (environment.get(key) or "").strip() for key in _LOCAL_RUNTIME_MARKERS
+        )
+        # Durable local runtime state is conservative evidence of an existing
+        # deployment even when the resource-group output has been lost.
+        existing = exists or has_runtime_state
+        if exists and not has_runtime_state:
+            existing = resource_group_has_resources(resource_group_name, subscription_id)
+        persisted = read_persisted_settings(app_config_endpoint) if existing else {}
+        enabled = resolve_ingestion_selection(
+            environment, existing=existing, persisted_settings=persisted
+        )
+        validate_ingestion_selection(environment, enabled)
+        plan = _resolve_environment_plan(
+            environment,
+            resource_group_name=resource_group_name,
+            subscription_id=subscription_id,
+            app_config_endpoint=app_config_endpoint,
+            detected_exists=existing,
+            detected_has_resources=existing,
+            persisted_settings=persisted,
+        )
+    return TopologyResolution(plan.mode, plan.preserve_classic_runtime, enabled)
+
+
+def _resolve_environment_plan(
+    environment: Mapping[str, str],
+    *,
+    resource_group_name: str | None = None,
+    subscription_id: str | None = None,
+    app_config_endpoint: str | None = None,
+    detected_exists: bool | None = None,
+    detected_has_resources: bool | None = None,
+    persisted_settings: Mapping[str, str] | None = None,
 ) -> TopologyResolution:
     """I/O-aware wrapper around ``resolve_topology`` for use at preProvision time.
 
@@ -268,7 +329,10 @@ def resolve_environment_plan(
     if explicit is DeploymentMode.CLASSIC:
         return TopologyResolution(explicit)
 
-    rg_exists = resource_group_exists(resource_group_name, subscription_id)
+    rg_exists = (
+        resource_group_exists(resource_group_name, subscription_id)
+        if detected_exists is None else detected_exists
+    )
     has_local_runtime_marker = any(
         (environment.get(key) or "").strip()
         for key in _LOCAL_RUNTIME_MARKERS
@@ -277,8 +341,9 @@ def resolve_environment_plan(
         explicit is not None
         and rg_exists
         and not has_local_runtime_marker
-        and not resource_group_has_resources(
-            resource_group_name, subscription_id
+        and not (
+            resource_group_has_resources(resource_group_name, subscription_id)
+            if detected_has_resources is None else detected_has_resources
         )
     ):
         # azd creates the target resource group before running preprovision.
@@ -300,7 +365,10 @@ def resolve_environment_plan(
     if materialized_preservation is not None:
         return TopologyResolution(explicit, materialized_preservation)
 
-    persisted = read_persisted_settings(app_config_endpoint) if rg_exists else {}
+    persisted = (
+        persisted_settings if persisted_settings is not None
+        else read_persisted_settings(app_config_endpoint) if rg_exists else {}
+    )
     mode = resolve_topology(
         environment,
         resource_group_exists=rg_exists,
@@ -333,6 +401,7 @@ def _print_materialized(resolution: TopologyResolution) -> None:
             os.environ.get(HOSTED_CUTOVER_COMPLETE)
         )
         and not resolution.preserve_classic_runtime,
+        deploy_ingestion=resolution.deploy_ingestion,
     ).items():
         print(f"{key}={value}")
 
@@ -341,12 +410,15 @@ def _print_description(mode: DeploymentMode) -> None:
     preserve_classic_runtime = (
         os.environ.get(PRESERVE_CLASSIC_RUNTIME, "").lower() == "true"
     )
+    enabled = resolve_ingestion_selection(os.environ)
+    validate_ingestion_selection(os.environ, enabled)
     print(
         json.dumps(
             describe_mode(
                 mode,
                 preserve_classic_runtime=preserve_classic_runtime,
                 runtime_mode=resolve_runtime_mode(mode, os.environ),
+                deploy_ingestion=enabled,
             )
         )
     )

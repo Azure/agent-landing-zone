@@ -146,16 +146,21 @@ def component_service_name(definition: AppDefinition, component: Mapping[str, An
 
 
 def effective_components(
-    definition: AppDefinition, *, hosted_orchestration: bool
+    definition: AppDefinition, *, hosted_orchestration: bool,
+    deploy_ingestion: bool = True,
 ) -> list[dict[str, Any]]:
     """Return the components to deploy for the selected deployment mode.
 
-    Custom definitions are returned unchanged. For the bundled trio in a
+    Custom definitions are returned unchanged, including ingestion when the
+    bundled-only switch is false. For the bundled application, an omitted
+    ingestion app is excluded before hosting overrides. In a
     hosted-agent mode, the orchestrator becomes an ``azure.ai.agent``
     component served by the ``hosted-agent`` child project; Container App
     only fields (``ingress``, ``resources``) are dropped.
     """
     components = copy.deepcopy(list(definition.document.get("components") or []))
+    if definition.bundled and not deploy_ingestion:
+        components = [component for component in components if component.get("name") != "ingestion"]
     if not (definition.bundled and hosted_orchestration):
         return components
     for component in components:

@@ -101,6 +101,7 @@
     "deployContainerEnv":                   { "value": "true" },
     "deployNsgs":                           { "value": "true" },
     "deployAzureFirewall":                  { "value": "${DEPLOY_AZURE_FIREWALL=true}" },
+    "enableFirewallDnsProxy":               { "value": "${ENABLE_FIREWALL_DNS_PROXY=false}" },
     "deployAcrTaskAgentPool":               { "value": "${DEPLOY_ACR_TASK_AGENT_POOL=true}" },
     "additionalAcrTaskBuildFqdns":           { "value": [] },
     "bastionAllowedSourceIPs":              { "value": [] },

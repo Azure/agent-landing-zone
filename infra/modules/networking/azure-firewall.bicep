@@ -5,6 +5,9 @@ import * as const from '../../constants/constants.bicep'
 @description('Master switch for deploying the spoke-local Azure Firewall.')
 param deployAzureFirewall bool
 
+@description('Enable DNS proxy on the existing firewall policy without changing client DNS. Defaults to false.')
+param enableFirewallDnsProxy bool = false
+
 @description('Whether the deployment runs in network-isolated mode.')
 param networkIsolation bool
 
@@ -251,6 +254,17 @@ var _firewallAcrTaskOsPackageFqdns = [
   'packages.microsoft.com'
 ]
 
+// Pinned orchestrator frontend npm feeds (v5.2.1 lockfile) and their download
+// redirect CDN. Keep separate from shared developer runtimes so only the
+// build subnet inherits these destinations, via HTTPS-only AllowAcrTaskDevRuntimes.
+var _firewallAcrTaskPackageFeedFqdns = [
+  'ms-feed-2.pkgs.visualstudio.com'
+  'ms-feed-12.pkgs.visualstudio.com'
+  'ms-feed-17.pkgs.visualstudio.com'
+  'ms-feed-25.pkgs.visualstudio.com'
+  '*.vsblob.vsassets.io'
+]
+
 // Azure Firewall rejects ApplicationRules whose targetFqdns is an empty
 // array with `BadRequest: "The request is invalid."` at the ARM
 // request-validation layer (no rule-collection-group operation is even
@@ -348,7 +362,7 @@ var _firewallDefaultApplicationRules = filter([
     protocols: [
       { protocolType: 'Https', port: 443 }
     ]
-    targetFqdns: (deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, additionalAcrTaskBuildFqdns) : []
+    targetFqdns: (deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, _firewallAcrTaskPackageFeedFqdns, additionalAcrTaskBuildFqdns) : []
     sourceAddresses: [devopsBuildAgentsSubnetPrefix]
   }
   {
@@ -515,6 +529,9 @@ resource firewallPolicy 'Microsoft.Network/firewallPolicies@2024-07-01' = if (de
       tier: 'Standard'
     }
     threatIntelMode: 'Alert'
+    dnsSettings: {
+      enableProxy: enableFirewallDnsProxy
+    }
   }
 }
 

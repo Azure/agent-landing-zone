@@ -89,10 +89,16 @@ class PlannedAssignment:
     assignment: RoleAssignment
 
 
-def plan_assignments(definition: AppDefinition, *, hosted_orchestration: bool) -> list[PlannedAssignment]:
+def plan_assignments(
+    definition: AppDefinition, *, hosted_orchestration: bool,
+    deploy_ingestion: bool = True,
+) -> list[PlannedAssignment]:
     """Return the profile role assignments for every ``containerapp`` component."""
     planned: list[PlannedAssignment] = []
-    for component in effective_components(definition, hosted_orchestration=hosted_orchestration):
+    for component in effective_components(
+        definition, hosted_orchestration=hosted_orchestration,
+        deploy_ingestion=deploy_ingestion,
+    ):
         if component.get("kind") != KIND_CONTAINER_APP:
             continue
         service = component_service_name(definition, component)
@@ -179,9 +185,14 @@ def discover_component_identities(
     run_az: RunAz | None = None,
 ) -> dict[str, str]:
     """Read Container App client IDs for platform outputs, without role writes."""
+    from config.deployment.composition import resolve_ingestion_selection
+
     components = [
         component
-        for component in effective_components(definition, hosted_orchestration=hosted_orchestration)
+        for component in effective_components(
+            definition, hosted_orchestration=hosted_orchestration,
+            deploy_ingestion=resolve_ingestion_selection(environment),
+        )
         if component.get("kind") == KIND_CONTAINER_APP
     ]
     if not components:
@@ -244,7 +255,12 @@ def assign_roles(
     role_guids: Mapping[str, str] | None = None,
 ) -> list[PlannedAssignment]:
     """Create missing profile role assignments; return the ones created."""
-    planned = plan_assignments(definition, hosted_orchestration=hosted_orchestration)
+    from config.deployment.composition import resolve_ingestion_selection
+
+    planned = plan_assignments(
+        definition, hosted_orchestration=hosted_orchestration,
+        deploy_ingestion=resolve_ingestion_selection(environment),
+    )
     return _assign_planned(planned, environment, run_az=run_az, role_guids=role_guids)
 
 
