@@ -393,6 +393,9 @@ param deployNsgs bool = true
 @description('Deploy Azure Firewall with UDR for egress traffic control. Defaults to true when networkIsolation is enabled.')
 param deployAzureFirewall bool = true
 
+@description('Enable DNS proxy on the spoke-local Azure Firewall policy. Defaults to false. Only effective when deployAzureFirewall and networkIsolation are true; does not change VNet or VPN client DNS settings or create a DNS resolver.')
+param enableFirewallDnsProxy bool = false
+
 @description('Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation.')
 param deployAcrTaskAgentPool bool = true
 
@@ -1591,6 +1594,7 @@ module firewall 'modules/networking/azure-firewall.bicep' = {
   name: 'firewall'
   params: {
     deployAzureFirewall: deployAzureFirewall
+    enableFirewallDnsProxy: enableFirewallDnsProxy
     networkIsolation: _networkIsolation
     enableAcsMediaEgress: enableAcsMediaEgress
     deploySpeechService: deploySpeechService
@@ -3151,6 +3155,27 @@ var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearch
     ]
   : []
 
+// Post-provision readiness uses exact template-owned identities, including the
+// bounded Foundry names. Blob is entry zero in the AVM shared-link array.
+var searchFoundrySharedPrivateLinkReadinessManifest = [for spl in searchFoundrySharedPrivateLinkResources: {
+  name: spl.name
+  groupId: spl.groupId
+  privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', resourceNames.aiFoundryAccountName)
+}]
+
+var searchSharedPrivateLinkReadinessManifest = (_networkIsolation && deploySearchService)
+  ? concat(
+      deployStorageAccount
+        ? [{
+            name: 'spl-${resourceNames.searchServiceName}-blob-0'
+            groupId: 'blob'
+            privateLinkResourceId: resourceId('Microsoft.Storage/storageAccounts', resourceNames.storageAccountName)
+          }]
+        : [],
+      searchFoundrySharedPrivateLinkReadinessManifest
+    )
+  : []
+
 @batchSize(1)
 resource searchFoundrySharedPrivateLinks 'Microsoft.Search/searchServices/sharedPrivateLinkResources@2025-05-01' = [for spl in searchFoundrySharedPrivateLinkResources: {
   parent: searchServiceResource
@@ -3906,6 +3931,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_RESOURCE_ID', value: deploySearchService ? searchService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SHARED_PRIVATE_LINKS', value: string(searchSharedPrivateLinkReadinessManifest), label: appConfigLabel, contentType: 'application/json' }
       #disable-next-line BCP318
       { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry ? aiFoundryKnowledgeBaseSearchConnection.outputs.searchConnectionId : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318

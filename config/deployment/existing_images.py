@@ -171,12 +171,15 @@ def definition_placeholder_plan(
         load_selected_definition,
         validate_definition,
     )
-    from config.deployment.composition import DeploymentMode, resolve_mode
+    from config.deployment.composition import DeploymentMode, resolve_mode, resolve_ingestion_selection
 
     definition = load_selected_definition(environment)
     validate_definition(definition)
     hosted = resolve_mode(environment) is not DeploymentMode.CLASSIC
-    components = effective_components(definition, hosted_orchestration=hosted)
+    components = effective_components(
+        definition, hosted_orchestration=hosted,
+        deploy_ingestion=resolve_ingestion_selection(environment),
+    )
     if images is None:
         images = discover_existing_images(
             (environment.get("AZURE_RESOURCE_GROUP") or "").strip(),

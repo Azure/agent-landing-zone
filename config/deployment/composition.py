@@ -28,6 +28,7 @@ from config.panel.settings import (
 
 
 APP_CONFIG_LABEL = "agent-lz"
+DEPLOY_INGESTION_CONTAINER_APP = "DEPLOY_INGESTION_CONTAINER_APP"
 # Default hosted agent name and image repository (new deployments only, ADR-0018).
 HOSTED_AGENT_NAME_DEFAULT = "agent-app-orchestrator"
 PRESERVE_CLASSIC_RUNTIME = "PRESERVE_CLASSIC_RUNTIME"
@@ -71,6 +72,68 @@ class ConflictingTopologySignalsError(DeploymentTopologyError):
 
 def is_truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def resolve_ingestion_selection(
+    environment: Mapping[str, str],
+    *,
+    existing: bool = True,
+    persisted_settings: Mapping[str, str] | None = None,
+) -> bool:
+    """Resolve ADR-0022 selection; unmaterialized legacy callers stay sticky.
+
+    Only preProvision supplies fresh/existing classification. Custom
+    definitions retain their component intent (the existing additive bundle
+    composition), regardless of this bundled-application switch.
+    """
+    from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
+
+    if (environment.get(DEFINITION_ENV) or "").strip():
+        if not load_selected_definition(environment).bundled:
+            return True
+    raw = environment.get(DEPLOY_INGESTION_CONTAINER_APP)
+    if raw is None and existing:
+        raw = (persisted_settings or {}).get(DEPLOY_INGESTION_CONTAINER_APP)
+    if raw is None:
+        return existing
+    normalized = raw.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise DeploymentTopologyError(
+            f"{DEPLOY_INGESTION_CONTAINER_APP} must be 'true' or 'false'."
+        )
+    return normalized == "true"
+
+
+def validate_ingestion_selection(
+    environment: Mapping[str, str], enabled: bool
+) -> None:
+    """Reject app-dependent sources unless a deliberate external index is bound."""
+    if enabled:
+        return
+    backend = (environment.get("RETRIEVAL_BACKEND") or "foundry_iq").strip()
+    pattern = (environment.get("FOUNDRY_IQ_PATTERN") or "azureBlob").strip()
+    kind = (environment.get("FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND") or "azureBlob").strip()
+    external_index = (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip()
+    native = backend == "foundry_iq" and pattern == "azureBlob" and kind == "azureBlob"
+    index_bound = (
+        external_index
+        and (
+            backend == "ai_search"
+            or (backend == "foundry_iq" and pattern == "searchIndex" and kind == "searchIndex")
+        )
+    )
+    conversation_upload = is_truthy(
+        environment.get("FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED")
+    )
+    if (not native and not index_bound) or conversation_upload:
+        raise DeploymentTopologyError(
+            f"{DEPLOY_INGESTION_CONTAINER_APP}=false requires supported native "
+            "Foundry IQ azureBlob ingestion, or an explicitly supplied "
+            "SEARCH_RAG_INDEX_NAME populated by an independent ingestion pipeline "
+            "with ai_search / Foundry IQ searchIndex. Conversation uploads still "
+            "require the ingestion application. Set the switch to true or review "
+            "the retrieval/source/index bindings; selection never changes them."
+        )
 
 
 def hosted_startup_command(environment: Mapping[str, str]) -> str:
@@ -358,6 +421,7 @@ def describe_mode(
     *,
     preserve_classic_runtime: bool = False,
     runtime_mode: DeploymentMode | None = None,
+    deploy_ingestion: bool = True,
 ) -> dict[str, object]:
     """Describe a resolved mode as the paired settings/flags that agree with it."""
     hosted = mode is not DeploymentMode.CLASSIC
@@ -366,7 +430,8 @@ def describe_mode(
     return {
         "topology": mode.value,
         "chat_backend": "hosted_agent" if hosted else "orchestrator",
-        "components": list(selected_components(mode)),
+        "components": list(selected_components(mode, deploy_ingestion=deploy_ingestion)),
+        "deploy_ingestion_container_app": deploy_ingestion,
         "deploy_hosted_agent_orchestration": hosted,
         "deploy_administrative_panel": panel,
         "preserve_classic_runtime": preserve_classic_runtime,
@@ -385,6 +450,7 @@ def materialized_settings(
     preserve_classic_runtime: bool = False,
     runtime_mode: DeploymentMode | None = None,
     hosted_cutover_complete: bool = False,
+    deploy_ingestion: bool = True,
 ) -> dict[str, str]:
     """Return the paired settings to materialize into the azd environment.
 
@@ -401,8 +467,10 @@ def materialized_settings(
         mode,
         preserve_classic_runtime=preserve_classic_runtime,
         runtime_mode=effective_runtime,
+        deploy_ingestion=deploy_ingestion,
     )
     return {
+        DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),
         "DEPLOYMENT_TOPOLOGY": str(description["topology"]),
         "DEPLOY_HOSTED_AGENT_ORCHESTRATION": str(
             effective_runtime is not DeploymentMode.CLASSIC
@@ -446,14 +514,15 @@ def resolve_database_containers(
     return []
 
 
-def selected_components(mode: DeploymentMode) -> tuple[str, ...]:
+def selected_components(
+    mode: DeploymentMode, *, deploy_ingestion: bool = True
+) -> tuple[str, ...]:
+    components = ("agent-app-ui",)
     if mode is DeploymentMode.CLASSIC:
-        return (
-            "agent-app-ui",
-            "agent-app-orchestrator",
-            "agent-app-ingestion",
-        )
-    return ("agent-app-ui", "agent-app-ingestion")
+        components += ("agent-app-orchestrator",)
+    if deploy_ingestion:
+        components += ("agent-app-ingestion",)
+    return components
 
 
 def panel_database_containers() -> list[dict[str, object]]:
@@ -607,6 +676,8 @@ def compose_parameters(
         raise ValueError("Parameter document must contain a 'parameters' object.")
 
     mode = resolve_mode(environment)
+    deploy_ingestion = resolve_ingestion_selection(environment)
+    validate_ingestion_selection(environment, deploy_ingestion)
     hosted = mode is not DeploymentMode.CLASSIC
     prepare_hosted = requires_hosted_foundation(
         environment, hosted_orchestration=hosted
@@ -729,6 +800,11 @@ def compose_parameters(
         raise ValueError("containerAppsList must contain an array value.")
 
     apps = apps_parameter["value"]
+    if not deploy_ingestion:
+        apps = [
+            app for app in apps
+            if not isinstance(app, dict) or app.get("service_name") != "dataingest"
+        ]
     if hosted and not preserving_classic_runtime:
         apps = [
             app
@@ -773,6 +849,12 @@ def compose_parameters(
 
     parameters["additionalAppConfigurationSettings"] = {
         "value": [
+            _setting(DEPLOY_INGESTION_CONTAINER_APP, str(deploy_ingestion).lower()),
+            *(
+                [_setting("SEARCH_RAG_INDEX_NAME", environment["SEARCH_RAG_INDEX_NAME"].strip())]
+                if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip()
+                else []
+            ),
             _setting(
                 "DEPLOY_HOSTED_AGENT_ORCHESTRATION",
                 str(runtime_hosted).lower(),

@@ -271,6 +271,7 @@ function Set-AgentLzAppConfiguration {
     $runtimeTopology = [string]$topologyInfo.runtime_topology
     $hostedMode = $runtimeTopology -ne 'classic'
     $administrativePanel = $runtimeTopology -eq 'hosted-panel'
+    $deployIngestion = [bool]$topologyInfo.deploy_ingestion_container_app
     $cosmosEnabled = (-not $hostedMode) -or $administrativePanel
 
     $appConfigName = Get-AppConfigResourceName -Endpoint $Endpoint
@@ -444,7 +445,7 @@ function Set-AgentLzAppConfiguration {
     # stable across naming modes.
     $frontendAppName = "ca-$nameSuffix-frontend"
     $orchestratorAppName = "ca-$nameSuffix-orchestrator"
-    $dataIngestAppName = "ca-$nameSuffix-dataingest"
+    $dataIngestAppName = if ($deployIngestion) { "ca-$nameSuffix-dataingest" } else { '' }
 
     # Cosmos database name - introspect the account to get the actual DB name
     $databaseName = if ($cosmosEnabled) { "cosmos-db$nameSuffix" } else { '' }
@@ -481,11 +482,11 @@ function Set-AgentLzAppConfiguration {
 
     $frontendFqdn = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $frontendAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$frontendAppName FQDN" -Required
     $orchestratorFqdn = if ($hostedMode) { '' } else { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $orchestratorAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$orchestratorAppName FQDN" -Required }
-    $dataIngestFqdn = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $dataIngestAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$dataIngestAppName FQDN" -Required
+    $dataIngestFqdn = if ($deployIngestion) { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $dataIngestAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$dataIngestAppName FQDN" -Required } else { '' }
 
     $frontendPrincipalId = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $frontendAppName, '--query', 'identity.principalId') -Description "$frontendAppName principal id"
     $orchestratorPrincipalId = if ($hostedMode) { '' } else { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $orchestratorAppName, '--query', 'identity.principalId') -Description "$orchestratorAppName principal id" }
-    $dataIngestPrincipalId = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $dataIngestAppName, '--query', 'identity.principalId') -Description "$dataIngestAppName principal id"
+    $dataIngestPrincipalId = if ($deployIngestion) { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $dataIngestAppName, '--query', 'identity.principalId') -Description "$dataIngestAppName principal id" } else { '' }
     $containerEnvPrincipalId = Invoke-AzTsv -Arguments @('resource', 'show', '--ids', $containerEnvResourceId, '--query', 'identity.principalId') -Description 'Container Apps Environment principal id'
     $searchPrincipalId = Invoke-AzTsv -Arguments @('resource', 'show', '--ids', $searchResourceId, '--query', 'identity.principalId') -Description 'Search service principal id'
 
@@ -493,9 +494,11 @@ function Set-AgentLzAppConfiguration {
     $appInsightsInstrumentationKey = Invoke-AzTsv -Arguments @('resource', 'show', '--ids', $appInsightsResourceId, '--query', 'properties.InstrumentationKey') -Description 'Application Insights instrumentation key'
 
     $containerApps = @(
-        [ordered]@{ name = $frontendAppName; serviceName = 'frontend'; canonical_name = 'FRONTEND_APP'; principalId = $frontendPrincipalId; fqdn = $frontendFqdn },
-        [ordered]@{ name = $dataIngestAppName; serviceName = 'dataingest'; canonical_name = 'DATA_INGEST_APP'; principalId = $dataIngestPrincipalId; fqdn = $dataIngestFqdn }
+        [ordered]@{ name = $frontendAppName; serviceName = 'frontend'; canonical_name = 'FRONTEND_APP'; principalId = $frontendPrincipalId; fqdn = $frontendFqdn }
     )
+    if ($deployIngestion) {
+        $containerApps += [ordered]@{ name = $dataIngestAppName; serviceName = 'dataingest'; canonical_name = 'DATA_INGEST_APP'; principalId = $dataIngestPrincipalId; fqdn = $dataIngestFqdn }
+    }
     if (-not $hostedMode) {
         $containerApps = @(
             [ordered]@{ name = $orchestratorAppName; serviceName = 'orchestrator'; canonical_name = 'ORCHESTRATOR_APP'; principalId = $orchestratorPrincipalId; fqdn = $orchestratorFqdn }
@@ -509,7 +512,7 @@ function Set-AgentLzAppConfiguration {
 
     $retrievalBackend = Get-OptionalEnvValue 'RETRIEVAL_BACKEND' 'foundry_iq'
     $foundryIqPattern = Get-OptionalEnvValue 'FOUNDRY_IQ_PATTERN' 'azureBlob'
-    $ragIndexName = "ragindex-$resourceToken"
+    $ragIndexName = Get-OptionalEnvValue 'SEARCH_RAG_INDEX_NAME' "ragindex-$resourceToken"
     $knowledgeBaseName = Get-OptionalEnvValue 'KNOWLEDGE_BASE_NAME' "$ragIndexName-rag-kb"
     $knowledgeBaseConnectionName = Get-OptionalEnvValue 'KNOWLEDGE_BASE_CONNECTION_NAME' "$environmentName-knowledge-base-connection"
     $knowledgeBaseEndpoint = if ($retrievalBackend -eq 'foundry_iq') {
@@ -705,7 +708,7 @@ function Set-AgentLzAppConfiguration {
 
         ORCHESTRATOR_APP_ENDPOINT = if ($orchestratorFqdn) { "https://$orchestratorFqdn" } else { '' }
         FRONTEND_APP_ENDPOINT = "https://$frontendFqdn"
-        DATA_INGEST_APP_ENDPOINT = "https://$dataIngestFqdn"
+        DATA_INGEST_APP_ENDPOINT = if ($dataIngestFqdn) { "https://$dataIngestFqdn" } else { '' }
         ORCHESTRATOR_APP_NAME = if ($hostedMode) { '' } else { $orchestratorAppName }
         FRONTEND_APP_NAME = $frontendAppName
         DATA_INGEST_APP_NAME = $dataIngestAppName

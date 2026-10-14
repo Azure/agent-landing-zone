@@ -39,6 +39,7 @@ from azure.appconfiguration import AzureAppConfigurationClient, ConfigurationSet
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
 from config.search.foundry_iq_mcp_setup import validate_foundry_iq_mcp_settings
+from config.search.private_link_readiness import ensure_native_blob_private_links
 
 # ── Silence verbose logging ─────────────────────────────────────────────────
 for logger_name in (
@@ -94,15 +95,44 @@ def strip_odata_metadata(value: Any) -> Any:
 
 
 def normalize_foundry_iq_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep protected defaults; distinguish inactive metadata from a shared native Blob source."""
     kind = str(settings.get("FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND") or "").lower()
     is_adls_gen2 = is_truthy_setting(settings.get("FOUNDRY_IQ_IS_ADLS_GEN2"))
+    permission_key = "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS"
+    options = settings.get(permission_key)
+    if options is None:
+        options = ["rbacScope"]
+    if not isinstance(options, list) or any(
+        not isinstance(option, str) or not option.strip() for option in options
+    ):
+        raise ValueError(
+            f"{permission_key} must be a JSON list of permission names; "
+            "[] denotes a shared native Blob source or inactive permission metadata."
+        )
+    # Infra publishes [] when no native Blob ingestion is selected. This is
+    # inactive metadata, not an instruction to broaden an active source.
+    inactive_permissions = settings.get("RETRIEVAL_BACKEND") == "ai_search" or (
+        settings.get("RETRIEVAL_BACKEND") == "foundry_iq"
+        and settings.get("FOUNDRY_IQ_PATTERN") == "searchIndex"
+    )
+    if not options and not inactive_permissions and not (
+        settings.get("RETRIEVAL_BACKEND") == "foundry_iq"
+        and settings.get("FOUNDRY_IQ_PATTERN") in {"azureBlob", "managed"}
+        and kind == "azureblob"
+        and str(settings.get("FOUNDRY_IQ_IS_ADLS_GEN2")).strip().lower()
+        in {"0", "false", "f", "no", "n"}
+    ):
+        raise ValueError(
+            f"{permission_key}=[] is supported only for Foundry IQ native azureBlob non-ADLS sources "
+            "(including the managed alias), or inactive ai_search/searchIndex metadata."
+        )
     if kind == "azureblob" and not is_adls_gen2:
         allowed_options = {"rbacScope", "sensitivityLabels"}
-        options = settings.get("FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS")
-        if not isinstance(options, list):
-            options = ["rbacScope"]
-        filtered_options = [option for option in options if option in allowed_options]
-        settings["FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS"] = filtered_options or ["rbacScope"]
+        if any(option not in allowed_options for option in options):
+            raise ValueError(
+                f"{permission_key} for non-ADLS azureBlob supports only rbacScope and sensitivityLabels."
+            )
+    settings[permission_key] = options
     return settings
 
 
@@ -823,6 +853,7 @@ def provision_knowledge_sources(defs: dict, context: dict, cred: ChainedTokenCre
         logging.info("🧠 No knowledge sources defined in template; skipping creation")
         return True
 
+    ensure_native_blob_private_links(defs, context, cred)
     knowledge_api_version = get_knowledge_api_version(context)
     logging.info(f"🧠 Creating knowledge sources ({knowledge_api_version})...")
     success_count = 0
@@ -925,6 +956,10 @@ def execute_setup(defs: Optional[dict], context: dict):
     if not api_version:
         logging.error("❗️ SEARCH_API_VERSION not found in search.env; skipping Azure Search setup.")
         return
+
+    # Prove outbound readiness before any dependent cleanup or data-plane
+    # mutation. Direct knowledge-source callers also run this idempotent gate.
+    ensure_native_blob_private_links(defs, context, cred)
     
     # Validate and prepare every index update before deleting any dependent
     # resources. Unsupported schema changes and transient reads fail without

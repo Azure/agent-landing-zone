@@ -320,10 +320,11 @@ class ResolveEnvironmentTopologyTests(unittest.TestCase):
 
     @patch("config.deployment.topology.read_persisted_settings")
     @patch("config.deployment.topology.resource_group_exists")
-    def test_legacy_hosted_contract_stays_hosted_without_private_lookup(
+    def test_legacy_hosted_contract_reads_missing_ingestion_selection(
         self, mock_rg_exists: object, mock_read_settings: object
     ) -> None:
         mock_rg_exists.return_value = True
+        mock_read_settings.return_value = {}
 
         resolution = topology.resolve_environment_plan(
             {
@@ -340,7 +341,7 @@ class ResolveEnvironmentTopologyTests(unittest.TestCase):
 
         self.assertEqual(DeploymentMode.HOSTED_NO_PANEL, resolution.mode)
         self.assertFalse(resolution.preserve_classic_runtime)
-        mock_read_settings.assert_not_called()
+        mock_read_settings.assert_called_once_with("https://private.example.test")
 
     @patch("config.deployment.topology.read_persisted_settings")
     @patch("config.deployment.topology.resource_group_exists")
@@ -351,6 +352,7 @@ class ResolveEnvironmentTopologyTests(unittest.TestCase):
 
         resolution = topology.resolve_environment_plan(
             {
+                "DEPLOY_INGESTION_CONTAINER_APP": "false",
                 "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
                 "CHAT_BACKEND": "hosted_agent",
                 "PRESERVE_CLASSIC_RUNTIME": "false",
@@ -371,6 +373,7 @@ class ResolveEnvironmentTopologyTests(unittest.TestCase):
 
         resolution = topology.resolve_environment_plan(
             {
+                "DEPLOY_INGESTION_CONTAINER_APP": "true",
                 "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
                 "CHAT_BACKEND": "orchestrator",
                 "PRESERVE_CLASSIC_RUNTIME": "false",
@@ -391,6 +394,7 @@ class ResolveEnvironmentTopologyTests(unittest.TestCase):
 
         resolution = topology.resolve_environment_plan(
             {
+                "DEPLOY_INGESTION_CONTAINER_APP": "true",
                 "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
                 "CHAT_BACKEND": "hosted_agent",
                 "PRESERVE_CLASSIC_RUNTIME": "true",
