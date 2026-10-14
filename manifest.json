@@ -12,8 +12,8 @@
     {
       "name": "agent-app-ui",
       "repo": "https://github.com/Azure/agent-app-ui.git",
-      "tag": "v3.2.2",
-      "commit": "b8bd441d578e840de2bc5189afdb3693131cfd71"
+      "tag": "v3.3.0",
+      "commit": "858ed4205d866b7bfbff43ca9ed20ab812baa24e"
     },
     {
       "name": "agent-app-orchestrator",

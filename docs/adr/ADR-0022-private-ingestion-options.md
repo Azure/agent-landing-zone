@@ -118,23 +118,26 @@ enumeration. An administrator approves pending links; exact source-side
 `Approved` plus `Succeeded` is the documented readiness signal. This avoids
 guessing ownership while preserving an actionable, fail-closed gate.
 
-The pinned UI v3.2.2 ignores ingestion selection and synthesizes a URL or Dapr
+The baseline UI v3.2.2 ignores ingestion selection and synthesizes a URL or Dapr
 fallback for attachments. Coordinated UI support must consume the existing
 selection key: a missing key preserves legacy eligibility; `false` gates upload
 controls and rejects attachments server-side before endpoint resolution.
 Text chat, authentication and retrieval remain unchanged. Native Blob ingestion
 does not replace application-managed conversation attachments.
 
-The compatible UI implementation is recorded in Azure/agent-app-ui commit
+The compatible UI implementation originated in Azure/agent-app-ui commit
 `6f1af9aa051bae4a0a8e713b49633d559ab96689` on
 `feature/optional-ingestion-uploads`. Offline source, installed-wheel and
-quality-gate checks passed for that source; this is not a published release.
+quality-gate checks passed for that source. The separately authorized
+UI v3.3.0 release publishes this support at commit
+`858ed4205d866b7bfbff43ca9ed20ab812baa24e`; the platform manifest and default
+application definition pin that exact released commit.
 
 Release and pin compatible UI support before activating ingestion-free platform
-defaults. This implementation task does not authorize runtime publication or
-invent a compatible release tag. Current release pins remain unchanged; the
-feature branches record the coordinated implementation and its integration
-dependency explicitly.
+defaults. The initial implementation preserved published pins and did not
+authorize runtime publication. The operator subsequently approved the
+coordinated GitHub integration and release sequence. Azure deployment and
+live-environment validation remain outside that authorization.
 
 ### Positive
 
@@ -154,8 +157,8 @@ dependency explicitly.
 Implement platform parameters, configuration, lifecycle selection and UI upload
 gating together, then update central operator documentation on a feature branch.
 Publish and pin the compatible UI first in a separately authorized release.
-Preserve release pins during implementation; do not publish releases or deploy
-Azure resources as part of this task.
+Preserve release pins during implementation and obtain separate approval before
+publishing releases. Do not deploy Azure resources as part of this work.
 Existing deployments retain selected components. Operators explicitly opt out
 only after checking source bindings and ingestion dependencies. Do not destroy
 existing applications or document/index data as a side effect of new defaults.
