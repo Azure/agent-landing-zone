@@ -33,28 +33,19 @@ Secure, enterprise-ready landing zone for deploying AI agent applications on Mic
 
 ## Deploy
 
-Choose one of two options:
-
-| Option | Guide | What you get |
-|---|---|---|
-| Full stack | [Deploy full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/) | Infrastructure, a chat UI and an orchestrator agent, with an optional ingestion Container App. |
-| Infrastructure only | [Deploy infra only](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-infra-only/) | Provision the foundation with `azd provision` without deploying application images. |
-
-The orchestrator agent runs in Microsoft Foundry by default, or in Azure Container Apps with the classic topology. Fresh environments use native Foundry IQ Blob ingestion without the ingestion Container App. Existing environments keep their ingestion selection. Native source ingestion does not provide chat attachment uploads. See [ingestion selection](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/configuration/#ingestion-application-selection).
-
-To deploy your own application, select its `app-definition.json` before the first provision. See [Custom applications](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/build-your-own-app/) and the examples in [samples/custom-app](samples/custom-app).
-
-Prerequisites, network-isolated deployment, and configuration are covered in the [central documentation](#documentation).
+- [Full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/) — Deploy the infrastructure and default agent application.
+- [Infrastructure only](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-infra-only/) — Provision the foundation without deploying application images.
+- [Custom applications](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/build-your-own-app/) — Deploy your own application on the foundation.
 
 ## Components
 
 Component versions for this release are pinned in [manifest.json](manifest.json).
 
-| Component | Repository | Version |
-|---|---|---|
-| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) | see `manifest.json` |
-| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) | see `manifest.json` |
-| Ingestion (optional) | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) | see `manifest.json` |
+| Component | Repository |
+|---|---|
+| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) |
+| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) |
+| Ingestion (optional) | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) |
 
 ## Documentation
 
