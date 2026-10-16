@@ -33,26 +33,19 @@ Secure, enterprise-ready landing zone for deploying AI agent applications on Mic
 
 ## Deploy
 
-Choose one of two options:
-
-| Option | Commands | What you get |
-|---|---|---|
-| Full stack | `azd up` | Infrastructure plus the UI, orchestrator, and ingestion applications. |
-| Infrastructure only | `azd provision`, then `azd deploy` later | The landing zone infrastructure now; deploy applications when you are ready. |
-
-To deploy your own application instead of the default components, describe it in `app-definition.json`. See `samples/custom-app` for an example.
-
-Prerequisites, network-isolated deployment, and configuration are covered in the [central documentation](#documentation).
+- [Full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/) — Deploy the infrastructure and default agent application.
+- [Infrastructure only](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-infra-only/) — Provision the foundation without deploying application images.
+- [Custom applications](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/build-your-own-app/) — Deploy your own application on the foundation.
 
 ## Components
 
 Component versions for this release are pinned in [manifest.json](manifest.json).
 
-| Component | Repository | Version |
-|---|---|---|
-| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) | see `manifest.json` |
-| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) | see `manifest.json` |
-| Ingestion | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) | see `manifest.json` |
+| Component | Repository |
+|---|---|
+| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) |
+| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) |
+| Ingestion | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) |
 
 ## Documentation
 
