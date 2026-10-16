@@ -48,11 +48,11 @@ Prerequisites, network-isolated deployment, and configuration are covered in the
 
 Component versions for this release are pinned in [manifest.json](manifest.json).
 
-| Component | Repository | Version |
-|---|---|---|
-| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) | see `manifest.json` |
-| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) | see `manifest.json` |
-| Ingestion | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) | see `manifest.json` |
+| Component | Repository |
+|---|---|
+| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) |
+| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) |
+| Ingestion | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) |
 
 ## Documentation
 
