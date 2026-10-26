@@ -52,6 +52,14 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check pytest click tabulate -r config/requirements.txt
 
+      - name: Prepare Bicep contract dependencies
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version v0.42.1
+          az bicep restore --file infra/main.bicep
+          echo "${AZURE_CONFIG_DIR:-$HOME/.azure}/bin" >> "$GITHUB_PATH"
+
       - name: Test deployment contracts
         run: python -m pytest tests --quiet
 
@@ -76,6 +84,10 @@ jobs:
 
       - name: Lint infra/main.bicep
         run: az bicep lint --file infra/main.bicep --diagnostics-format sarif > "$RUNNER_TEMP/bicep-lint.sarif"
+
+      - name: Install offline PowerShell dependencies
+        shell: pwsh
+        run: Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
 
       - name: Validate compiled foundation and deployment contracts
         shell: pwsh

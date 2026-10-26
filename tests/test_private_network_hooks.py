@@ -52,6 +52,7 @@ raise SystemExit(network.main(["--stage", sys.argv[1]]))
 """
 
 PS_WRAPPER = r"""
+$ErrorView = 'NormalView'
 function azd {
     if ($env:FAKE_AZD_FAIL -eq '1') { $global:LASTEXITCODE = 1; return }
     if (Test-Path (Join-Path $env:FAKE_ROOT 'env-read')) {

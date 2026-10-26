@@ -51,10 +51,13 @@ tests/
 ## Offline contract checks
 
 Run from the umbrella repository root (PowerShell 7, Azure CLI Bicep
-**0.42.1**). The compiler version is the historical fixtures' version, not an
-infrastructure or runtime component pin:
+**0.42.1**, `powershell-yaml` **0.4.12** or later). The compiler version is
+the historical fixtures' version, not an infrastructure or runtime component pin:
 
 ```pwsh
+az config set bicep.use_binary_from_path=false
+az bicep install --version v0.42.1
+Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
 pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
 
 # Separate parity/schema/provenance suite; requires Node.js and pinned packages.
@@ -81,9 +84,9 @@ what-if, live RBAC or DNS validation was performed.
 The smallest umbrella CI addition is the single offline-runner command above,
 replacing the standalone resource-group-contract invocation so it is not run
 twice. Keep the existing build/lint steps and install the fixture compiler with
-`az bicep install --version v0.42.1`. The measured offline run fits the current
-20-minute build job; parity is a separate command with the provenance limitations
-below.
+`az bicep install --version v0.42.1`. Active CI also installs the PowerShell
+module above. The measured offline run fits the current 30-minute build job;
+parity is a separate command with the provenance limitations below.
 
 ### Historical parity provenance
 
