@@ -55,9 +55,9 @@
 | agent-app-ingestion | v3.1.1 |
 | infra / AI Landing Zone | v2.7.3 |
 
-- Full local Python/configurator regressions: 696 passed, 4 skipped and
-  744 subtests passed. Clean Linux deployment/hook CI: 636 passed, 6 skipped
-  and 727 subtests passed.
+- Full local Python/configurator regressions: 883 passed, 4 skipped and
+  970 subtests passed. Clean Linux deployment/hook CI: 654 passed, 6 skipped
+  and 741 subtests passed.
 - All 16 offline foundation entrypoints pass with Bicep 0.42.1, including
   145 scope assertions, 17 rejected normalization mutations and the original
   protected graph fingerprints. Both hook variants pass syntax/behavior checks.
@@ -73,8 +73,10 @@
   embedding models with managed identity. Actual subscription deployment
   writes and unauthorized private vault data access were denied. A targeted
   recovery resolved an Azure private-endpoint internal error.
-- **Release gate pending:** application deployment, full restricted-RG
-  provisioning and lifecycle/re-provision acceptance are not complete.
+- **Release gate pending:** private configuration stopped at the required
+  administrator review and approval of Search shared private links.
+  Application deployment, full restricted-RG provisioning and
+  lifecycle/re-provision acceptance are not complete.
   This candidate must not be published until ADR-0023's remaining live
   acceptance gate is resolved by authorized validation or an explicit
   human-approved exception.
