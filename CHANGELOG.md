@@ -1,5 +1,33 @@
 # Changelog
 
+## [v4.3.2] - 2026-10-26
+
+### Changed
+- Rename the three architecture diagram titles to Agent Landing Zone.
+- Use the approved two-line title for the integrated scenario:
+  "Agent Landing Zone with Platform Hub" and "and AI Gateway Landing Zone".
+- Refresh the 6400-pixel-wide PNGs while preserving all existing resource
+  placements, connections, full-resolution links and safe export margins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparisons allow only the approved title text and the
+  integrated title box height; PNG differences are confined to the title area.
+- Verify complete bottom panels and all 6400-pixel-wide image dimensions;
+  build the central documentation site in strict mode.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
 ## [v4.3.1] - 2026-10-25
 
 ### Changed
