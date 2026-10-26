@@ -123,10 +123,17 @@ acr_task_agent_pool="$(get_azd_value "$repo_root" "ACR_TASK_AGENT_POOL")"
 
 # Foundation guard (first step, before any Azure change): azd deploy only
 # deploys applications onto a foundation created by azd provision.
-if [ -z "$global_rg" ] || [ -z "${APP_CONFIG_ENDPOINT:-}" ] || ! rg_exists "$global_rg" "${global_sub:-}"; then
+if [ -z "$global_rg" ] || [ -z "${APP_CONFIG_ENDPOINT:-}" ]; then
   red "The foundation is not provisioned. Run azd provision first."
   exit 3
 fi
+command -v python3 >/dev/null 2>&1 || { red "python3 is required to verify the foundation."; exit 1; }
+python3 -m config.deployment.resource_groups --azure-dir "$dot_azure" --check >/dev/null || {
+  red "Resource-group binding check failed. No changes were made."; exit 3;
+}
+python3 -m config.deployment.outputs --check-foundation || {
+  red "Foundation destination/project verification failed. Run azd provision first."; exit 3;
+}
 
 # Re-validate the application definition and compare it with the binding.
 app_definition_path="${AGENTLZ_APP_DEFINITION:-$repo_root/app-definition.json}"

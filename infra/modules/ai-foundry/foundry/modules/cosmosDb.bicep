@@ -11,6 +11,11 @@ param existingResourceId string?
 @description('Optional. Resource Id of an existing subnet to use for private connectivity. This is required along with \'privateDnsZoneResourceId\' to establish private endpoints.')
 param privateEndpointSubnetResourceId string?
 
+@description('Actual RG ARM ID for customer-owned private endpoints.')
+param privateEndpointResourceGroupResourceId string = resourceGroup().id
+@description('Private endpoint region.')
+param privateEndpointLocation string = location
+
 @description('Optional. The resource ID of the private DNS zone for the Cosmos DB to establish private endpoints.')
 param privateDnsZoneResourceId string?
 
@@ -58,6 +63,8 @@ module cosmosDb 'br/public:avm/res/document-db/database-account:0.18.0' = if (em
           union({
             service: 'Sql'
             subnetResourceId: privateEndpointSubnetResourceId!
+            resourceGroupResourceId: privateEndpointResourceGroupResourceId
+            location: privateEndpointLocation
           }, !empty(privateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [

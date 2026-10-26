@@ -28,6 +28,7 @@ tests/
 │   ├── Test-HostedAgentContract.ps1
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
 │   ├── Test-AcrTaskAgentPoolSubnetContract.ps1
+│   ├── Test-ResourceGroupScopesContract.ps1
 │   ├── Test-SolutionStorageAccessContract.ps1
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
 │   ├── Test-MaintenanceConfigurationWrapperContract.ps1
@@ -49,22 +50,63 @@ tests/
 
 ## Offline contract checks
 
-Run from the repository root:
+Run from the umbrella repository root (PowerShell 7, Azure CLI Bicep
+**0.42.1**, `powershell-yaml` **0.4.12** or later). The compiler version is
+the historical fixtures' version, not an infrastructure or runtime component pin:
 
 ```pwsh
-pwsh tests/contracts/Test-HostedAgentContract.ps1
-pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
-pwsh tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
-pwsh tests/contracts/Test-SolutionStorageAccessContract.ps1
-pwsh tests/contracts/Test-ReleaseMetadataContract.ps1
-pwsh tests/parity/Test-BaselineContract.Tests.ps1
-pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
-pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
-pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
-pwsh tests/contracts/Test-CosmosDeploymentNameContract.ps1
-pwsh tests/scripts/Measure-MainJsonSize.Tests.ps1
-pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
+az config set bicep.use_binary_from_path=false
+az bicep install --version v0.42.1
+Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
+pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
+
+# Separate parity/schema/provenance suite; requires Node.js and pinned packages.
+npm --prefix infra ci --no-audit --no-fund
+npm --prefix infra run test:parity
 ```
+
+The offline runner executes every `contracts/Test-*Contract.ps1` and
+`scripts/*.Tests.ps1`, reports each exit code and elapsed time, and fails if any
+gate fails. Compiler scratch files and native runtime extraction stay in a
+unique directory under `infra/tests/`, removed in `finally`. It does not execute
+the live hub/spoke scripts or make Azure writes. The parity suite remains
+separate: a historical source/approval/provenance failure must be reported, not
+resolved by changing source pins or waiving a gate. The copied
+`infra/.github/workflows/` are not active umbrella workflows; active CI must
+invoke these commands explicitly.
+
+The scoped-resource-group integration run passed all **16** offline entrypoints
+in **703.4 seconds** on Windows with Azure CLI Bicep 0.42.1, including 139 scope
+assertions, 14 normalization mutation rejections, the original hosted/Storage
+fingerprints, and split/wrong-group operator authorization. No Azure deployment,
+what-if, live RBAC or DNS validation was performed.
+
+The smallest umbrella CI addition is the single offline-runner command above,
+replacing the standalone resource-group-contract invocation so it is not run
+twice. Keep the existing build/lint steps and install the fixture compiler with
+`az bicep install --version v0.42.1`. Active CI also installs the PowerShell
+module above. The measured offline run fits the current 30-minute build job;
+parity is a separate command with the provenance limitations below.
+
+### Historical parity provenance
+
+The full 17-entrypoint parity verification in this umbrella checkout has
+12 passing entrypoints and five pre-existing provenance failures, separate from
+the compiled foundation contracts:
+
+| Entrypoint | Existing failure |
+| --- | --- |
+| `Test-InventoryCoverage.Tests.ps1` | Historical commit `64195c01b70974fa7256c2f54a0035fb06804139` does not contain root `main.bicep` in the umbrella repository. |
+| `Invoke-ParityWorkflow.Tests.ps1` | Historical commit `54d18f53273082dd12f0cab0689ec7968e845950` does not contain root `parity/inventory.json`. |
+| `Test-ParityPerformance.Tests.ps1` | Aggregate validation and Markdown export stop at that missing committed inventory. |
+| `Test-NewTerraformHandoff.Tests.ps1` | Its historical `5dd04b6e…` inventory digest differs from the current committed inventory's `37ee758c…` digest. |
+| `Test-ParityPublication.Tests.ps1` | The historical approved handoff has a stale/mismatched inventory digest. |
+
+The parity data, scripts, tests, source pins and approval records are unchanged
+by the resource-group work. These tests must not be made green by inventing
+source history, replacing approved digests or changing the release's component
+or foundation pins. No upstream release or infrastructure-submodule change is
+required: `infra/` is repository-owned source.
 
 The hosted-agent contract test compiles with the Bicep version recorded in its
 fixture and proves that the default-disabled feature preserves every symbolic
@@ -93,11 +135,49 @@ dependency, API-key prerequisite, and BYO subnet/NSG configurations without
 accessing Azure. The component deployment flag contract proves the matching
 Bicep validation expressions and defensive resource, DNS, secret, and
 configuration gates.
+
+The resource-group scope contract compiles the actual orchestrator with Azure
+CLI Bicep, checks application/Foundry/network ownership, actual IDs and RBAC
+scopes, and projects one/two/three-RG mappings only after checking their exact
+compiled bindings. It checks independent legacy/separate PE subnet selection,
+BYO and explicit PE/DNS precedence (including subscriptions), nested Foundry
+endpoint destinations and serialization, prerequisite project grants, private
+access with policy-managed DNS, collision-safe deployment names, the ARM
+64-output limit, and minified template size. CIDR/name validation gates new
+subnet writes; address-space checks are not applied to untouched platform-owned
+BYO subnets. It makes no Azure requests and creates its compiler artifact beside
+the test, deleting it in `finally`.
+
+The scoped refactor intentionally changes the historical symbolic resource
+graph: direct network resources now live in focused deployments, Foundry
+modules acquire destination scopes, and RBAC fans out to actual target RGs.
+The hosted-agent and solution-Storage fingerprint baselines are **not**
+regenerated or waived. `ScopedResourceGroupNormalization.ps1` checks exact
+compiled before/after deltas before projecting the reviewed changes back to
+their historical graph representation. The two explicit allowlists keep the
+ADR-0023 scoped refactor separate from the earlier incorporation/customization
+of repository-owned `infra/` and upstream post-baseline fixes. They preserve
+all original hashes, including nested module properties and definitions.
+Dictionary membership, wrapper contents, scopes, bindings, security settings,
+and new outputs must match the reviewed values; unrelated fields survive
+projection and remain subject to the original fingerprints. Only generated
+compiler hashes and line endings are non-deploying comparison differences.
+`Test-ScopedGraphNormalizationContract.ps1` proves that projection leaves the
+actual deployment graph untouched and rejects wrong scopes, grounding Storage
+ownership changes, default/subnet/output/security drift, extra wrapper
+resources, unrelated resource changes, and manifest spoofing. Behavioral checks
+still inspect the actual compiled template, not the historical projection.
+The ACR subnet and Search shared-link semantic tests follow the new compiled
+composition while retaining ordering, naming, and NSG checks.
+
 The Cosmos DB deployment-name contract proves that no top-level deployment
 embeds an environment-derived resource name and that SQL databases and
 containers use direct resources behind a fixed nested deployment name. Long CAF
 environment names therefore cannot exceed ARM's 64-character deployment-name
-limit while configured Azure resource names remain unchanged.
+limit while configured Azure resource names remain unchanged. The incorporated
+account-only local module must contain exactly one account resource and no SQL
+parameter or SQL children; legacy AVM fixture shapes must retain an empty SQL
+collection.
 The compiled-template size tests prove that the script's default 3.5 MB warning,
 4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
 command and exercise each exit path without compiling or accessing Azure.
@@ -117,7 +197,8 @@ precise additional exclusion, retaining the historical fingerprints and
 rejecting unrelated exclusion or explicit-NSG selector changes.
 
 The solution Storage access contract (#160) checks typed input/default and
-native JSON parameter values, exact root-to-AVM-to-resource forwarding, all
+native JSON parameter values (or omitted inputs using the exact native Bicep
+defaults), exact root-to-AVM-to-resource forwarding, all
 supported bypass values, true/false, zero/one/multiple resource-instance rules,
 invalid typed inputs, and standard/isolated/IP-exception/disabled-account cases
 (S1-S9). It checks nested compiled expressions rather than treating source-token
@@ -130,12 +211,16 @@ checks exact equal manifest tags and the latest unique versioned changelog
 heading, separately from historical parity tag/SHA pins. Its offline tests
 include metadata mutations and both workflows' path coverage.
 The Storage graph guard verifies that `_manifest` retains its Bicep 0.42.1
-binding to `$fxv#0` and that this loaded object matches the actual manifest.
-Only that object's `tag` and `ailz_tag` are normalized to `v2.6.1` before the
-original root-variable fingerprint. No fingerprints are regenerated; manifest
-repo/components/extra fields, unrelated variables, resources and outputs remain
-protected by negative mutations. `-MainFile` fixture roots must include their
-corresponding manifest and changelog. These checks do not authorize a release.
+binding to `$fxv#0`. Before compatibility projection, the loaded object must
+match the actual umbrella manifest, its `infra.source.tag` must match the
+incorporated foundation manifest, and source/component pins and manifest shape
+must match the reviewed incorporation allowlist. The projected foundation
+manifest is then checked against its own manifest/changelog; only its `tag` and
+`ailz_tag` are normalized to `v2.6.1` before the original variable fingerprint.
+Release numbers can change; arbitrary repositories, pins, extra fields,
+variables, resources and outputs cannot. No fingerprints are regenerated.
+`-MainFile` fixtures must include the corresponding umbrella manifest and
+foundation manifest/changelog. These checks do not authorize a release.
 
 Both scripts accept `-MainFile` for isolated regression fixtures and remove their
 temporary compiler artifacts. Their offline checks do not prove live subnet

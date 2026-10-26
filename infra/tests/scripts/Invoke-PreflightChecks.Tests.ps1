@@ -183,7 +183,28 @@ function Get-AzdEnvValues {
 }
 $mainParametersPath = Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath 'main.parameters.json'
 Reset-Findings
-$effectiveEmptyBooleanParams = Get-EffectiveParameters -Path $mainParametersPath
+$incorporatedDefaults = Get-EffectiveParameters -Path $mainParametersPath
+Assert-True 'Incorporated literal true defaults do not consume empty azd aliases' (
+    @('deployCosmosDb', 'deployContainerApps', 'deployContainerRegistry', 'deployContainerEnv', 'deployNsgs' |
+        Where-Object { $incorporatedDefaults[$_] -cne 'true' }).Count -eq 0
+)
+# Exercise upstream alias expansion independently of the umbrella's literal
+# parameter surface; neither missing keys nor literals are environment aliases.
+$emptyBooleanFixture = Join-Path $PSScriptRoot ".boolean-aliases-$([guid]::NewGuid().ToString('N')).json"
+try {
+    @{
+        parameters = @{
+            deployCosmosDb = @{ value = '${DEPLOY_COSMOS_DB=true}' }
+            deployContainerApps = @{ value = '${DEPLOY_CONTAINER_APPS=true}' }
+            deployContainerRegistry = @{ value = '${DEPLOY_CONTAINER_REGISTRY=true}' }
+            deployContainerEnv = @{ value = '${DEPLOY_CONTAINER_ENV=true}' }
+            deployNsgs = @{ value = '${DEPLOY_NSGS=true}' }
+            aiFoundryDisableLocalAuth = @{ value = '${AI_FOUNDRY_DISABLE_LOCAL_AUTH=true}' }
+        }
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $emptyBooleanFixture -Encoding utf8
+    $effectiveEmptyBooleanParams = Get-EffectiveParameters -Path $emptyBooleanFixture
+}
+finally { Remove-Item -LiteralPath $emptyBooleanFixture -ErrorAction SilentlyContinue }
 Test-BooleanParameterValues -P $effectiveEmptyBooleanParams
 $invalidEmptyBooleanFindings = @($script:Findings | Where-Object Code -eq 'BOOL_VALUE_INVALID')
 Assert-True 'All six explicit empty azd Boolean values remain empty after expansion' (

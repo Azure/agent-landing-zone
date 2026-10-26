@@ -314,7 +314,7 @@ class LifecycleParityTests(unittest.TestCase):
             content,
         )
 
-    def test_postprovision_disambiguates_resources_by_explicit_name_or_location(
+    def test_postprovision_disambiguates_resources_by_explicit_name_and_destination(
         self,
     ) -> None:
         content = (ROOT / "scripts" / "postProvision.ps1").read_text(
@@ -328,9 +328,10 @@ class LifecycleParityTests(unittest.TestCase):
             content,
         )
         self.assertIn("$foundryProjectResourceId -match '/accounts/([^/]+)/projects/'", content)
-        self.assertIn("$locationMatches = @(", content)
+        self.assertIn("-Group $foundryResourceGroup", content)
         self.assertIn("[StringComparison]::OrdinalIgnoreCase", content)
-        self.assertIn("return $locationMatches[0].name", content)
+        self.assertNotIn("return $locationMatches[0].name", content)
+        self.assertIn("Resource discovery returned a foreign or malformed", content)
         self.assertIn("throw", content)
 
     def test_windows_lifecycle_python_modules_support_jumpbox_python(self) -> None:

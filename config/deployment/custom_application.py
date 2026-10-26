@@ -26,6 +26,7 @@ from config.deployment.hosted_image import (
 )
 from config.deployment.private_network import check_stage
 from config.deployment.hosted_access import discover_instance
+from config.deployment.context import registry_resource_group
 from util.azure_cli import resolve_az_command
 
 LOGGER = logging.getLogger("config.deployment.custom_application")
@@ -99,7 +100,7 @@ def prepare_image(
         or environment.get("CONTAINER_REGISTRY_LOGIN_SERVER") or ""
     ).strip()
     pool = (environment.get("ACR_TASK_AGENT_POOL") or "").strip()
-    group = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
+    group = registry_resource_group(environment)
     if not registry_endpoint or not pool or not group:
         raise ValueError(
             "Isolated custom builds require the registry endpoint, "

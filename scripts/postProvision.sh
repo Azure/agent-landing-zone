@@ -50,6 +50,10 @@ is_truthy() {
 #-------------------------------------------------------------------------------
 # Private deployment-host prerequisite (before data-plane configuration)
 #-------------------------------------------------------------------------------
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --bind-only) >/dev/null || {
+  echo "Resource-group destination binding failed; configuration has not started." >&2
+  exit 1
+}
 network_exit=0
 (cd "$PROJECT_ROOT" && python3 -m config.deployment.private_network --stage post-provision) || network_exit=$?
 if [ "$network_exit" -eq 20 ]; then
@@ -150,7 +154,8 @@ echo "📑 AI Foundry Setup…"
   python -m config.aifoundry.setup
   echo "✅ AI Foundry setup script finished."
 } || {
-  echo "❗️ Error during AI Foundry setup. Skipping it."
+  echo "❗️ Error during AI Foundry setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -163,7 +168,8 @@ echo "🔍 ContainerApp setup…"
   python -m config.containerapps.setup
   echo "✅ Container Apps setup script finished."
 } || {
-  echo "❗️ Error during Container Apps setup. Skipping it."
+  echo "❗️ Error during Container Apps setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -176,7 +182,8 @@ echo "🔍 AI Search setup…"
   python -m config.search.setup
   echo "✅ Search setup script finished."
 } || {
-  echo "❗️ Error during Search setup. Skipping it."
+  echo "❗️ Error during Search setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -189,7 +196,8 @@ echo "🔐 Administrative panel Cosmos RBAC…"
   python -m config.panel.setup
   echo "✅ Administrative panel Cosmos RBAC finished (no-op unless DEPLOY_ADMINISTRATIVE_PANEL=true)."
 } || {
-  echo "❗️ Error during administrative panel Cosmos RBAC setup. Skipping it."
+  echo "❗️ Error during administrative panel Cosmos RBAC setup." >&2
+  exit 1
 }
 
 ###############################################################################

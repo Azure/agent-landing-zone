@@ -52,6 +52,12 @@ param allowedIpRanges string[] = []
 @description('Optional. Subnet resource ID for the blob private endpoint. When empty, no private endpoint is created.')
 param privateEndpointSubnetResourceId string = ''
 
+@description('Actual RG ARM ID for the blob private endpoint.')
+param privateEndpointResourceGroupResourceId string = resourceGroup().id
+
+@description('Region for the private endpoint.')
+param privateEndpointLocation string = location
+
 @description('Optional. Private DNS zone resource ID for the blob private endpoint (privatelink.blob.<suffix>).')
 param blobPrivateDnsZoneResourceId string = ''
 
@@ -93,6 +99,8 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = {
             name: 'pe-${name}-blob'
             service: 'blob'
             subnetResourceId: privateEndpointSubnetResourceId
+            resourceGroupResourceId: privateEndpointResourceGroupResourceId
+            location: privateEndpointLocation
           }, !empty(blobPrivateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [

@@ -74,6 +74,7 @@ function Get-AzdEnvValues {
     return @{
         AZURE_AI_PROJECT_RESOURCE_ID = $env:AZURE_AI_PROJECT_RESOURCE_ID
         AZURE_RESOURCE_GROUP = $env:AZURE_RESOURCE_GROUP
+        AZURE_FOUNDRY_RESOURCE_GROUP = $env:AZURE_FOUNDRY_RESOURCE_GROUP
     }
 }
 if ($env:QUOTA_GATE -eq 'foundation') {
@@ -120,7 +121,8 @@ def fixture() -> dict:
 @unittest.skipUnless(PWSH, "PowerShell is required for regional quota behavior tests")
 class RegionalModelQuotaTests(unittest.TestCase):
     def run_check(self, data: dict, *, project: str = ACCOUNT_ID + "/projects/test-project",
-                  group: str = "test-group", gate: str = "regional") -> tuple[dict, str]:
+                  group: str = "test-group", foundry_group: str = "",
+                  gate: str = "regional") -> tuple[dict, str]:
         with tempfile.TemporaryDirectory(prefix="model quota ") as directory:
             folder = Path(directory)
             (folder / "fixture.json").write_text(json.dumps(data), encoding="utf-8")
@@ -134,6 +136,7 @@ class RegionalModelQuotaTests(unittest.TestCase):
                 QUOTA_HELPER=str(ROOT / "infra" / "scripts" / "ModelQuota.ps1"),
                 QUOTA_GATE=gate,
                 AZURE_AI_PROJECT_RESOURCE_ID=project, AZURE_RESOURCE_GROUP=group,
+                AZURE_FOUNDRY_RESOURCE_GROUP=foundry_group,
             )
             result = subprocess.run(
                 [PWSH, "-NoProfile", "-NonInteractive", "-File", str(folder / "run.ps1")],
@@ -313,3 +316,43 @@ class RegionalModelQuotaTests(unittest.TestCase):
                     group="ambient-group", gate="foundation",
                 )
                 self.assertEqual(int(wrong_selected_target), result["failures"], output)
+
+    def test_split_foundry_allocation_is_verified_in_its_destination(self) -> None:
+        for gate in ("regional", "foundation"):
+            with self.subTest(gate=gate):
+                result, output = self.run_check(
+                    fixture(), group="app-group", foundry_group="test-group", gate=gate,
+                )
+                self.assertEqual(0, result["failures"], output)
+                self.assertIn("--resource-group test-group", " ".join(result["calls"]))
+                self.assertNotIn("--resource-group app-group", " ".join(result["calls"]))
+
+    def test_split_foundry_does_not_credit_a_project_in_application_group(self) -> None:
+        for gate in ("regional", "foundation"):
+            with self.subTest(gate=gate):
+                result, output = self.run_check(
+                    fixture(), foundry_group="different-foundry-group", gate=gate,
+                )
+                self.assertEqual(1, result["failures"], output)
+                self.assertEqual(1, result["warnings"], output)
+                self.assertFalse(any(call.startswith("resource show") for call in result["calls"]))
+
+    def test_blank_foundry_override_preserves_root_fallback(self) -> None:
+        for gate in ("regional", "foundation"):
+            with self.subTest(gate=gate):
+                result, output = self.run_check(fixture(), foundry_group="  ", gate=gate)
+                self.assertEqual(0, result["failures"], output)
+
+    def test_selected_foundry_override_wins_over_stale_ambient_context(self) -> None:
+        data = fixture()
+        data["selectedEnvironment"] = {
+            "AZURE_AI_PROJECT_RESOURCE_ID": ACCOUNT_ID + "/projects/test-project",
+            "AZURE_RESOURCE_GROUP": "app-group",
+            "AZURE_FOUNDRY_RESOURCE_GROUP": "test-group",
+        }
+        result, output = self.run_check(
+            data, project=ACCOUNT_ID.replace("test-group", "stale-group") + "/projects/stale",
+            group="ambient-app", foundry_group="ambient-foundry", gate="foundation",
+        )
+        self.assertEqual(0, result["failures"], output)
+        self.assertIn("--resource-group test-group", " ".join(result["calls"]))

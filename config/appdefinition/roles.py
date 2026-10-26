@@ -5,7 +5,7 @@ Runs in ``postProvision`` through ``python -m config.appdefinition
 definition, it expands the component profiles with
 :func:`~config.appdefinition.profiles.expand_profiles`, resolves the component
 Container App identity by its ``azd-service-name`` tag, resolves each scope to
-the single matching resource in ``AZURE_RESOURCE_GROUP``, and creates only the
+the single matching resource across the workload destinations, and creates only the
 assignments that do not already exist (directly or inherited). Re-runs converge.
 Custom hosted components use the same profile reconciliation after deployment,
 with an instance identity verified by :mod:`config.deployment.hosted_access`.
@@ -25,6 +25,8 @@ from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from config import find_repo_root
+from config.deployment.context import bound_resource_id, parse_resource_id, registry_resource_group
+from config.deployment.resource_groups import resource_group_for
 
 from .loader import KIND_CONTAINER_APP, AppDefinition, component_service_name, effective_components
 from .profiles import (
@@ -75,6 +77,15 @@ SCOPES: dict[str, ScopeSpec] = {
     # The Foundry account storage ("staif...") is never an application data store.
     SCOPE_STORAGE: ScopeSpec("Microsoft.Storage/storageAccounts", ("AZURE_STORAGE_ACCOUNT_NAME", "STORAGE_ACCOUNT_NAME"), ("staif",)),
     SCOPE_COSMOS: ScopeSpec("Microsoft.DocumentDB/databaseAccounts", ("AZURE_COSMOS_DB_NAME", "COSMOS_DB_ENDPOINT")),
+}
+SCOPE_ID_SOURCES = {
+    SCOPE_APP_CONFIG: ("APP_CONFIG_RESOURCE_ID",),
+    SCOPE_CONTAINER_REGISTRY: ("AZURE_CONTAINER_REGISTRY_RESOURCE_ID", "CONTAINER_REGISTRY_RESOURCE_ID"),
+    SCOPE_KEY_VAULT: ("KEY_VAULT_RESOURCE_ID",),
+    SCOPE_FOUNDRY_ACCOUNT: ("AI_FOUNDRY_ACCOUNT_RESOURCE_ID",),
+    SCOPE_SEARCH: ("SEARCH_SERVICE_RESOURCE_ID",),
+    SCOPE_STORAGE: ("STORAGE_ACCOUNT_RESOURCE_ID",),
+    SCOPE_COSMOS: ("COSMOS_DB_ACCOUNT_RESOURCE_ID",),
 }
 
 
@@ -132,8 +143,58 @@ def resolve_scope(scope: str, environment: Mapping[str, str], resource_group: st
     spec = SCOPES.get(scope)
     if spec is None:
         raise RoleAssignmentError(f"Scope {scope} has no resource mapping.")
-    items = _json(run_az, ["resource", "list", "--resource-group", resource_group, "--resource-type", spec.resource_type])
-    items = [item for item in items or [] if isinstance(item, dict) and item.get("id") and item.get("name")]
+    environment = {"AZURE_RESOURCE_GROUP": resource_group, **environment}
+    subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip()
+    if not subscription:
+        raise RoleAssignmentError("AZURE_SUBSCRIPTION_ID is required to bind capability-profile resources.")
+    if any(
+        environment[key].strip().lower() != subscription.lower()
+        for key in ("AZURE_SUBSCRIPTION_ID", "SUBSCRIPTION_ID")
+        if (environment.get(key) or "").strip()
+    ):
+        raise RoleAssignmentError("Deployment subscription aliases conflict.")
+    groups = list(dict.fromkeys(
+        resource_group_for(environment, area).lower()
+        for area in ("application", "foundry", "network")
+    ))
+    explicit = next((
+        environment[key].strip() for key in SCOPE_ID_SOURCES[scope]
+        if (environment.get(key) or "").strip()
+    ), "")
+    try:
+        if explicit:
+            if scope == SCOPE_CONTAINER_REGISTRY:
+                registry_group = registry_resource_group(environment)
+                groups = [registry_group]
+            else:
+                bound_resource_id(explicit, environment, spec.resource_type)
+    except ValueError as error:
+        raise RoleAssignmentError(str(error)) from error
+    items = []
+    for group in groups:
+        rows = _json(run_az, [
+            "resource", "list", "--subscription", subscription,
+            "--resource-group", group, "--resource-type", spec.resource_type,
+        ])
+        if not isinstance(rows, list):
+            raise RoleAssignmentError("Resource discovery must return a JSON array.")
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("id") or not row.get("name"):
+                raise RoleAssignmentError("Resource discovery returned incomplete metadata.")
+            try:
+                context = parse_resource_id(str(row["id"]))
+                if (
+                    context.subscription.lower() != subscription.lower()
+                    or context.resource_group.lower() != group.lower()
+                    or context.resource_type.lower() != spec.resource_type.lower()
+                    or context.name.lower() != str(row["name"]).lower()
+                ):
+                    raise ValueError("Discovered resource belongs to a foreign context.")
+            except ValueError as error:
+                raise RoleAssignmentError(str(error)) from error
+            items.append(row)
+    if explicit:
+        items = [item for item in items if str(item["id"]).lower() == explicit.lower()]
     preferred = next((_host_label(environment[name]) for name in spec.name_sources if (environment.get(name) or "").strip()), "")
     if preferred:
         items = [item for item in items if str(item["name"]).lower() == preferred.lower()]
@@ -142,15 +203,20 @@ def resolve_scope(scope: str, environment: Mapping[str, str], resource_group: st
     if len(items) != 1:
         hint = f"named {preferred}" if preferred else f"(set {spec.name_sources[0]} to choose one)"
         raise RoleAssignmentError(
-            f"Expected exactly one {spec.resource_type} {hint} in resource group {resource_group} "
+            f"Expected exactly one {spec.resource_type} {hint} in resource groups {', '.join(groups)} "
             f"for scope {scope}; found {len(items)}."
         )
     return str(items[0]["id"])
 
 
-def _resolve_identity(service: str, resource_group: str, run_az: RunAz) -> tuple[str, str, str]:
-    apps = _json(run_az, ["containerapp", "list", "--resource-group", resource_group, "--query",
-                          f"[?tags.\"azd-service-name\"=='{service}'].{{name:name,identity:identity}}"])
+def _resolve_identity(
+    service: str, resource_group: str, run_az: RunAz, subscription: str = "",
+) -> tuple[str, str, str]:
+    arguments = ["containerapp", "list", "--resource-group", resource_group, "--query",
+                 f"[?tags.\"azd-service-name\"=='{service}'].{{name:name,identity:identity}}"]
+    if subscription:
+        arguments += ["--subscription", subscription]
+    apps = _json(run_az, arguments)
     apps = [app for app in apps or [] if isinstance(app, dict)]
     if len(apps) != 1:
         raise RoleAssignmentError(
@@ -172,9 +238,9 @@ def _resolve_identity(service: str, resource_group: str, run_az: RunAz) -> tuple
     return identities[0]
 
 
-def resolve_principal(service: str, resource_group: str, run_az: RunAz) -> str:
+def resolve_principal(service: str, resource_group: str, run_az: RunAz, subscription: str = "") -> str:
     """Return the single managed identity principal of the service's Container App."""
-    return _resolve_identity(service, resource_group, run_az)[0]
+    return _resolve_identity(service, resource_group, run_az, subscription)[0]
 
 
 def discover_component_identities(
@@ -205,7 +271,10 @@ def discover_component_identities(
     identities: dict[str, str] = {}
     for component in components:
         service = component_service_name(definition, component)
-        principal, client, resource_id = _resolve_identity(service, resource_group, run_az)
+        principal, client, resource_id = _resolve_identity(
+            service, resource_group, run_az,
+            (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip(),
+        )
         if not client:
             arguments = (
                 ["identity", "show", "--ids", resource_id, "--query", "clientId"]
@@ -231,17 +300,19 @@ def _ensure_rbac(principal: str, role_guid: str, scope_id: str, run_az: RunAz) -
 
 
 def _ensure_cosmos(principal: str, role_guid: str, account_id: str, resource_group: str, run_az: RunAz) -> bool:
+    context = parse_resource_id(account_id)
+    resource_group = context.resource_group
     account = account_id.rstrip("/").rsplit("/", 1)[-1]
     definition_id = f"{account_id}/sqlRoleDefinitions/{role_guid}"
     existing = _json(run_az, ["cosmosdb", "sql", "role", "assignment", "list", "--account-name", account,
-                              "--resource-group", resource_group])
+                              "--resource-group", resource_group, "--subscription", context.subscription])
     for row in existing or []:
         if (isinstance(row, dict) and str(row.get("principalId", "")).lower() == principal.lower()
                 and str(row.get("roleDefinitionId", "")).lower() == definition_id.lower()
                 and str(row.get("scope", "")).rstrip("/").lower() == account_id.rstrip("/").lower()):
             return False
     run_az(["cosmosdb", "sql", "role", "assignment", "create", "--account-name", account,
-            "--resource-group", resource_group, "--role-definition-id", role_guid,
+            "--resource-group", resource_group, "--subscription", context.subscription, "--role-definition-id", role_guid,
             "--principal-id", principal, "--scope", "/", "--output", "none", "--only-show-errors"], required=False)
     return True
 
@@ -310,7 +381,10 @@ def _assign_planned(
     # Resolve every identity and scope before the first write so an ambiguous
     # or missing resource fails with no partial assignment.
     principals = principals if principals is not None else {
-        service: resolve_principal(service, resource_group, run_az)
+        service: resolve_principal(
+            service, resource_group, run_az,
+            (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip(),
+        )
         for service in dict.fromkeys(item.service for item in planned)
     }
     scopes = {

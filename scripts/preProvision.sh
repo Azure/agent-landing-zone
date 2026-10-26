@@ -87,6 +87,19 @@ if [ $APPDEF_EXIT -ne 0 ]; then
     exit $APPDEF_EXIT
 fi
 
+# Validate and bind destinations before bootstrap; azd still owns root creation.
+echo "${CYAN}Preparing workload resource-group destinations...${NC}"
+if [ -n "${AZURE_ENV_NAME:-}" ]; then
+    (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --env-name "$AZURE_ENV_NAME") >/dev/null
+else
+    (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure") >/dev/null
+fi
+RESOURCE_GROUP_EXIT=$?
+if [ $RESOURCE_GROUP_EXIT -ne 0 ]; then
+    echo "${YELLOW}Error: Resource-group destination preparation failed. Review the reported configuration or access error; no automatic cleanup is performed.${NC}"
+    exit $RESOURCE_GROUP_EXIT
+fi
+
 ###############################################################################
 # Infrastructure is repository-owned source under infra/ (no submodule).
 ###############################################################################

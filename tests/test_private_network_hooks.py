@@ -52,6 +52,7 @@ raise SystemExit(network.main(["--stage", sys.argv[1]]))
 """
 
 PS_WRAPPER = r"""
+$ErrorView = 'NormalView'
 function azd {
     if ($env:FAKE_AZD_FAIL -eq '1') { $global:LASTEXITCODE = 1; return }
     if (Test-Path (Join-Path $env:FAKE_ROOT 'env-read')) {
@@ -74,6 +75,11 @@ function git {
 function docker { $global:LASTEXITCODE = 0 }
 function python {
     $call = $args -join ' '
+    if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
+    if ($call -match 'config.deployment.outputs') {
+        $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
+        return
+    }
     if ($call -match 'config.deployment.private_network') {
         Add-Content -LiteralPath $env:FAKE_TRACE -Value 'probe'
         if ($env:FAKE_REAL_PROBE -eq '1') {
@@ -123,6 +129,8 @@ exit "$FAKE_AZD_EXIT"
 """,
     "python3": """#!/usr/bin/env bash
 case "$*" in
+  *config.deployment.resource_groups*) exit 0 ;;
+  *config.deployment.outputs*) [ "${FAKE_RG_MISSING:-0}" != 1 ]; exit $? ;;
   *config.deployment.private_network*)
     echo probe >> "$FAKE_TRACE"
     if [ "$FAKE_REAL_PROBE" = 1 ]; then

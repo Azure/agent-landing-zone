@@ -489,7 +489,8 @@ function Test-ExistingHostedOperatorAccess {
     $scope = (Get-StringValue $values['AZURE_AI_PROJECT_RESOURCE_ID']).Trim()
     $principal = (Get-StringValue $P['principalId']).Trim()
     $subscription = (Get-StringValue $values['AZURE_SUBSCRIPTION_ID']).Trim()
-    $group = (Get-StringValue $values['AZURE_RESOURCE_GROUP']).Trim()
+    $group = Get-FoundryResourceGroup -ApplicationResourceGroup $values['AZURE_RESOURCE_GROUP'] `
+        -FoundryResourceGroup $values['AZURE_FOUNDRY_RESOURCE_GROUP']
     $prefix = "/subscriptions/$subscription/resourceGroups/$group/providers/Microsoft.CognitiveServices/accounts/"
     $newProject = [string]::IsNullOrWhiteSpace($scope)
     if (-not $principal -or -not $subscription -or
@@ -1478,9 +1479,11 @@ function Test-ModelQuota {
     $deployments = @($deployments | Where-Object { $_.model.format -eq 'OpenAI' })
     if ($deployments.Count -eq 0) { return }
     $selectedEnvironment = Get-AzdEnvValues
+    $foundryGroup = Get-FoundryResourceGroup -ApplicationResourceGroup $selectedEnvironment['AZURE_RESOURCE_GROUP'] `
+        -FoundryResourceGroup $selectedEnvironment['AZURE_FOUNDRY_RESOURCE_GROUP']
     $existing = @(Get-ExistingModelDeployments -Location $Location -SubscriptionId $selectedSubscription `
         -ProjectResourceId $selectedEnvironment['AZURE_AI_PROJECT_RESOURCE_ID'] `
-        -ResourceGroup $selectedEnvironment['AZURE_RESOURCE_GROUP'] -ReadAzureJson {
+        -ResourceGroup $foundryGroup -ReadAzureJson {
         param([string[]]$Arguments)
         Invoke-AzCliRaw -Arguments ($Arguments + @('-o', 'json'))
     } -OnWarning {

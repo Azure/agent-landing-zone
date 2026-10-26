@@ -256,7 +256,7 @@ try {
     $scopeBindings = [ordered]@{
         vnetName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetName')), createObject('value', variables('resourceNames').vnetName))]"
         subscriptionId = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetSubscriptionId')), createObject('value', subscription().subscriptionId))]"
-        resourceGroupName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetResourceGroupName')), createObject('value', resourceGroup().name))]"
+        resourceGroupName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetResourceGroupName')), createObject('value', variables('_networkResourceGroupName')))]"
         virtualNetworkResourceId = "[if(variables('_networkIsolation'), if(parameters('useExistingVNet'), createObject('value', parameters('existingVnetResourceId')), createObject('value', reference('virtualNetwork').outputs.resourceId.value)), createObject('value', ''))]"
     }
     foreach ($entry in $scopeBindings.GetEnumerator()) {
@@ -265,14 +265,14 @@ try {
     foreach ($name in @('useExistingVNet', 'deploySubnets', 'deployNsgs')) {
         Test-Equal "Subnet module $name forwarding" $subnets.properties.parameters.$name.value "[parameters('$name')]"
     }
-    $buildSubnets = @($subnets.properties.parameters.subnets.value | Where-Object { $_.name -ceq "[parameters('devopsBuildAgentsSubnetName')]" })
-    Test-Equal 'Exactly one build subnet is supplied to BYO child operations' $buildSubnets.Count 1
-    if ($buildSubnets.Count -eq 1) {
-        Test-Equal 'Build subnet prefix unchanged' $buildSubnets[0].addressPrefix "[parameters('devopsBuildAgentsSubnetPrefix')]"
-        Test-Equal 'Build subnet route unchanged' $buildSubnets[0].routeTableResourceId "[variables('_effectiveRouteTableId')]"
-        Test-Equal 'Build subnet remains undelegated' $buildSubnets[0].delegation ''
-        Test-Equal 'Build subnet service endpoints unchanged' $buildSubnets[0].serviceEndpoints @()
-    }
+    # The optional second PE subnet makes this a concat expression, not a
+    # literal array. Keep checking the complete build-subnet object exactly.
+    $subnetExpression = [string]$subnets.properties.parameters.subnets.value
+    $buildSubnetExpression = "createObject('name', parameters('devopsBuildAgentsSubnetName'), 'addressPrefix', parameters('devopsBuildAgentsSubnetPrefix'), 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'delegation', '', 'serviceEndpoints', createArray())"
+    Test-Equal 'Exactly one build subnet is supplied to BYO child operations' `
+        ([regex]::Matches($subnetExpression, [regex]::Escape("parameters('devopsBuildAgentsSubnetName')")).Count) 1
+    Test-Equal 'Complete build subnet retains prefix, actual route-table ID, no delegation or service endpoints' `
+        $subnetExpression.Contains($buildSubnetExpression) $true
 
     $children = @($subnets.properties.template.resources)
     Test-Equal 'Subnet orchestrator retains exactly three child deployment declarations' $children.Count 3
@@ -310,12 +310,11 @@ try {
         $subnetChild.properties.parameters.networkSecurityGroupId $selection
     Test-Equal '#168 dedicated Bastion NSG stays gated on Bastion and NSGs' `
         $template.resources.bastionNsg.condition "[and(variables('_deployBastion'), parameters('deployNsgs'))]"
-    $bastionEntries = @($subnets.properties.parameters.subnets.value | Where-Object { $_.name -ceq "[parameters('azureBastionSubnetName')]" })
-    Test-Equal '#168 reserved subnet remains present independently of host deployment' $bastionEntries.Count 1
-    if ($bastionEntries.Count -eq 1) {
-        Test-Equal '#168 enabled Bastion retains the dedicated NSG binding' `
-            $bastionEntries[0].networkSecurityGroupResourceId "[if(and(variables('_deployBastion'), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, '')]"
-    }
+    Test-Equal '#168 reserved subnet remains present independently of host deployment' `
+        ([regex]::Matches($subnetExpression, [regex]::Escape("parameters('azureBastionSubnetName')")).Count) 1
+    $bastionSubnetExpression = "createObject('name', parameters('azureBastionSubnetName'), 'addressPrefix', parameters('azureBastionSubnetPrefix'), 'networkSecurityGroupResourceId', if(and(variables('_deployBastion'), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, ''), 'delegation', '', 'serviceEndpoints', createArray())"
+    Test-Equal '#168 enabled Bastion retains the complete dedicated NSG binding and reserved subnet shape' `
+        $subnetExpression.Contains($bastionSubnetExpression) $true
     if ($subnetChild.properties.parameters.networkSecurityGroupId -ceq $selection) {
         foreach ($case in @(
             @{ Name = 'Bastion disabled'; Subnet = 'AzureBastionSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }

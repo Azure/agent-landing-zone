@@ -98,13 +98,26 @@ try {
         -Condition ($null -ne $accountDeployment) `
         -Message 'Cosmos DB account AVM deployment remains present'
 
-    $accountSqlDeployment = $accountDeployment.properties.template.resources.databaseAccount_sqlDatabases
+    $accountResources = $accountDeployment.properties.template.resources
+    $accountSqlDeployments = if ($accountResources -is [array]) {
+        @($accountResources | Where-Object {
+            $_.type -like 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases*' -or
+            ($_.type -eq 'Microsoft.Resources/deployments' -and $_.copy.name -ceq 'databaseAccount_sqlDatabases')
+        })
+    }
+    else { @($accountResources.databaseAccount_sqlDatabases | Where-Object { $null -ne $_ }) }
+    $localAccountOnly = $accountResources -is [array] -and
+        $accountResources.Count -eq 1 -and
+        $accountResources[0].type -ceq 'Microsoft.DocumentDB/databaseAccounts' -and
+        $null -eq $accountDeployment.properties.template.parameters.sqlDatabases
     Assert-True `
         -Condition (
             $null -eq $accountDeployment.properties.parameters.sqlDatabases -and
-            [string]$accountSqlDeployment.copy.count -eq "[length(coalesce(parameters('sqlDatabases'), createArray()))]"
+            (($localAccountOnly -and $accountSqlDeployments.Count -eq 0) -or
+                ($accountSqlDeployments.Count -eq 1 -and
+                    [string]$accountSqlDeployments[0].copy.count -eq "[length(coalesce(parameters('sqlDatabases'), createArray()))]"))
         ) `
-        -Message 'Account AVM receives no SQL databases, so its unbounded deployment loop has zero instances'
+        -Message 'Account-only local module creates no SQL children (or the legacy AVM receives an empty SQL collection)'
 
     Assert-True `
         -Condition ($null -ne $databaseDeployment) `

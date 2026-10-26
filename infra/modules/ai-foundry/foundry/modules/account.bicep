@@ -106,7 +106,9 @@ var privateDnsZoneResourceIdValues = [
     privateDnsZoneResourceId: id
   }
 ]
-var privateNetworkingEnabled = !empty(privateDnsZoneResourceIdValues) && !empty(privateEndpointSubnetResourceId)
+// Policy-managed DNS intentionally omits zone IDs, but still requires private
+// access and agent subnet injection.
+var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)
 
 // -----------------------------------------------------------------------------
 // Cognitive Services account (no inline PE — see header for #29 fix)

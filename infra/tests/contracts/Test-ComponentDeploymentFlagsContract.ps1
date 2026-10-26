@@ -142,9 +142,15 @@ try {
         aiFoundryDisableLocalAuth = '${AI_FOUNDRY_DISABLE_LOCAL_AUTH=true}'
     }
     foreach ($entry in $expectedEnvironmentMappings.GetEnumerator()) {
-        $actual = [string]$parameterValues.($entry.Key).value
-        if ($actual -ne $entry.Value) {
-            $failures.Add("$($entry.Key) must map to '$($entry.Value)'; got '$actual'.") | Out-Null
+        $binding = $parameterValues.($entry.Key)
+        $actual = if ($null -ne $binding) { $binding.value } else { $template.parameters.($entry.Key).defaultValue }
+        # The incorporated parameter files retain literal true strings, and
+        # omitted inputs use native Bicep defaults. An upstream azd alias is
+        # also supported, but false/renamed aliases must never pass this gate.
+        $compatible = ($actual -is [bool] -and $actual) -or
+            ($actual -is [string] -and ($actual -ceq 'true' -or $actual -ceq $entry.Value))
+        if (-not $compatible) {
+            $failures.Add("$($entry.Key) must retain its true default or exact '$($entry.Value)' mapping; got '$actual'.") | Out-Null
             Write-Host "  [FAIL] $($entry.Key) environment mapping" -ForegroundColor Red
         }
         else {

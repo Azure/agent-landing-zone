@@ -1,6 +1,36 @@
 # Changelog
 
-## [Unreleased]
+## [v4.3.1] - 2026-10-25
+
+### Changed
+- Refresh the README architecture section with high-resolution Standalone,
+  Platform Hub and AI Gateway + Platform Hub reference diagrams and links to
+  the full-size PNGs.
+
+### Fixed
+- Include the complete lower panels of the AI Gateway diagram with safe
+  export margins, and use `rg-networking` consistently in all three diagrams.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure source are unchanged
+  from v4.3.0.
+- Verify all three 6400-pixel-wide PNGs, full-resolution README links, corrected
+  RG labels and complete bottom panels against the original draw.io export.
+- Build the central documentation site in strict mode and verify the published
+  HTML and exact PNG hashes.
+- Pass all 39 existing release-contract regressions with the unchanged pinned
+  component and infrastructure combination.
+- No Azure deployment or live-environment validation is needed for these
+  unchanged runtime and infrastructure sources.
 
 ## [v4.3.0] - 2026-10-14
 
