@@ -366,8 +366,9 @@ ownership review and separate operator approval, not just environment-name tags.
 3. Introduce scoped foundation modules, network ordering, both hooks, and
    destination-aware configurators together; retain incorporated `infra.source`
    provenance rather than pretending a local refactor is an upstream re-sync.
-4. Run the offline and separately authorized live gates below, coordinate upstream
-   infrastructure parity, and update central documentation in the same delivery.
+4. Run the offline and separately authorized live gates below and update central
+   documentation in the same delivery. Upstream implementation, publication and
+   parity work are not dependencies of this repository-owned foundation change.
 5. Prepare a **minor release later**, with separately approved publication and
    validated pins read from `manifest.json`; this ADR changes no version or pin.
 
@@ -447,6 +448,6 @@ validation identifier, or private meeting link belongs in the delivery.
 Review before the planned minor release and on an azd hook/state/teardown change,
 Foundry/AVM endpoint lifecycle change, failed live fitness gate, requested
 in-place migration, cross-subscription workload destinations, independently
-operated deployments, second PE subnet, separately owned ACR, or new
+operated deployments, further PE-subnet ownership/layout changes, separately owned ACR, or new
 portal/Terraform support claim. These require their own evidence and, where they
 change this contract, an explicit decision rather than an implicit fallback.
