@@ -40,6 +40,8 @@
 - Load application schema/YAML validation dependencies only when validation
   runs, so destination binding can bootstrap on a fresh jumpbox before
   post-provision installs the declared Python requirements.
+- Resolve the declared registry owner with an explicit repository import path
+  on isolated jumpbox Python, preserving default and custom-registry routing.
 
 ### Validation
 

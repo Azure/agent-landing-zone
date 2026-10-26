@@ -443,7 +443,7 @@ function Set-AgentLzAppConfiguration {
 
     # Container Registry / Container Apps Env / Log Analytics / App Insights
     $registryResourceGroup = Invoke-NativeCommand {
-        & python -c "import os; from config.deployment.context import registry_resource_group; print(registry_resource_group(os.environ))"
+        & python -c "import os, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); from config.deployment.context import registry_resource_group; print(registry_resource_group(os.environ))"
     }
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($registryResourceGroup)) {
         throw 'Declared registry context is invalid; no App Configuration values were imported.'
