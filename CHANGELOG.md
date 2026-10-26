@@ -1,6 +1,116 @@
 # Changelog
 
-## [Unreleased]
+## [v4.3.4] - 2026-10-26
+
+### Changed
+- Show only the Standalone and Platform Hub diagrams in the README Architecture
+  section, retaining their full-resolution image links.
+- Remove the AI Gateway + Platform Hub subsection from the README only;
+  preserve every diagram asset and the central documentation site.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script, infrastructure sources and images are unchanged.
+- Verify exactly two architecture images in the intended order, both
+  full-resolution links and an otherwise unchanged README.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.3] - 2026-10-26
+
+### Changed
+- Move the workload UDR icon and caption to the space above AppGateway subnet
+  in the Platform Hub and Platform Hub with AI Gateway architecture diagrams.
+- Refresh only the two corresponding 6400-pixel-wide PNGs, preserving the
+  Standalone diagram and the separate AI Gateway landing-zone UDR.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparison allows only the two workload UDR group positions;
+  verify the new position is above AppGateway subnet without overlapping resources.
+- Preserve full export bounds and bottom labels; build the central documentation
+  site in strict mode and compare published PNG hashes with the source exports.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.2] - 2026-10-26
+
+### Changed
+- Rename the three architecture diagram titles to Agent Landing Zone.
+- Use the approved two-line title for the integrated scenario:
+  "Agent Landing Zone with Platform Hub" and "and AI Gateway Landing Zone".
+- Refresh the 6400-pixel-wide PNGs while preserving all existing resource
+  placements, connections, full-resolution links and safe export margins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparisons allow only the approved title text and the
+  integrated title box height; PNG differences are confined to the title area.
+- Verify complete bottom panels and all 6400-pixel-wide image dimensions;
+  build the central documentation site in strict mode.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.1] - 2026-10-25
+
+### Changed
+- Refresh the README architecture section with high-resolution Standalone,
+  Platform Hub and AI Gateway + Platform Hub reference diagrams and links to
+  the full-size PNGs.
+
+### Fixed
+- Include the complete lower panels of the AI Gateway diagram with safe
+  export margins, and use `rg-networking` consistently in all three diagrams.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure source are unchanged
+  from v4.3.0.
+- Verify all three 6400-pixel-wide PNGs, full-resolution README links, corrected
+  RG labels and complete bottom panels against the original draw.io export.
+- Build the central documentation site in strict mode and verify the published
+  HTML and exact PNG hashes.
+- Pass all 39 existing release-contract regressions with the unchanged pinned
+  component and infrastructure combination.
+- No Azure deployment or live-environment validation is needed for these
+  unchanged runtime and infrastructure sources.
 
 ## [v4.3.0] - 2026-10-14
 
