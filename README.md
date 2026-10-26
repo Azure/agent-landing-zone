@@ -39,13 +39,6 @@ reuse depend on deployment settings. Select an image to open the full-resolution
 
 [![Agent Landing Zone with Platform Hub architecture](media/AI-Landing-Zone-with-platform.png)](media/AI-Landing-Zone-with-platform.png)
 
-### AI Gateway + Platform Hub
-
-This integrated scenario uses a separately deployed AI Gateway; Agent Landing Zone
-does not provision or connect it automatically.
-
-[![AI Gateway and Platform Hub integrated architecture](media/AI-Landing-Zones-APIM.png)](media/AI-Landing-Zones-APIM.png)
-
 ## Deploy
 
 - [Full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/) — Deploy the infrastructure and default agent application.
