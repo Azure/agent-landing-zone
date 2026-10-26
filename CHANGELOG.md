@@ -31,6 +31,13 @@
   Configurable RGs are supported by the Agent Bicep/azd entrypoint only;
   Terraform and Portal support are not claimed.
 
+### Fixed
+- Use supported Azure CLI resource inventory filters during destination
+  preparation, retaining strict environment-tag matching and access failures.
+- Apply jumpbox Reader grants at the resolved resource-group deployment scope
+  rather than treating a resource-group ID as a service resource. Preserve
+  assignment GUIDs, per-resource grants and the single-group behavior.
+
 ### Validation
 
 | Component | Version |
@@ -44,7 +51,7 @@
   744 subtests passed. Clean Linux deployment/hook CI: 636 passed, 6 skipped
   and 727 subtests passed.
 - All 16 offline foundation entrypoints pass with Bicep 0.42.1, including
-  139 scope assertions, 14 rejected normalization mutations and the original
+  145 scope assertions, 17 rejected normalization mutations and the original
   protected graph fingerprints. Both hook variants pass syntax/behavior checks.
 - Strict central documentation build and rubber-duck documentation review
   pass. Runtime tag/commit bindings and incorporated infrastructure
@@ -52,10 +59,15 @@
 - The separate copied historical parity/provenance suite retains five
   pre-existing failures documented in `infra/tests/README.md`; no source
   histories, approval digests or gates were changed to hide them.
-- **Release gate pending:** no Azure what-if, live provisioning, restricted-RG
-  permissions, RBAC, DNS/HTTPS, re-provision or recovery validation has run.
-  This candidate must not be published until ADR-0023's live acceptance gate
-  is resolved by authorized validation or an explicit human-approved exception.
+- Authorized private Azure validation has provisioned resources across three
+  destinations, created the unchanged default model deployments and verified
+  five private DNS/TLS endpoints with anonymous access denied. A targeted
+  recovery resolved an Azure private-endpoint internal error.
+- **Release gate pending:** authenticated functional checks, restricted-RG
+  permissions and lifecycle/re-provision acceptance are not complete.
+  This candidate must not be published until ADR-0023's remaining live
+  acceptance gate is resolved by authorized validation or an explicit
+  human-approved exception.
 
 ## [v4.3.5] - 2026-10-26
 
