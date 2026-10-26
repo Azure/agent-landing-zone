@@ -10,20 +10,29 @@ Write-Host ""
 # Mirror azd environment variables into process environment
 # This avoids persisting secrets in the User environment (registry)
 #-------------------------------------------------------------------------------
-$azdValues = & azd env get-values
+$azdValues = & azd env get-values --output json
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($azdValues -join "`n"))) {
     Write-Error "Could not load the selected azd environment; refusing to configure resources."
     exit 1
 }
-$azdValues | ForEach-Object {
-  if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-    $k = $matches[1]
-    $v = $matches[2] -replace '^"|"$'
-    Set-Item -Path Env:$k -Value $v
-  } elseif (-not [string]::IsNullOrWhiteSpace($_)) {
-    Write-Error "Invalid azd environment output; refusing to configure resources."
+try {
+    $azdEnvironment = ($azdValues -join "`n") | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    Write-Error "Invalid azd environment JSON; refusing to configure resources."
     exit 1
-  }
+}
+if ($azdEnvironment -isnot [pscustomobject] -or @($azdEnvironment.PSObject.Properties).Count -eq 0) {
+    Write-Error "The selected azd environment must be a nonempty object."
+    exit 1
+}
+foreach ($prop in $azdEnvironment.PSObject.Properties) {
+    if ($prop.Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or $prop.Value -isnot [string] -or $prop.Value.Contains([char]0)) {
+        Write-Error "Invalid azd environment key or value; refusing to configure resources."
+        exit 1
+    }
+}
+foreach ($prop in $azdEnvironment.PSObject.Properties) {
+    Set-Item -Path "Env:$($prop.Name)" -Value $prop.Value
 }
 
 #-------------------------------------------------------------------------------

@@ -42,6 +42,9 @@
   post-provision installs the declared Python requirements.
 - Resolve the declared registry owner with an explicit repository import path
   on isolated jumpbox Python, preserving default and custom-registry routing.
+- Load post-provision environment values through validated azd JSON on both
+  platforms, preserving structured identity metadata, quotes and multiline
+  values without interpreting them as shell expressions.
 
 ### Validation
 
