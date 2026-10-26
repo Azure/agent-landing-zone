@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
 
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check pytest -r config/requirements.txt
+        run: python -m pip install --disable-pip-version-check pytest click tabulate -r config/requirements.txt
 
       - name: Test deployment contracts
         run: python -m pytest tests --quiet
@@ -67,6 +67,7 @@ jobs:
       - name: Install Bicep CLI
         run: |
           set -euo pipefail
+          az config set bicep.use_binary_from_path=false
           az bicep install --version v0.42.1
           az bicep version
 
