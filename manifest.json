@@ -1,5 +1,5 @@
 {
-  "tag": "v4.3.4",
+  "tag": "v4.3.5",
   "repo": "https://github.com/Azure/agent-landing-zone.git",
   "infra": {
     "source": {

@@ -1,5 +1,32 @@
 # Changelog
 
+## [v4.3.5] - 2026-10-26
+
+### Changed
+- Rename the subscription header to "Agent Landing Zone - prod subscription"
+  in all three reference architecture PNGs, matching the editable draw.io source.
+- Preserve the two-diagram README, full-resolution image links, resource
+  placements, UDR locations, management-group labels and AI Gateway subscription.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparison allows only the three subscription text values;
+  all image pixels outside those labels are identical to the previous exports.
+- Verify complete PDF bounds and bottom labels, all 6400-pixel-wide PNGs and
+  the central documentation site's strict build.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
 ## [v4.3.4] - 2026-10-26
 
 ### Changed
