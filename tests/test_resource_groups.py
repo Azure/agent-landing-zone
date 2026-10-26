@@ -159,6 +159,13 @@ class BootstrapTests(ScratchTest):
         before_env = self.env_file.read_bytes()
         def azure(arguments: list[str]) -> tuple[int, str, str]:
             if arguments[:2] == ["resource", "list"]:
+                self.assertNotIn("--tag", arguments)
+                self.assertEqual(
+                    "rg-app", arguments[arguments.index("--resource-group") + 1]
+                )
+                self.assertEqual(
+                    SUBSCRIPTION, arguments[arguments.index("--subscription") + 1]
+                )
                 return 0, "[]", ""
             self.assertEqual(["group", "exists"], arguments[:2])
             return 0, "true", ""
@@ -175,6 +182,71 @@ class BootstrapTests(ScratchTest):
             self.assertEqual(before, state.read_bytes())
             self.assertEqual(before_time, state.stat().st_mtime_ns)
         self.assertEqual(before_env, self.env_file.read_bytes())
+
+    def test_legacy_inventory_filters_tags_without_widening_resource_scope(self) -> None:
+        selection = rg.resolve_resource_groups(self.environment)
+        for resources, expected in (
+            ([], False),
+            ([{"tags": None}], False),
+            ([{"id": "untagged-resource"}], False),
+            ([{"tags": {"azd-env-name": "another-environment"}}], False),
+            ([{"tags": {"azd-env-name": "OFFLINE"}}], False),
+            ([{"tags": {"azd-env-name": "offline"}}], True),
+            ([{"tags": {"AZD-ENV-NAME": "offline"}}], True),
+        ):
+            with self.subTest(resources=resources), patch.object(
+                rg, "_run_az", return_value=(0, json.dumps(resources), "")
+            ) as run:
+                self.assertEqual(
+                    expected,
+                    rg._legacy_deployed(
+                        self.environment, self.env_file, selection, "offline",
+                        check_inventory=True,
+                    ),
+                )
+                run.assert_called_once_with([
+                    "resource", "list", "--resource-group", "rg-app",
+                    "--subscription", SUBSCRIPTION,
+                    "--output", "json", "--only-show-errors",
+                ])
+
+    def test_legacy_inventory_malformed_or_inaccessible_fails_closed(self) -> None:
+        selection = rg.resolve_resource_groups(self.environment)
+        for response in (
+            (0, "not-json", ""),
+            (0, "{}", ""),
+            (0, "[null]", ""),
+            (0, '[{"tags": []}]', ""),
+            (0, '[{"tags": "invalid"}]', ""),
+            (0, '[{"tags": {"azd-env-name": 42}}]', ""),
+            (1, "", "ERROR: (AuthorizationFailed) forbidden"),
+        ):
+            with self.subTest(response=response), patch.object(
+                rg, "_run_az", return_value=response
+            ) as run:
+                with self.assertRaises(rg.ResourceGroupError):
+                    rg._legacy_deployed(
+                        self.environment, self.env_file, selection, "offline",
+                        check_inventory=True,
+                    )
+                self.assertEqual(1, run.call_count)
+                self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
+
+    def test_tagged_legacy_resources_still_reject_split_adoption_before_writes(self) -> None:
+        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+
+        def azure(arguments: list[str]) -> tuple[int, str, str]:
+            if arguments[:2] == ["resource", "list"]:
+                return 0, '[{"tags": {"azd-env-name": "offline"}}]', ""
+            self.assertEqual(["group", "exists"], arguments[:2])
+            return 0, "true", ""
+
+        with patch.object(rg, "_run_az", side_effect=azure):
+            with self.assertRaisesRegex(
+                rg.ResourceGroupError, "existing deployment without a resource-group binding"
+            ):
+                self.prepare()
+        self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
 
     def test_missing_false_checks_all_destinations_without_any_writes(self) -> None:
         self.environment.update(
@@ -352,7 +424,8 @@ class BootstrapTests(ScratchTest):
             run.assert_not_called()
         self.environment.pop("APP_CONFIG_ENDPOINT")
         with patch.object(rg, "_run_az", side_effect=[
-            (0, "true", ""), (0, "true", ""), (0, '[{"id":"previous-resource"}]', ""),
+            (0, "true", ""), (0, "true", ""),
+            (0, '[{"id":"previous-resource","tags":{"azd-env-name":"offline"}}]', ""),
         ]):
             with self.assertRaisesRegex(rg.ResourceGroupError, "existing deployment"):
                 self.prepare()

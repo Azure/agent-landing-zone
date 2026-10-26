@@ -376,7 +376,7 @@ def _legacy_deployed(
         return False
     code, output, error = _run_az([
         "resource", "list", "--resource-group", selection.application,
-        "--subscription", selection.subscription, "--tag", f"azd-env-name={env_name}",
+        "--subscription", selection.subscription,
         "--output", "json", "--only-show-errors",
     ])
     if code:
@@ -388,9 +388,24 @@ def _legacy_deployed(
         resources = json.loads(output)
         if not isinstance(resources, list):
             raise ValueError
+        for resource in resources:
+            if not isinstance(resource, dict):
+                raise ValueError
+            tags = resource.get("tags")
+            if tags is None:
+                continue
+            if not isinstance(tags, dict) or not all(
+                isinstance(value, str) for value in tags.values()
+            ):
+                raise ValueError
+            if any(
+                key.casefold() == "azd-env-name" and value == env_name
+                for key, value in tags.items()
+            ):
+                return True
     except ValueError as exc:
         raise ResourceGroupError("Azure CLI returned invalid deployment-state JSON.") from exc
-    return bool(resources)
+    return False
 
 
 def _check_legacy_root_scope(
