@@ -201,7 +201,8 @@ try {
         Add-Failure 'Two or more shared private-link names collide on their direct or bounded name expression.'
     }
 
-    $splResource = $template.resources.searchFoundrySharedPrivateLinks
+    $splDeployment = $template.resources.searchFoundrySharedPrivateLinks
+    $splResource = $splDeployment.properties.template.resources.sharedPrivateLinks
     $expectedType = 'Microsoft.Search/searchServices/sharedPrivateLinkResources'
     $expectedApiVersion = '2025-05-01'
     if ($null -eq $splResource) {
@@ -214,17 +215,26 @@ try {
         elseif ($splResource.apiVersion -ne $expectedApiVersion) {
             Add-Failure "searchFoundrySharedPrivateLinks apiVersion changed: expected '$expectedApiVersion', got '$($splResource.apiVersion)'."
         }
-        elseif ((@($splResource.dependsOn) -join ',') -ne (@('aiFoundry', 'searchService') -join ',')) {
-            Add-Failure "searchFoundrySharedPrivateLinks dependsOn changed: expected [aiFoundry, searchService], got [$($splResource.dependsOn -join ', ')]."
+        elseif ($splDeployment.resourceGroup -ne "[variables('_foundryResourceGroupName')]") {
+            Add-Failure 'Shared private links must be service-owned Search children in the Foundry RG.'
+        }
+        elseif ((@($splDeployment.dependsOn) -join ',') -ne (@('aiFoundry', 'searchService') -join ',')) {
+            Add-Failure "searchFoundrySharedPrivateLinks dependsOn changed: expected [aiFoundry, searchService], got [$($splDeployment.dependsOn -join ', ')]."
+        }
+        elseif ($splDeployment.properties.parameters.links.value -ne "[variables('searchFoundrySharedPrivateLinkResources')]") {
+            Add-Failure 'Shared private-link wrapper must receive the exact gated resources array.'
+        }
+        elseif ($splDeployment.properties.parameters.foundryAccountResourceId.value -ne "[reference('aiFoundry').outputs.accountResourceId.value]") {
+            Add-Failure 'Shared private-link wrapper must use the actual Foundry resource ID.'
         }
         elseif ($splResource.copy.mode -ne 'serial' -or $splResource.copy.batchSize -ne 1) {
             Add-Failure "searchFoundrySharedPrivateLinks copy loop changed: expected serial mode with batchSize 1, got mode='$($splResource.copy.mode)' batchSize=$($splResource.copy.batchSize)."
         }
-        elseif ($splResource.copy.count -ne "[length(variables('searchFoundrySharedPrivateLinkResources'))]") {
+        elseif ($splResource.copy.count -ne "[length(parameters('links'))]") {
             Add-Failure "searchFoundrySharedPrivateLinks copy count no longer targets the gated resources array: got '$($splResource.copy.count)'."
         }
         else {
-            Add-Pass 'searchFoundrySharedPrivateLinks keeps its type, apiVersion, dependsOn, and gated serial copy loop unchanged.'
+            Add-Pass 'Scoped shared private links keep their resource type, API version, dependency ordering, and gated serial copy loop.'
         }
     }
 

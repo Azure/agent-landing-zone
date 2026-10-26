@@ -33,6 +33,14 @@ param includeAssociatedResources bool = false
 @description('Optional. The Resource ID of the subnet to establish Private Endpoint(s). If provided, private endpoints will be created for the AI Foundry account and associated resources when creating those resource. Each resource will also require supplied private DNS zone resource ID(s) to establish those private endpoints.')
 param privateEndpointSubnetResourceId string?
 
+@description('Actual RG ARM ID for customer-owned private endpoints, including any BYO subscription.')
+param privateEndpointResourceGroupResourceId string = resourceGroup().id
+
+@description('Region of the endpoint subnet.')
+param privateEndpointLocation string = location
+
+var _privateEndpointRgParts = split(privateEndpointResourceGroupResourceId, '/')
+
 @description('Optional. Custom configuration for the AI Foundry.')
 param aiFoundryConfiguration foundryConfigurationType?
 
@@ -121,6 +129,8 @@ module keyVault 'modules/keyVault.bicep' = if (includeAssociatedResources) {
     tags: tags
     enableTelemetry: enableTelemetry
     privateEndpointSubnetResourceId: privateEndpointSubnetResourceId
+    privateEndpointResourceGroupResourceId: privateEndpointResourceGroupResourceId
+    privateEndpointLocation: privateEndpointLocation
     privateDnsZoneResourceId: keyVaultConfiguration.?privateDnsZoneResourceId
     roleAssignments: keyVaultConfiguration.?roleAssignments
   }
@@ -135,9 +145,13 @@ module aiSearch 'modules/aiSearch.bicep' = if (includeAssociatedResources) {
     tags: tags
     enableTelemetry: enableTelemetry
     privateEndpointSubnetResourceId: privateEndpointSubnetResourceId
+    privateEndpointResourceGroupResourceId: privateEndpointResourceGroupResourceId
+    privateEndpointLocation: privateEndpointLocation
     privateDnsZoneResourceId: aiSearchConfiguration.?privateDnsZoneResourceId
     roleAssignments: aiSearchConfiguration.?roleAssignments
   }
+  // These modules can each create a PE NIC on the same subnet.
+  dependsOn: [keyVault]
 }
 
 module storageAccount 'modules/storageAccount.bicep' = if (includeAssociatedResources) {
@@ -154,6 +168,8 @@ module storageAccount 'modules/storageAccount.bicep' = if (includeAssociatedReso
     tags: tags
     enableTelemetry: enableTelemetry
     privateEndpointSubnetResourceId: privateEndpointSubnetResourceId
+    privateEndpointResourceGroupResourceId: privateEndpointResourceGroupResourceId
+    privateEndpointLocation: privateEndpointLocation
     blobPrivateDnsZoneResourceId: storageAccountConfiguration.?blobPrivateDnsZoneResourceId
     roleAssignments: concat(
       !empty(storageAccountConfiguration) && !empty(storageAccountConfiguration.?roleAssignments)
@@ -188,9 +204,12 @@ module cosmosDb 'modules/cosmosDb.bicep' = if (includeAssociatedResources) {
     tags: tags
     enableTelemetry: enableTelemetry
     privateEndpointSubnetResourceId: privateEndpointSubnetResourceId
+    privateEndpointResourceGroupResourceId: privateEndpointResourceGroupResourceId
+    privateEndpointLocation: privateEndpointLocation
     privateDnsZoneResourceId: cosmosDbConfiguration.?privateDnsZoneResourceId
     roleAssignments: cosmosDbConfiguration.?roleAssignments
   }
+  dependsOn: [storageAccount]
 }
 
 var createCapabilityHosts = (aiFoundryConfiguration.?createCapabilityHosts ?? false) && includeAssociatedResources
@@ -254,10 +273,11 @@ module foundryProject 'modules/project/main.bicep' = {
 var hasAllFoundryPrivateDnsZoneIds = !empty(aiFoundryConfiguration.?networking.?cognitiveServicesPrivateDnsZoneResourceId) && !empty(aiFoundryConfiguration.?networking.?openAiPrivateDnsZoneResourceId) && !empty(aiFoundryConfiguration.?networking.?aiServicesPrivateDnsZoneResourceId)
 
 module foundryAccountPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if (!empty(privateEndpointSubnetResourceId) && !empty(aiFoundryConfiguration.?networking) && hasAllFoundryPrivateDnsZoneIds) {
+  scope: resourceGroup(_privateEndpointRgParts[2], _privateEndpointRgParts[4])
   name: take('module.account.pe.${resourcesName}', 64)
   params: {
     name: 'pep-${foundryAccount.outputs.name}-account'
-    location: location
+    location: privateEndpointLocation
     tags: tags
     subnetResourceId: privateEndpointSubnetResourceId!
     privateLinkServiceConnections: [
@@ -291,10 +311,11 @@ module foundryAccountPrivateEndpoint 'br/public:avm/res/network/private-endpoint
 }
 
 module foundryAccountPrivateEndpointWithoutDns 'br/public:avm/res/network/private-endpoint:0.11.0' = if (!empty(privateEndpointSubnetResourceId) && !empty(aiFoundryConfiguration.?networking) && !hasAllFoundryPrivateDnsZoneIds) {
+  scope: resourceGroup(_privateEndpointRgParts[2], _privateEndpointRgParts[4])
   name: take('module.account.pe.nodns.${resourcesName}', 64)
   params: {
     name: 'pep-${foundryAccount.outputs.name}-account'
-    location: location
+    location: privateEndpointLocation
     tags: tags
     subnetResourceId: privateEndpointSubnetResourceId!
     privateLinkServiceConnections: [
@@ -328,6 +349,12 @@ output aiSearchName string = includeAssociatedResources ? aiSearch!.outputs.name
 
 @description('Name of the deployed Azure AI Project.')
 output aiProjectName string = foundryProject.outputs.name
+
+@description('Actual ARM ID of the Foundry account.')
+output accountResourceId string = foundryAccount.outputs.resourceId
+
+@description('Actual ARM ID of the Foundry project.')
+output projectResourceId string = foundryProject.outputs.resourceId
 
 @description('Name of the deployed Azure Storage Account.')
 output storageAccountName string = includeAssociatedResources ? storageAccount!.outputs.name : ''

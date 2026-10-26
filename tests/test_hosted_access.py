@@ -169,6 +169,35 @@ class HostedAccessTests(unittest.TestCase):
             (access.Role.SECRET, SECRET),
         ], [(grant.role, grant.scope) for grant in plan.grants])
 
+    def test_split_foundry_preserves_exact_model_appconfig_and_audit_ownership(self):
+        for group in ("foundry-group", "rg-ai(team)", "rg-équipe"):
+            with self.subTest(group=group):
+                self.azure = AzureFixture()
+                environment = {
+                    **ENV, "AZURE_FOUNDRY_RESOURCE_GROUP": group,
+                    "AZURE_NETWORK_RESOURCE_GROUP": "network-group",
+                    "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT.replace("test-group", group),
+                }
+                for old_id in (PROJECT, ACCOUNT, MODEL):
+                    new_id = old_id.replace("test-group", group)
+                    self.azure.resources[new_id] = {**self.azure.resources.pop(old_id), "id": new_id}
+                self.azure.settings["AZURE_FOUNDRY_RESOURCE_GROUP"] = {
+                    "key": "AZURE_FOUNDRY_RESOURCE_GROUP", "label": "agent-lz", "value": group,
+                }
+                plan = self.discover(environment)
+                plan.validate()
+                self.assertEqual("test-group", plan.resource_group)
+                self.assertEqual(group, plan.foundry_resource_group)
+                self.assertEqual([STORE, MODEL.replace("test-group", group), SECRET], [g.scope for g in plan.grants])
+                with self.assertRaises(access.AccessError):
+                    replace(plan, grants=tuple(
+                        access.Grant(g.role, MODEL) if g.role is access.Role.MODEL else g
+                        for g in plan.grants
+                    )).validate()
+                self.fails_discovery({**environment, "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT})
+                self.azure.settings["AZURE_FOUNDRY_RESOURCE_GROUP"]["value"] = "wrong-group"
+                self.fails_discovery(environment)
+
     def test_custom_instance_discovery_is_read_only_and_validates_actual_name(self):
         self.azure.live["name"] = self.azure.version["name"] = "sample-hosted-agent"
         instance = access.discover_instance(

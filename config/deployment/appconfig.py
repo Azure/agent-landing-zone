@@ -21,6 +21,8 @@ from config.deployment.composition import (
     validate_ingestion_selection,
 )
 from util.azure_cli import resolve_az_command
+from config.deployment.context import context_settings
+from config.deployment.resource_groups import resource_group_for
 
 
 def _resolve_az_command() -> str:
@@ -48,6 +50,7 @@ def _container_app(
     name: str,
     *,
     required: bool,
+    subscription: str = "",
 ) -> dict[str, str]:
     query = (
         "{fqdn:properties.configuration.ingress.fqdn,"
@@ -62,6 +65,7 @@ def _container_app(
             resource_group,
             "--name",
             name,
+            *(["--subscription", subscription] if subscription else []),
             "--query",
             query,
             "--output",
@@ -135,7 +139,9 @@ def build_settings(
     deploy_ingestion = resolve_ingestion_selection(environment)
     validate_ingestion_selection(environment, deploy_ingestion)
     hosted = mode is not DeploymentMode.CLASSIC
-    resource_group = _required(environment, "AZURE_RESOURCE_GROUP")
+    resource_group = resource_group_for(environment, "application")
+    subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip()
+    deployment_context = context_settings(environment)
     resource_token = _required(environment, "RESOURCE_TOKEN")
     prepare_hosted = requires_hosted_foundation(
         environment, hosted_orchestration=hosted
@@ -165,15 +171,15 @@ def build_settings(
     runtime_hosted = runtime_mode is not DeploymentMode.CLASSIC
 
     frontend = _container_app(
-        resource_group, app_names["frontend"], required=True
+        resource_group, app_names["frontend"], required=True, subscription=subscription
     )
     dataingest = (
-        _container_app(resource_group, app_names["dataingest"], required=True)
+        _container_app(resource_group, app_names["dataingest"], required=True, subscription=subscription)
         if deploy_ingestion else {"fqdn": "", "principalId": ""}
     )
     orchestrator = (
         _container_app(
-            resource_group, app_names["orchestrator"], required=True
+            resource_group, app_names["orchestrator"], required=True, subscription=subscription
         )
         if runtime_mode is DeploymentMode.CLASSIC
         else {"fqdn": "", "principalId": ""}
@@ -209,6 +215,7 @@ def build_settings(
         )
 
     return {
+        **deployment_context,
         DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),
         **(
             {"SEARCH_RAG_INDEX_NAME": environment["SEARCH_RAG_INDEX_NAME"].strip()}

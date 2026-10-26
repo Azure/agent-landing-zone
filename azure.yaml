@@ -8,6 +8,15 @@ infra:
   path: infra
   module: main  
 hooks:
+  predown:
+    posix:
+      shell: sh
+      run: scripts/preDown.sh
+      interactive: false
+    windows:
+      shell: pwsh
+      run: scripts/preDown.ps1
+      interactive: false
   preup:
     posix:
       shell: sh

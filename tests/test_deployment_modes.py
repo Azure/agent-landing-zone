@@ -915,7 +915,7 @@ class EnvironmentTopologyResolutionTests(unittest.TestCase):
 
 class AppConfigurationContractTests(unittest.TestCase):
     @staticmethod
-    def _app(_resource_group: str, name: str, *, required: bool) -> dict[str, str]:
+    def _app(_resource_group: str, name: str, *, required: bool, subscription: str = "") -> dict[str, str]:
         del required
         return {"fqdn": f"{name}.example.test", "principalId": f"id-{name}"}
 

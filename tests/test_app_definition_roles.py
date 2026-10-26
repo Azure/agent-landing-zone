@@ -24,17 +24,20 @@ from config.appdefinition.roles import (
 ROOT = Path(__file__).resolve().parents[1]
 RG = "rg-test"
 SUB = "/subscriptions/0000/resourceGroups/rg-test/providers"
+CONTEXT = {"AZURE_RESOURCE_GROUP": RG, "AZURE_SUBSCRIPTION_ID": "0000", "SUBSCRIPTION_ID": "0000"}
+ACR = f"{SUB}/Microsoft.ContainerRegistry/registries/crx"
+COSMOS = f"{SUB}/Microsoft.DocumentDB/databaseAccounts/cosmos-x"
 RESOURCES = {
-    "Microsoft.AppConfiguration/configurationStores": [{"name": "appcs-x", "id": f"{SUB}/appcs"}],
-    "Microsoft.ContainerRegistry/registries": [{"name": "crx", "id": f"{SUB}/cr"}],
-    "Microsoft.KeyVault/vaults": [{"name": "kv-x", "id": f"{SUB}/kv"}],
-    "Microsoft.CognitiveServices/accounts": [{"name": "aif-x", "id": f"{SUB}/aif"}],
-    "Microsoft.Search/searchServices": [{"name": "srch-x", "id": f"{SUB}/srch"}],
+    "Microsoft.AppConfiguration/configurationStores": [{"name": "appcs-x", "id": f"{SUB}/Microsoft.AppConfiguration/configurationStores/appcs-x"}],
+    "Microsoft.ContainerRegistry/registries": [{"name": "crx", "id": ACR}],
+    "Microsoft.KeyVault/vaults": [{"name": "kv-x", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-x"}],
+    "Microsoft.CognitiveServices/accounts": [{"name": "aif-x", "id": f"{SUB}/Microsoft.CognitiveServices/accounts/aif-x"}],
+    "Microsoft.Search/searchServices": [{"name": "srch-x", "id": f"{SUB}/Microsoft.Search/searchServices/srch-x"}],
     "Microsoft.Storage/storageAccounts": [
-        {"name": "stx", "id": f"{SUB}/st"},
-        {"name": "staifx", "id": f"{SUB}/staif"},
+        {"name": "stx", "id": f"{SUB}/Microsoft.Storage/storageAccounts/stx"},
+        {"name": "staifx", "id": f"{SUB}/Microsoft.Storage/storageAccounts/staifx"},
     ],
-    "Microsoft.DocumentDB/databaseAccounts": [{"name": "cosmos-x", "id": f"{SUB}/cosmos"}],
+    "Microsoft.DocumentDB/databaseAccounts": [{"name": "cosmos-x", "id": COSMOS}],
 }
 SERVICES = {"frontend": "p-ui", "orchestrator": "p-orch", "dataingest": "p-ing"}
 
@@ -72,8 +75,8 @@ class FakeAz:
         if arguments[:4] == ["cosmosdb", "sql", "role", "assignment"] and arguments[4] == "create":
             self.cosmos.append({
                 "principalId": arguments[arguments.index("--principal-id") + 1],
-                "roleDefinitionId": f"{SUB}/cosmos/sqlRoleDefinitions/{arguments[arguments.index('--role-definition-id') + 1]}",
-                "scope": f"{SUB}/cosmos",
+                "roleDefinitionId": f"{COSMOS}/sqlRoleDefinitions/{arguments[arguments.index('--role-definition-id') + 1]}",
+                "scope": COSMOS,
             })
             return ""
         raise AssertionError(f"Unexpected az call: {arguments}")
@@ -88,16 +91,16 @@ def bundled():
 
 class RoleAssignmentTests(unittest.TestCase):
     def test_key_vault_scope_uses_foundation_name_without_guessing(self):
-        vaults = [{"name": "kv-app", "id": f"{SUB}/app"}, {"name": "kv-foundry", "id": f"{SUB}/foundry"}]
+        vaults = [{"name": "kv-app", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-app"}, {"name": "kv-foundry", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-foundry"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             self.assertEqual(
-                f"{SUB}/app",
-                resolve_scope("keyVault", {"KEY_VAULT_NAME": "kv-app"}, RG, FakeAz()),
+                f"{SUB}/Microsoft.KeyVault/vaults/kv-app",
+                resolve_scope("keyVault", {**CONTEXT, "KEY_VAULT_NAME": "kv-app"}, RG, FakeAz()),
             )
             self.assertEqual(
-                f"{SUB}/foundry",
+                f"{SUB}/Microsoft.KeyVault/vaults/kv-foundry",
                 resolve_scope("keyVault", {
-                    "AZURE_KEY_VAULT_NAME": "kv-foundry", "KEY_VAULT_NAME": "kv-app",
+                    **CONTEXT, "AZURE_KEY_VAULT_NAME": "kv-foundry", "KEY_VAULT_NAME": "kv-app",
                 }, RG, FakeAz()),
             )
             for environment in ({}, {"KEY_VAULT_NAME": "missing"}):
@@ -108,7 +111,7 @@ class RoleAssignmentTests(unittest.TestCase):
         az = FakeAz()
         principal = "22222222-2222-4222-8222-222222222222"
         component = {"name": "agent", "profiles": ["retrieval-reader", "conversation-store"]}
-        env = {"AZURE_RESOURCE_GROUP": RG}
+        env = CONTEXT
         created = assign_hosted_roles(component, principal, env, run_az=az)
         self.assertEqual(
             {item.role for item in expand_profiles(component["profiles"])},
@@ -127,11 +130,11 @@ class RoleAssignmentTests(unittest.TestCase):
         with self.assertRaises(RoleAssignmentError):
             assign_hosted_roles({"name": "agent"}, "00000000-0000-0000-0000-000000000000",
                                 {"AZURE_RESOURCE_GROUP": RG}, run_az=az)
-        vaults = [{"name": "kv-a", "id": f"{SUB}/kva"}, {"name": "kv-b", "id": f"{SUB}/kvb"}]
+        vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "exactly one"):
                 assign_hosted_roles({"name": "agent"}, "22222222-2222-4222-8222-222222222222",
-                                    {"AZURE_RESOURCE_GROUP": RG}, run_az=az)
+                                    CONTEXT, run_az=az)
         self.assertEqual([], az.creates())
 
     def test_discovers_client_ids_without_role_writes(self) -> None:
@@ -213,7 +216,7 @@ class RoleAssignmentTests(unittest.TestCase):
 
     def test_assigns_missing_roles_then_converges(self) -> None:
         az = FakeAz()
-        environment = {"AZURE_RESOURCE_GROUP": RG}
+        environment = CONTEXT
         created = assign_roles(bundled(), environment, hosted_orchestration=False, run_az=az)
         planned = plan_assignments(bundled(), hosted_orchestration=False)
         self.assertEqual(len(planned), len(created))
@@ -221,12 +224,12 @@ class RoleAssignmentTests(unittest.TestCase):
         rbac = [c for c in az.creates() if c[:2] == ["role", "assignment"]]
         self.assertIn(
             ["role", "assignment", "create", "--assignee-object-id", "p-ui", "--assignee-principal-type",
-             "ServicePrincipal", "--role", guids["AcrPull"], "--scope", f"{SUB}/cr", "--output", "none",
+             "ServicePrincipal", "--role", guids["AcrPull"], "--scope", ACR, "--output", "none",
              "--only-show-errors"],
             rbac,
         )
         # Foundry account storage is never chosen for the storage scope.
-        self.assertFalse(any(f"{SUB}/staif" in call for call in az.calls))
+        self.assertFalse(any(f"{SUB}/Microsoft.Storage/storageAccounts/staifx" in call for call in az.calls))
         cosmos = [c for c in az.creates() if c[0] == "cosmosdb"]
         self.assertEqual({"p-orch", "p-ing"}, {c[c.index("--principal-id") + 1] for c in cosmos})
 
@@ -243,23 +246,23 @@ class RoleAssignmentTests(unittest.TestCase):
 
     def test_ambiguous_scope_requires_explicit_name(self) -> None:
         az = FakeAz()
-        vaults = [{"name": "kv-a", "id": f"{SUB}/kva"}, {"name": "kv-b", "id": f"{SUB}/kvb"}]
+        vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "AZURE_KEY_VAULT_NAME"):
-                assign_roles(bundled(), {"AZURE_RESOURCE_GROUP": RG}, hosted_orchestration=False, run_az=az)
+                assign_roles(bundled(), CONTEXT, hosted_orchestration=False, run_az=az)
             self.assertEqual([], az.creates(), "no partial assignment before the failure")
             created = assign_roles(
                 bundled(),
-                {"AZURE_RESOURCE_GROUP": RG, "KEY_VAULT_URI": "https://kv-b.vault.azure.net/"},
+                {**CONTEXT, "KEY_VAULT_URI": "https://kv-b.vault.azure.net/"},
                 hosted_orchestration=False,
                 run_az=az,
             )
         self.assertTrue(created)
-        self.assertTrue(any(f"{SUB}/kvb" in call for call in az.creates()))
-        self.assertFalse(any(f"{SUB}/kva" in call for call in az.creates()))
+        self.assertTrue(any(f"{SUB}/Microsoft.KeyVault/vaults/kv-b" in call for call in az.creates()))
+        self.assertFalse(any(f"{SUB}/Microsoft.KeyVault/vaults/kv-a" in call for call in az.creates()))
 
     def test_cli_assign_roles_exit_codes(self) -> None:
-        environment = {"AZURE_RESOURCE_GROUP": RG, "DEPLOYMENT_TOPOLOGY": "classic", "AGENTLZ_APP_DEFINITION": ""}
+        environment = {**CONTEXT, "DEPLOYMENT_TOPOLOGY": "classic", "AGENTLZ_APP_DEFINITION": ""}
         with patch.dict("os.environ", environment), patch("config.deployment.appconfig._run_az", FakeAz()):
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(0, cli_main(["--assign-roles"]))

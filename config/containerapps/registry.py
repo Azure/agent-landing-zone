@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Mapping
+from config.deployment.resource_groups import resource_group_for
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,9 +24,9 @@ def configure_service_registry(
     if not image or not server or image.split("/", 1)[0].lower() != server.lower():
         return
     subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or "").strip()
-    group = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
-    if not subscription or not group:
+    if not subscription or not (environment.get("AZURE_RESOURCE_GROUP") or "").strip():
         raise ValueError("Custom registry configuration requires AZURE_SUBSCRIPTION_ID and AZURE_RESOURCE_GROUP.")
+    group = resource_group_for(environment, "application")
 
     # Keep SDK dependencies lazy for ordinary azd builds and external images.
     from azure.core.exceptions import AzureError

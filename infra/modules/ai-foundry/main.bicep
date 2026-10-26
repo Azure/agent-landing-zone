@@ -14,6 +14,10 @@ targetScope = 'resourceGroup'
 @maxLength(10)
 param baseName string
 
+@description('Root naming seed retained when the module moves to another resource group.')
+@maxLength(5)
+param baseUniqueName string = substring(uniqueString(subscription().id, resourceGroup().name, baseName), 0, 5)
+
 @description('Optional. Include associated resources like Storage, Key Vault, Cosmos DB, and AI Search.')
 param includeAssociatedResources bool = true
 
@@ -25,6 +29,12 @@ param tags object = {}
 
 @description('Optional. Resource ID of the subnet for private endpoints.')
 param privateEndpointSubnetResourceId string = ''
+
+@description('Actual RG ARM ID for all customer-owned private endpoints, independent of service ownership.')
+param privateEndpointResourceGroupResourceId string = resourceGroup().id
+
+@description('Region for private endpoints; may differ from the service region.')
+param privateEndpointLocation string = location
 
 @description('Required. AI Foundry account configuration.')
 param aiFoundryConfiguration object
@@ -53,19 +63,21 @@ param enableTelemetry bool = true
 
 // Issue #26: this wrapper now points to a customized derivation of
 // avm/ptn/ai-ml/ai-foundry@0.6.0 maintained inside this repo
-// (`./foundry/`). The customization is limited to the `account` submodule,
-// which splits account creation from private-endpoint creation and adds an
-// explicit wait on `provisioningState == Succeeded`. All other behavior is
-// identical to the upstream AVM PTN at SHA 55178238674d0fc99dda39ac40d24bfebc4f5e0e.
+// (`./foundry/`). The account/project readiness guard, destination propagation
+// and PE serialization are repository-owned customizations of the upstream
+// AVM PTN at SHA 55178238674d0fc99dda39ac40d24bfebc4f5e0e.
 // See `modules/ai-foundry/foundry/modules/account.bicep` for details.
 module aiFoundryAvm './foundry/main.bicep' = {
   name: 'aiFoundryAvm-${baseName}'
   params: {
     baseName: baseName
+    baseUniqueName: baseUniqueName
     includeAssociatedResources: includeAssociatedResources
     location: location
     tags: tags
     privateEndpointSubnetResourceId: privateEndpointSubnetResourceId
+    privateEndpointResourceGroupResourceId: privateEndpointResourceGroupResourceId
+    privateEndpointLocation: privateEndpointLocation
     aiFoundryConfiguration: aiFoundryConfiguration
     aiModelDeployments: aiModelDeployments
     aiSearchConfiguration: aiSearchConfiguration
@@ -117,3 +129,9 @@ output resourceGroupName string = aiFoundryAvm.outputs.resourceGroupName
 
 @description('The principal ID of the AI Foundry project managed identity.')
 output aiProjectPrincipalId string = getProjectPrincipalId.outputs.principalId
+
+@description('Actual ARM ID of the Foundry account.')
+output accountResourceId string = aiFoundryAvm.outputs.accountResourceId
+
+@description('Actual ARM ID of the Foundry project.')
+output projectResourceId string = aiFoundryAvm.outputs.projectResourceId

@@ -78,6 +78,22 @@ if ($appDefinitionExitCode -ne 0) {
     exit $appDefinitionExitCode
 }
 
+# Validate and bind destinations before bootstrap; azd still owns root creation.
+Write-Host "Preparing workload resource-group destinations..." -ForegroundColor Cyan
+$resourceGroupArguments = @('--azure-dir', (Join-Path $projectRoot '.azure'))
+if ($env:AZURE_ENV_NAME) { $resourceGroupArguments += @('--env-name', $env:AZURE_ENV_NAME) }
+Push-Location $projectRoot
+try {
+    Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments $resourceGroupArguments | Out-Null
+    $resourceGroupExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($resourceGroupExitCode -ne 0) {
+    Write-Host "Error: Resource-group destination preparation failed. Review the reported configuration or access error; no automatic cleanup is performed." -ForegroundColor Red
+    exit $resourceGroupExitCode
+}
+
 #-------------------------------------------------------------------------------
 # Infrastructure is repository-owned source under infra/ (no submodule).
 #-------------------------------------------------------------------------------

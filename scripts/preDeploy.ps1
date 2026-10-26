@@ -110,15 +110,21 @@ $dotAzure   = Join-Path $repoRoot '.azure'
 $globalEnv  = Get-AzdEnv -projectPath $repoRoot
 $globalRG   = $globalEnv.AZURE_RESOURCE_GROUP
 $globalSub  = $globalEnv.AZURE_SUBSCRIPTION_ID
+foreach ($prop in $globalEnv.PSObject.Properties) {
+  Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
+}
 
 # Foundation guard (first step, before any Azure change): azd deploy only
 # deploys applications onto a foundation created by azd provision.
 $foundationMissing = (-not $globalRG) -or (-not $globalEnv.APP_CONFIG_ENDPOINT)
-if (-not $foundationMissing -and -not (ResourceGroup-Exists -rg $globalRG -subscription $globalSub)) { $foundationMissing = $true }
 if ($foundationMissing) {
   Write-Error "The foundation is not provisioned. Run azd provision first."
   exit 3
 }
+Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments @('--azure-dir', $dotAzure, '--check') | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Resource-group binding check failed. No changes were made."; exit 3 }
+Invoke-PythonModule -ModuleName 'config.deployment.outputs' -Arguments @('--check-foundation')
+if ($LASTEXITCODE -ne 0) { Write-Error "Foundation destination/project verification failed. Run azd provision first."; exit 3 }
 
 # Re-validate the application definition and compare it with the binding.
 $appDefinitionPath = if ($globalEnv.AGENTLZ_APP_DEFINITION) { "$($globalEnv.AGENTLZ_APP_DEFINITION)" } elseif ($env:AGENTLZ_APP_DEFINITION) { $env:AGENTLZ_APP_DEFINITION } else { Join-Path $repoRoot 'app-definition.json' }

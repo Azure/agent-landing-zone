@@ -124,6 +124,9 @@ try {
         throw "Bicep compilation failed with exit code $LASTEXITCODE."
     }
     $template = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -Depth 100
+    . (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
+    $legacyGraph = ConvertTo-HistoricalFoundationGraph (ConvertTo-LegacyResourceGroupGraph $template) $MainFile |
+        ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
 
     Write-Host "Hosted-agent resource contract (baseline $($fixture.mergeBase))" -ForegroundColor Cyan
 
@@ -161,7 +164,7 @@ try {
         $allowedPostBaselineMutations |
             Select-Object -Unique
     )
-    $actualNames = @($template.resources.PSObject.Properties.Name)
+    $actualNames = @($legacyGraph.resources.PSObject.Properties.Name)
     $missingNames = @($expectedNames | Where-Object { $_ -notin $actualNames })
     $addedNames = @($actualNames | Where-Object { $_ -notin $expectedNames })
     if ($missingNames.Count -gt 0 -or $addedNames.Count -gt 0) {
@@ -183,7 +186,7 @@ try {
         if ($entry.Name -in $allowedPostBaselineMutations) { continue }
         $useNormalizedHash = $normalizedResourceHashes.ContainsKey($entry.Name)
         $expectedHash = $useNormalizedHash ? $normalizedResourceHashes[$entry.Name] : $entry.Value
-        $actualHash = Get-ObjectHash -Value $template.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
+        $actualHash = Get-ObjectHash -Value $legacyGraph.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
         if ($actualHash -ne $expectedHash) {
             Add-Failure "Pre-existing resource '$($entry.Name)' changed (expected $expectedHash, got $actualHash)."
         }

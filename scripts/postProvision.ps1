@@ -35,6 +35,8 @@ function Test-Truthy {
 }
 
 $env:AGENTLZ_REPO_ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+& python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.resource_groups', '--azure-dir', os.path.join(os.environ['AGENTLZ_REPO_ROOT'], '.azure'), '--bind-only']; runpy.run_module('config.deployment.resource_groups', run_name='__main__')" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Resource-group destination binding failed; configuration has not started."; exit $LASTEXITCODE }
 & python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.private_network', '--stage', 'post-provision']; runpy.run_module('config.deployment.private_network', run_name='__main__')"
 $networkExitCode = $LASTEXITCODE
 if ($networkExitCode -eq 20) {
@@ -109,6 +111,9 @@ function Invoke-AzTsv {
         [Parameter(Mandatory = $true)][string]$Description,
         [switch]$Required
     )
+    if ($env:AZURE_SUBSCRIPTION_ID -and '--subscription' -notin $Arguments -and '--ids' -notin $Arguments) {
+        $Arguments += @('--subscription', $env:AZURE_SUBSCRIPTION_ID)
+    }
     $output = Invoke-NativeCommand { & az @Arguments -o tsv 2>$null }
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) {
         if ($Required) {
@@ -230,6 +235,8 @@ function Set-AgentLzAppConfiguration {
     Invoke-NativeCommand { az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null }
 
     $resourceGroup = Get-RequiredEnvValue 'AZURE_RESOURCE_GROUP'
+    $foundryResourceGroup = Get-OptionalEnvValue 'AZURE_FOUNDRY_RESOURCE_GROUP' $resourceGroup
+    $networkResourceGroup = Get-OptionalEnvValue 'AZURE_NETWORK_RESOURCE_GROUP' $resourceGroup
     $subscriptionId = Get-OptionalEnvValue 'AZURE_SUBSCRIPTION_ID'
     if (-not $subscriptionId) {
         $subscriptionId = Invoke-AzTsv -Arguments @('account', 'show', '--query', 'id') -Description 'current subscription id' -Required
@@ -279,21 +286,42 @@ function Set-AgentLzAppConfiguration {
 
     # --- CAF-aware resource discovery (v3.1.0) ---
     # AI Landing Zone v2.2.0 defaults to caf naming; resource names no longer follow the
-    # legacy "<prefix>-$nameSuffix" pattern. Discover actual names by listing resources
-    # in the RG; fall back to the legacy derivation only when discovery finds nothing.
+    # legacy "<prefix>-$nameSuffix" pattern. Discover exact identities in their
+    # configured destinations; missing or ambiguous resources are not guessed.
     function _resolveResource {
         param(
             [string]$Type,
             [string]$Fallback,
             [scriptblock]$Filter = $null,
-            [string]$PreferredName = ''
+            [string]$PreferredName = '',
+            [string]$Group = $resourceGroup,
+            [string]$ResourceId = '',
+            [switch]$Optional
         )
-        try {
-            $json = az resource list -g $resourceGroup --resource-type $Type -o json 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $json) { return $Fallback }
-            $items = $json | ConvertFrom-Json
-            if ($null -eq $items) { return $Fallback }
-            if ($Filter) { $items = @($items | Where-Object $Filter) }
+            if ($ResourceId) {
+                $resourcePattern = '^/subscriptions/[^/\s]+/resourceGroups/[^/\s]+/providers/' + [regex]::Escape($Type) + '/([^/\s]+)$'
+                if ($ResourceId -notmatch $resourcePattern) { throw "Declared '$Type' ARM ID is malformed." }
+                $declaredName = $matches[1]
+                if ($PreferredName -and $declaredName -ne $PreferredName) { throw "Declared '$Type' ARM ID and name conflict." }
+                $metadata = az resource show --ids $ResourceId -o json 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $metadata) { throw "Failed to read declared '$Type' ARM ID." }
+                $resolved = $metadata | ConvertFrom-Json
+                if (-not $resolved.id -or -not $resolved.id.Equals($ResourceId, [StringComparison]::OrdinalIgnoreCase) -or $resolved.type -ne $Type) {
+                    throw "Declared '$Type' ARM metadata identity/type mismatch."
+                }
+                return $declaredName
+            }
+            $json = az resource list --subscription $subscriptionId -g $Group --resource-type $Type -o json 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $json) { throw "Failed to discover '$Type' in its configured destination." }
+            $items = $json | ConvertFrom-Json -NoEnumerate
+            if ($null -eq $items -or $items -isnot [array]) { throw "Invalid resource discovery response for '$Type'." }
+            foreach ($item in $items) {
+                $expectedId = "/subscriptions/$subscriptionId/resourceGroups/$Group/providers/$Type/$($item.name)"
+                if (-not $item.id -or -not $item.id.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Resource discovery returned a foreign or malformed '$Type' identity."
+                }
+            }
+            if ($Filter -and -not $PreferredName) { $items = @($items | Where-Object $Filter) }
             if (-not [string]::IsNullOrWhiteSpace($PreferredName)) {
                 $preferredMatches = @(
                     $items | Where-Object {
@@ -306,38 +334,22 @@ function Set-AgentLzAppConfiguration {
                 if ($preferredMatches.Count -eq 1) {
                     return $preferredMatches[0].name
                 }
-                throw "Configured resource '$PreferredName' did not uniquely match type '$Type' in resource group '$resourceGroup'."
+                throw "Configured resource '$PreferredName' did not uniquely match type '$Type' in its destination."
             }
             if ($items.Count -eq 1) { return $items[0].name }
-            if ($items.Count -eq 0) { return $Fallback }
-            $locationMatches = @(
-                $items | Where-Object {
-                    $_.location -and $_.location.Equals(
-                        $location,
-                        [StringComparison]::OrdinalIgnoreCase
-                    )
-                }
-            )
-            if ($locationMatches.Count -eq 1) {
-                return $locationMatches[0].name
-            }
-            Write-Warning "Multiple '$Type' resources matched; falling back to legacy name '$Fallback'."
-            return $Fallback
-        } catch {
-            if (-not [string]::IsNullOrWhiteSpace($PreferredName)) {
-                throw
-            }
-            return $Fallback
-        }
+            if ($items.Count -eq 0 -and $Optional) { return '' }
+            throw "Expected exactly one '$Type' resource in its destination; set the corresponding resource name explicitly."
     }
 
     # Storage: main workload vs AI Foundry storage (prefix "staif")
     $storageName = _resolveResource `
+        -Group $foundryResourceGroup `
         -Type 'Microsoft.Storage/storageAccounts' `
         -Fallback "st$nameSuffix" `
         -Filter { -not $_.name.StartsWith('staif') } `
         -PreferredName (Get-OptionalEnvValue 'AZURE_STORAGE_ACCOUNT_NAME')
     $foundryStorageName = _resolveResource `
+        -Group $foundryResourceGroup -Optional `
         -Type 'Microsoft.Storage/storageAccounts' `
         -Fallback "staif$nameSuffix" `
         -Filter { $_.name.StartsWith('staif') } `
@@ -360,6 +372,7 @@ function Set-AgentLzAppConfiguration {
 
     # Search: main vs AI Foundry-project search (prefix "srch-aif")
     $searchName = _resolveResource `
+        -Group $foundryResourceGroup `
         -Type 'Microsoft.Search/searchServices' `
         -Fallback "srch-$nameSuffix" `
         -Filter { -not $_.name.StartsWith('srch-aif') } `
@@ -375,6 +388,7 @@ function Set-AgentLzAppConfiguration {
         $preferredFoundryName = $matches[1]
     }
     $foundryName = _resolveResource `
+        -Group $foundryResourceGroup `
         -Type 'Microsoft.CognitiveServices/accounts' `
         -Fallback "aif-$nameSuffix" `
         -PreferredName $preferredFoundryName
@@ -382,11 +396,11 @@ function Set-AgentLzAppConfiguration {
     # Resolve the project through generic ARM discovery because the specialized
     # project-list command is absent from some supported Azure CLI versions.
     $requestedFoundryProjectName = Get-OptionalEnvValue 'AI_FOUNDRY_PROJECT_NAME'
-    $foundryAccountResourceId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$foundryName"
+    $foundryAccountResourceId = "/subscriptions/$subscriptionId/resourceGroups/$foundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$foundryName"
     $projectJson = Invoke-NativeCommand {
         & az resource list `
             --subscription $subscriptionId `
-            --resource-group $resourceGroup `
+            --resource-group $foundryResourceGroup `
             --resource-type 'Microsoft.CognitiveServices/accounts/projects' `
             -o json 2>$null
     }
@@ -423,9 +437,19 @@ function Set-AgentLzAppConfiguration {
         exit 1
     }
     $foundryProjectName = Split-Path $foundryProjects[0].id -Leaf
+    if ($foundryProjectResourceId -and -not $foundryProjectResourceId.Equals($foundryProjects[0].id, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Configured Foundry project ID conflicts with its discovered destination/account.'
+    }
 
     # Container Registry / Container Apps Env / Log Analytics / App Insights
+    $registryResourceGroup = Invoke-NativeCommand {
+        & python -c "import os; from config.deployment.context import registry_resource_group; print(registry_resource_group(os.environ))"
+    }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($registryResourceGroup)) {
+        throw 'Declared registry context is invalid; no App Configuration values were imported.'
+    }
     $acrName = _resolveResource `
+        -Group "$registryResourceGroup".Trim() `
         -Type 'Microsoft.ContainerRegistry/registries' `
         -Fallback "cr$nameSuffix" `
         -PreferredName (
@@ -435,9 +459,11 @@ function Set-AgentLzAppConfiguration {
         -Type 'Microsoft.App/managedEnvironments' `
         -Fallback "cae-$nameSuffix"
     $logAnalyticsName = _resolveResource `
+        -ResourceId (Get-OptionalEnvValue 'LOG_ANALYTICS_RESOURCE_ID') `
         -Type 'Microsoft.OperationalInsights/workspaces' `
         -Fallback "log-$nameSuffix"
     $appInsightsName = _resolveResource `
+        -ResourceId (Get-OptionalEnvValue 'APP_INSIGHTS_RESOURCE_ID') `
         -Type 'Microsoft.Insights/components' `
         -Fallback "appi-$nameSuffix"
 
@@ -448,15 +474,15 @@ function Set-AgentLzAppConfiguration {
     $dataIngestAppName = if ($deployIngestion) { "ca-$nameSuffix-dataingest" } else { '' }
 
     # Cosmos database name - introspect the account to get the actual DB name
-    $databaseName = if ($cosmosEnabled) { "cosmos-db$nameSuffix" } else { '' }
+    $databaseName = if ($cosmosEnabled) { Get-OptionalEnvValue 'DATABASE_NAME' } else { '' }
     if ($cosmosEnabled) {
-        try {
-            $dbJson = az cosmosdb sql database list -g $resourceGroup -a $cosmosName -o json 2>$null
-            if ($LASTEXITCODE -eq 0 -and $dbJson) {
-                $dbs = $dbJson | ConvertFrom-Json
-                if ($dbs.Count -eq 1) { $databaseName = $dbs[0].name }
-            }
-        } catch { }
+        $dbJson = az cosmosdb sql database list --subscription $subscriptionId -g $resourceGroup -a $cosmosName -o json 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $dbJson) { throw 'Failed to discover application Cosmos databases.' }
+        $dbs = $dbJson | ConvertFrom-Json -NoEnumerate
+        if ($dbs -isnot [array]) { throw 'Invalid Cosmos database discovery response.' }
+        if ($databaseName) { $dbs = @($dbs | Where-Object { $_.name -eq $databaseName }) }
+        if ($dbs.Count -ne 1) { throw 'Expected one application Cosmos database; set DATABASE_NAME to choose one.' }
+        $databaseName = $dbs[0].name
     }
 
     Write-Host "🔎 Resolved resource names:"
@@ -470,15 +496,16 @@ function Set-AgentLzAppConfiguration {
     Write-Host "   Container apps:   $frontendAppName, $orchestratorAppName, $dataIngestAppName"
 
     $resourceGroupId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup"
+    $foundryResourceGroupId = "/subscriptions/$subscriptionId/resourceGroups/$foundryResourceGroup"
     $keyVaultResourceId = "$resourceGroupId/providers/Microsoft.KeyVault/vaults/$keyVaultName"
-    $storageResourceId = "$resourceGroupId/providers/Microsoft.Storage/storageAccounts/$storageName"
+    $storageResourceId = "$foundryResourceGroupId/providers/Microsoft.Storage/storageAccounts/$storageName"
     $cosmosResourceId = if ($cosmosEnabled) { "$resourceGroupId/providers/Microsoft.DocumentDB/databaseAccounts/$cosmosName" } else { '' }
-    $searchResourceId = "$resourceGroupId/providers/Microsoft.Search/searchServices/$searchName"
-    $foundryResourceId = "$resourceGroupId/providers/Microsoft.CognitiveServices/accounts/$foundryName"
+    $searchResourceId = "$foundryResourceGroupId/providers/Microsoft.Search/searchServices/$searchName"
+    $foundryResourceId = "$foundryResourceGroupId/providers/Microsoft.CognitiveServices/accounts/$foundryName"
     $foundryProjectResourceId = "$foundryResourceId/projects/$foundryProjectName"
     $containerEnvResourceId = "$resourceGroupId/providers/Microsoft.App/managedEnvironments/$containerEnvName"
-    $appInsightsResourceId = "$resourceGroupId/providers/Microsoft.Insights/components/$appInsightsName"
-    $logAnalyticsResourceId = "$resourceGroupId/providers/Microsoft.OperationalInsights/workspaces/$logAnalyticsName"
+    $appInsightsResourceId = Get-OptionalEnvValue 'APP_INSIGHTS_RESOURCE_ID' "$resourceGroupId/providers/Microsoft.Insights/components/$appInsightsName"
+    $logAnalyticsResourceId = Get-OptionalEnvValue 'LOG_ANALYTICS_RESOURCE_ID' "$resourceGroupId/providers/Microsoft.OperationalInsights/workspaces/$logAnalyticsName"
 
     $frontendFqdn = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $frontendAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$frontendAppName FQDN" -Required
     $orchestratorFqdn = if ($hostedMode) { '' } else { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $orchestratorAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$orchestratorAppName FQDN" -Required }
@@ -522,7 +549,7 @@ function Set-AgentLzAppConfiguration {
         ''
     }
     $knowledgeBaseConnectionId = if ($retrievalBackend -eq 'foundry_iq') {
-        Get-OptionalEnvValue 'KNOWLEDGE_BASE_CONNECTION_ID' "$resourceGroupId/providers/Microsoft.CognitiveServices/accounts/$foundryName/projects/$foundryProjectName/connections/$knowledgeBaseConnectionName"
+        Get-OptionalEnvValue 'KNOWLEDGE_BASE_CONNECTION_ID' "$foundryProjectResourceId/connections/$knowledgeBaseConnectionName"
     }
     else {
         ''
@@ -564,6 +591,8 @@ function Set-AgentLzAppConfiguration {
         AZURE_TENANT_ID = $tenantId
         SUBSCRIPTION_ID = $subscriptionId
         AZURE_RESOURCE_GROUP = $resourceGroup
+        AZURE_FOUNDRY_RESOURCE_GROUP = $foundryResourceGroup
+        AZURE_NETWORK_RESOURCE_GROUP = $networkResourceGroup
         LOCATION = $location
         ENVIRONMENT_NAME = $environmentName
         DEPLOYMENT_NAME = $deploymentName
@@ -737,7 +766,7 @@ function Set-AgentLzAppConfiguration {
         Set-Item -Path "Env:$key" -Value $flatSettings[$key]
     }
 
-    $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "agentlz-appconfig-$([Guid]::NewGuid().ToString('N')).json"
+    $tempFile = Join-Path $repoRoot ".azure\agentlz-appconfig-$([Guid]::NewGuid().ToString('N')).json"
     try {
         $flatSettings | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $tempFile -Encoding UTF8
         $importOutput = Invoke-NativeCommand {
