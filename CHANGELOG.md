@@ -37,6 +37,9 @@
 - Apply jumpbox Reader grants at the resolved resource-group deployment scope
   rather than treating a resource-group ID as a service resource. Preserve
   assignment GUIDs, per-resource grants and the single-group behavior.
+- Load application schema/YAML validation dependencies only when validation
+  runs, so destination binding can bootstrap on a fresh jumpbox before
+  post-provision installs the declared Python requirements.
 
 ### Validation
 
@@ -59,12 +62,14 @@
 - The separate copied historical parity/provenance suite retains five
   pre-existing failures documented in `infra/tests/README.md`; no source
   histories, approval digests or gates were changed to hide them.
-- Authorized private Azure validation has provisioned resources across three
-  destinations, created the unchanged default model deployments and verified
-  five private DNS/TLS endpoints with anonymous access denied. A targeted
+- Authorized private Azure validation completed native three-destination
+  provisioning, verified five private DNS/TLS endpoints with anonymous
+  access denied, and exercised the unchanged default chat and 3072-dimensional
+  embedding models with managed identity. Actual subscription deployment
+  writes and unauthorized private vault data access were denied. A targeted
   recovery resolved an Azure private-endpoint internal error.
-- **Release gate pending:** authenticated functional checks, restricted-RG
-  permissions and lifecycle/re-provision acceptance are not complete.
+- **Release gate pending:** application deployment, full restricted-RG
+  provisioning and lifecycle/re-provision acceptance are not complete.
   This candidate must not be published until ADR-0023's remaining live
   acceptance gate is resolved by authorized validation or an explicit
   human-approved exception.

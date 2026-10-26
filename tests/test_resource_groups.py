@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -17,6 +18,28 @@ from config.deployment import resource_groups as rg
 ROOT = Path(__file__).resolve().parents[1]
 SUBSCRIPTION = "11111111-1111-1111-1111-111111111111"
 OTHER_SUBSCRIPTION = "22222222-2222-2222-2222-222222222222"
+
+
+class BootstrapDependencyTests(unittest.TestCase):
+    def test_resource_group_cli_bootstraps_without_validation_packages(self) -> None:
+        script = (
+            "import runpy, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "sys.argv = ['config.deployment.resource_groups', '--help']\n"
+            "try:\n"
+            "    runpy.run_module('config.deployment.resource_groups', run_name='__main__')\n"
+            "except SystemExit as error:\n"
+            "    if error.code != 0:\n"
+            "        raise\n"
+            "assert 'yaml' not in sys.modules\n"
+            "assert 'jsonschema' not in sys.modules\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script, str(ROOT)],
+            cwd=ROOT, capture_output=True, text=True, timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--bind-only", result.stdout)
 
 
 class ScratchTest(unittest.TestCase):
