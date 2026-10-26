@@ -1,5 +1,62 @@
 # Changelog
 
+## [v4.4.0] - 2026-10-26
+
+### Added
+- Add configurable application, Foundry/grounding and local-network
+  resource-group destinations through one `azd provision`, retaining the
+  single-resource-group default and supporting one, two or three distinct
+  destinations in the workload subscription.
+- Add `AZURE_FOUNDRY_RESOURCE_GROUP` and `AZURE_NETWORK_RESOURCE_GROUP`,
+  falling back to application/root `AZURE_RESOURCE_GROUP`, and strict
+  `CREATE_RESOURCE_GROUPS` opt-in, defaulting to `false`, for missing
+  additional destinations only.
+- Add paired `AZURE_APPLICATION_PE_SUBNET_NAME` and
+  `AZURE_APPLICATION_PE_SUBNET_PREFIX` settings independently of RG count;
+  omitted values preserve the shared private-endpoint subnet.
+
+### Changed
+- Scope foundation resources, exact resource-ID RBAC and dependent bindings
+  to their owners without changing default names, feature gates, public-access
+  settings or existing BYO network/DNS precedence.
+- Align PowerShell and shell hooks, Foundry configuration, quota preflight,
+  application/storage consumers and nonsecret `agent-lz` handoff context.
+  The closed platform-outputs v1 JSON and runtime pins remain unchanged.
+- Persist destination bindings, reject implicit migration/retargeting and
+  converge partial bootstrap retries without changing reused RG metadata.
+  Split-layout `azd down` fails closed; cleanup requires an explicit
+  resource-owner inventory, not automatic rollback or shared-RG deletion.
+- Coordinate the existing central documentation pages for configuration,
+  permissions, ownership, private networking, lifecycle and recovery.
+  Configurable RGs are supported by the Agent Bicep/azd entrypoint only;
+  Terraform and Portal support are not claimed.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Full local Python/configurator regressions: 696 passed, 4 skipped and
+  744 subtests passed. Clean Linux deployment/hook CI: 636 passed, 6 skipped
+  and 727 subtests passed.
+- All 16 offline foundation entrypoints pass with Bicep 0.42.1, including
+  139 scope assertions, 14 rejected normalization mutations and the original
+  protected graph fingerprints. Both hook variants pass syntax/behavior checks.
+- Strict central documentation build and rubber-duck documentation review
+  pass. Runtime tag/commit bindings and incorporated infrastructure
+  provenance are verified without changing component or source pins.
+- The separate copied historical parity/provenance suite retains five
+  pre-existing failures documented in `infra/tests/README.md`; no source
+  histories, approval digests or gates were changed to hide them.
+- **Release gate pending:** no Azure what-if, live provisioning, restricted-RG
+  permissions, RBAC, DNS/HTTPS, re-provision or recovery validation has run.
+  This candidate must not be published until ADR-0023's live acceptance gate
+  is resolved by authorized validation or an explicit human-approved exception.
+
 ## [v4.3.5] - 2026-10-26
 
 ### Changed
