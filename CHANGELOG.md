@@ -1,5 +1,32 @@
 # Changelog
 
+## [v4.3.3] - 2026-10-26
+
+### Changed
+- Move the workload UDR icon and caption to the space above AppGateway subnet
+  in the Platform Hub and Platform Hub with AI Gateway architecture diagrams.
+- Refresh only the two corresponding 6400-pixel-wide PNGs, preserving the
+  Standalone diagram and the separate AI Gateway landing-zone UDR.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparison allows only the two workload UDR group positions;
+  verify the new position is above AppGateway subnet without overlapping resources.
+- Preserve full export bounds and bottom labels; build the central documentation
+  site in strict mode and compare published PNG hashes with the source exports.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
 ## [v4.3.2] - 2026-10-26
 
 ### Changed
