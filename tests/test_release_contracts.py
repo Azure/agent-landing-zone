@@ -41,7 +41,7 @@ class IntegrationPinTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            ("v3.1.2", "833aa54f2b12db342b84f96e8873b111ad980754"),
+            ("v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
             (
                 components["agent-app-ingestion"]["tag"],
                 components["agent-app-ingestion"]["commit"],

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **SharePoint permission-only synchronization.** Pin Agent App Ingestion
+  v3.1.3 to refresh supported user/group ACLs on every affected item document
+  and document-library chunk independently of content timestamps. Remove
+  revoked principals without reprocessing unchanged content, include
+  Graph-reported inherited file permissions and retry failed ACL updates.
+
 ## [v5.1.0] - 2026-10-27
 
 ### Added
