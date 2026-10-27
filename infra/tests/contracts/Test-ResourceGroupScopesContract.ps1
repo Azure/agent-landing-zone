@@ -90,7 +90,18 @@ try {
     Assert-Equal $roles.resourceGroup "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), resourceGroup().name, split(parameters('roleAssignments')[copyIndex()].resourceId, '/')[4])]" 'RBAC actual resource group'
     Assert-Equal $roles.properties.template.resources.assignment.name "[guid(parameters('roleAssignments')[copyIndex()].principalId, parameters('roleAssignments')[copyIndex()].roleDefinitionId, parameters('roleAssignments')[copyIndex()].resourceId)]" 'RBAC GUID compatibility'
     Assert-Contains $roles.name "uniqueString(parameters('name'))" 'RBAC nested deployment names remain collision-safe after truncation.'
-    Assert-Equal $roles.properties.template.resources.assignment.scope "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), '', parameters('roleAssignments')[copyIndex()].resourceId)]" 'RBAC uses the exact resource scope inside the target RG.'
+    Assert-Equal $roles.properties.template.resources.assignment.scope "[if(or(empty(parameters('roleAssignments')[copyIndex()].resourceId), equals(toLower(parameters('roleAssignments')[copyIndex()].resourceId), toLower(resourceGroup().id))), '', parameters('roleAssignments')[copyIndex()].resourceId)]" 'RG grants use deployment scope; service grants retain their exact resource scope.'
+    foreach ($case in @(
+        @{ Target = '/subscriptions/sub/resourceGroups/rg-app'; Resource = ''; Expected = '' }
+        @{ Target = '/subscriptions/sub/resourceGroups/rg-ai'; Resource = '/subscriptions/sub/resourceGroups/rg-ai'; Expected = '' }
+        @{ Target = '/subscriptions/sub/resourceGroups/rg-net'; Resource = '/SUBSCRIPTIONS/SUB/RESOURCEGROUPS/RG-NET'; Expected = '' }
+        @{ Target = '/subscriptions/byo/resourceGroups/rg-byo'; Resource = '/subscriptions/byo/resourceGroups/rg-byo'; Expected = '' }
+        @{ Target = '/subscriptions/sub/resourceGroups/rg-ai'; Resource = '/subscriptions/sub/resourceGroups/rg-ai/providers/Microsoft.CognitiveServices/accounts/account'; Expected = '/subscriptions/sub/resourceGroups/rg-ai/providers/Microsoft.CognitiveServices/accounts/account' }
+        @{ Target = '/subscriptions/byo/resourceGroups/rg-byo'; Resource = '/subscriptions/byo/resourceGroups/rg-byo/providers/Microsoft.Network/virtualNetworks/vnet'; Expected = '/subscriptions/byo/resourceGroups/rg-byo/providers/Microsoft.Network/virtualNetworks/vnet' }
+    )) {
+        $scope = if (-not $case.Resource -or $case.Resource.ToLowerInvariant() -ceq $case.Target.ToLowerInvariant()) { '' } else { $case.Resource }
+        Assert-Equal $scope $case.Expected 'Verified scope expression preserves implicit/explicit/case-alias RG and service targets.'
+    }
     $deploymentNames = @($t.resources.Values | Where-Object { $_.type -eq 'Microsoft.Resources/deployments' } | ForEach-Object { $_.name })
     Assert-Equal @($deploymentNames | Select-Object -Unique).Count $deploymentNames.Count 'Module names do not collide when destinations coincide.'
 

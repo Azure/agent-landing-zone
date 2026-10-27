@@ -10,17 +10,17 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator
-
-import yaml
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
+from typing import TYPE_CHECKING, Any, Iterator
 
 from config import find_repo_root
 
 from .errors import AppDefinitionValidationError, ValidationIssue
 from .loader import KIND_CONTAINER_APP, KIND_HOSTED_AGENT, AppDefinition
 from .profiles import PROFILES
+
+if TYPE_CHECKING:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError
 
 SCHEMA_RELATIVE_PATH = Path("contracts") / "app-definition-v1.schema.json"
 RESERVED_SETTING_PREFIX = "AGENTLZ_"
@@ -52,6 +52,8 @@ def pointer(*tokens: object) -> str:
 
 @lru_cache(maxsize=4)
 def _validator(schema_path: str) -> Draft202012Validator:
+    from jsonschema import Draft202012Validator
+
     schema = json.loads(Path(schema_path).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
@@ -219,6 +221,8 @@ def _bundled_pin_issues(components: list[dict[str, Any]], repo_root: Path | None
 
 
 def _folder_issues(definition: AppDefinition, components: list[dict[str, Any]]) -> list[ValidationIssue]:
+    import yaml
+
     folder = definition.folder.resolve()
     azure_yaml = folder / AZURE_YAML
     issues: list[ValidationIssue] = []

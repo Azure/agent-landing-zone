@@ -20,25 +20,18 @@ echo
 # This avoids persisting secrets in the User environment (registry)
 #-------------------------------------------------------------------------------
 
-azd_values="$(azd env get-values)" || {
+command -v jq >/dev/null 2>&1 || { echo "jq is required to load the selected azd environment." >&2; exit 1; }
+azd_values="$(azd env get-values --output json)" || {
   echo "Could not load the selected azd environment; refusing to configure resources." >&2
   exit 1
 }
-[ -n "$azd_values" ] || { echo "The selected azd environment is empty." >&2; exit 1; }
-while IFS= read -r line; do
-  line="${line%$'\r'}"
-  [[ -z "$line" ]] && continue
-  [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || { echo "Invalid azd environment output." >&2; exit 1; }
-  key="${BASH_REMATCH[1]}"
-  value="${BASH_REMATCH[2]}"
-
-  # Trim surrounding double quotes from the value (if present)
-  value="${value%\"}"
-  value="${value#\"}"
-
-  # Export into current shell
+jq -e 'type == "object" and length > 0 and all(to_entries[];
+  (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) and
+  (.value | type == "string") and (.value | contains("\u0000") | not))' \
+  <<< "$azd_values" >/dev/null || { echo "Invalid azd environment JSON, key or value." >&2; exit 1; }
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
   export "$key=$value"
-done <<< "$azd_values"
+done < <(jq -b -j 'to_entries[] | .key, "\u0000", .value, "\u0000"' <<< "$azd_values")
 
 is_truthy() {
   case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in

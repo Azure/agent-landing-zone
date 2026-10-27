@@ -3,8 +3,10 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -66,6 +68,35 @@ def test_explicit_acr_id_does_not_use_foundry_group():
     assert registry_resource_group(BASE) == "rg-app"
     with pytest.raises(ValueError):
         registry_resource_group({**env, "AZURE_CONTAINER_REGISTRY_ENDPOINT": "wrong.azurecr.io"})
+
+
+@pytest.mark.parametrize("external_registry", [False, True])
+def test_postprovision_registry_lookup_supports_isolated_python(tmp_path, external_registry):
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "scripts" / "postProvision.ps1").read_text(encoding="utf-8-sig")
+    code = re.search(r'& python -c "([^"\n]*registry_resource_group[^"\n]*)"', source)
+    assert code is not None
+    environment = {**os.environ, **BASE, "AGENTLZ_REPO_ROOT": str(root)}
+    for key in (
+        "AZURE_CONTAINER_REGISTRY_RESOURCE_ID", "CONTAINER_REGISTRY_RESOURCE_ID",
+        "AZURE_CONTAINER_REGISTRY_ENDPOINT", "CONTAINER_REGISTRY_LOGIN_SERVER",
+    ):
+        environment.pop(key, None)
+    if external_registry:
+        environment.update(
+            AZURE_CONTAINER_REGISTRY_ENDPOINT="registry.azurecr.io",
+            AZURE_CONTAINER_REGISTRY_RESOURCE_ID=(
+                f"/subscriptions/{SUB}/resourceGroups/rg-registry/providers/"
+                "Microsoft.ContainerRegistry/registries/registry"
+            ),
+        )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code.group(1)],
+        cwd=tmp_path, env=environment, capture_output=True, text=True,
+        timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ("rg-registry" if external_registry else "rg-app")
 
 
 def test_flat_context_does_not_clobber_bicep_document_scope_without_storage_outputs():
