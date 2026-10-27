@@ -1,5 +1,44 @@
 # Changelog
 
+## [v5.3.0] - 2026-10-27
+
+### Added
+- Prepare dedicated Power Platform and AI Gateway subnets with the required
+  service delegations. Isolated deployments create all twelve architecture
+  subnets by default, with individual creation switches and configurable
+  names and IPv4 ranges for new and existing virtual networks.
+
+### Changed
+- Use a dedicated application private endpoint subnet by default, independently
+  of the Foundry and grounding private endpoint subnet. Use the reserved
+  `GatewaySubnet` name without NSG, route-table or delegation attachments.
+- Apply global and individual subnet creation ownership consistently to both
+  virtual network paths. Validate enabled consumers, actual existing-network
+  properties, address overlap, delegated-subnet providers and APIM integration
+  NSG requirements before provisioning; do not silently reuse the Foundry subnet.
+- These are defaults for new deployments. Existing occupied subnets and private
+  endpoints are not automatically renamed or migrated; review explicit network
+  inputs and resource dependencies before applying the changed topology.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes `python -m pytest tests --quiet`, Bicep build/lint and all
+  17 offline foundation contract entrypoints. Subnet coverage includes 500
+  assertions and exact mutation-tested preservation of historical fingerprints.
+- The deterministic preflight suite passes 382 assertions. Targeted Python
+  regression coverage passes 174 tests across resource groups, deployment modes,
+  custom composition, provider prerequisites and regional quota checks.
+- Central documentation builds in strict MkDocs mode; all 36 subnet parameter
+  bindings match the implementation.
+- Validation is offline; no live Azure provisioning was performed.
+
 ## [v5.2.0] - 2026-10-27
 
 ### Changed

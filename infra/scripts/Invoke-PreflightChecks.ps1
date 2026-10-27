@@ -39,6 +39,8 @@
 
 .PARAMETER SkipAzureLookups
     Skip every check that requires an `az` call. Use for offline testing.
+    BYO network validation fails as unverified in this mode: actual address
+    space, retained overlaps and reused subnet properties require live reads.
 
 .PARAMETER Skip
     Skip all checks. Equivalent to setting `$env:PREFLIGHT_SKIP='true'`.
@@ -122,7 +124,10 @@ function ConvertTo-IpUint32 {
 }
 
 function Get-CidrRange {
-    param([Parameter(Mandatory)] [string]$Cidr)
+    param([Parameter(Mandatory)] [string]$Cidr, [switch]$RequireAligned)
+    if ($RequireAligned -and $Cidr -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}/(0|[1-9]\d?)$') {
+        throw "Expected an IPv4 network CIDR; got '$Cidr'."
+    }
     $parts = $Cidr -split '/', 2
     $ip = $parts[0]
     $prefix = if ($parts.Count -eq 2) { [int]$parts[1] } else { 32 }
@@ -139,6 +144,7 @@ function Get-CidrRange {
         $size = [uint64]($hostMax + 1)
     }
     $start = [uint32]($ipVal -band $maskVal)
+    if ($RequireAligned -and $ipVal -ne $start) { throw "CIDR '$Cidr' has host bits set." }
     $end = [uint32]($start + ($size - 1))
     [pscustomobject]@{ Start = [uint32]$start; End = $end; Prefix = $prefix; Cidr = $Cidr }
 }
@@ -318,6 +324,20 @@ function Test-BooleanParameterValues {
         deployContainerRegistry    = 'DEPLOY_CONTAINER_REGISTRY'
         deployContainerEnv         = 'DEPLOY_CONTAINER_ENV'
         deployNsgs                 = 'DEPLOY_NSGS'
+        deploySubnets              = 'DEPLOY_SUBNETS'
+        deployAgentSubnet          = 'DEPLOY_AGENT_SUBNET'
+        deployPeSubnet             = 'DEPLOY_PE_SUBNET'
+        deployApplicationPeSubnet  = 'DEPLOY_APPLICATION_PE_SUBNET'
+        deployAzureBastionSubnet   = 'DEPLOY_AZURE_BASTION_SUBNET'
+        deployAzureFirewallSubnet  = 'DEPLOY_AZURE_FIREWALL_SUBNET'
+        deployGatewaySubnet        = 'DEPLOY_GATEWAY_SUBNET'
+        deployAppGatewaySubnet     = 'DEPLOY_APP_GATEWAY_SUBNET'
+        deployJumpboxSubnet        = 'DEPLOY_JUMPBOX_SUBNET'
+        deployAcaEnvironmentSubnet = 'DEPLOY_ACA_ENVIRONMENT_SUBNET'
+        deployDevopsBuildAgentsSubnet = 'DEPLOY_DEVOPS_BUILD_AGENTS_SUBNET'
+        deployPowerPlatformSubnet  = 'DEPLOY_POWER_PLATFORM_SUBNET'
+        deployAiGatewaySubnet      = 'DEPLOY_AI_GATEWAY_SUBNET'
+        deployAiFoundrySubnet      = 'DEPLOY_AI_FOUNDRY_SUBNET'
         aiFoundryDisableLocalAuth  = 'AI_FOUNDRY_DISABLE_LOCAL_AUTH'
     }
 
@@ -450,8 +470,8 @@ function Test-Topology {
     # Network isolation without any access path
     $netIso = ConvertTo-Bool $P['networkIsolation']
     $useExistingVNet = ConvertTo-Bool $P['useExistingVNet']
-    $deploySubnets = Resolve-DeployFlag -P $P -Key 'deploySubnets' -Default $true
-    if ($netIso -and $useExistingVNet -and $deploySubnets -and -not $deployNsgs) {
+    $managedSubnets = @(Get-SubnetSelection -P $P | Where-Object Managed)
+    if ($netIso -and $useExistingVNet -and $managedSubnets.Count -gt 0 -and -not $deployNsgs) {
         Add-Finding -Severity FAIL -Code 'BYO_SUBNET_NSG_DETACH' `
             -Message 'A network-isolated deployment cannot update subnets in an existing VNet while deployNsgs=false because existing NSG associations would be removed.' `
             -Hint 'Set DEPLOY_NSGS=true, or set deploySubnets=false and manage the existing subnets and NSG associations outside this deployment.'
@@ -707,118 +727,189 @@ function Test-AllowedIpRanges {
     }
 }
 
-function Test-LocalCidrSanity {
+function Resolve-SubnetCreationFlag {
+    # Unlike nullable service switches, creation switches default only when
+    # absent. Test-BooleanParameterValues rejects explicit empty/null/aliases.
+    param([hashtable]$P, [string]$Key)
+    if (-not $P.ContainsKey($Key)) { return $true }
+    return (Get-StringValue $P[$Key]).Trim() -ieq 'true'
+}
+
+function Get-SubnetSelection {
     param([hashtable]$P)
 
-    $vnetPrefixes = Get-ArrayValue $P['vnetAddressPrefixes'] | ForEach-Object { Get-StringValue $_ } | Where-Object { -not [string]::IsNullOrEmpty($_) }
-    if ($vnetPrefixes.Count -eq 0) { return }
-
-    # Validate VNet prefixes themselves
-    foreach ($vp in $vnetPrefixes) {
-        try { Get-CidrRange -Cidr $vp | Out-Null }
-        catch {
-            Add-Finding -Severity FAIL -Code 'VNET_CIDR_BAD' -Message "vnetAddressPrefixes entry '$vp' is not a valid CIDR: $_"
-            return
-        }
-    }
-
-    # Collect declared subnet prefixes
-    $subnetKeys = @(
-        'agentSubnetPrefix',
-        'peSubnetPrefix',
-        'acaEnvironmentSubnetPrefix',
-        'azureBastionSubnetPrefix',
-        'azureFirewallSubnetPrefix',
-        'jumpboxSubnetPrefix',
-        'devopsBuildAgentsSubnetPrefix'
-    )
-    $subnets = @()
-    foreach ($k in $subnetKeys) {
-        $v = Get-StringValue $P[$k]
-        if ([string]::IsNullOrEmpty($v)) { continue }
-        if ($v -notmatch '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$') {
-            Add-Finding -Severity FAIL -Code 'SUBNET_CIDR_BAD' -Message "Subnet '$k' value '$v' is not a valid CIDR."
-            continue
-        }
+    $isolated = ConvertTo-Bool $P['networkIsolation']
+    $create = $isolated -and (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets')
+    $foundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
+    $cosmos = Resolve-DeployFlag -P $P -Key 'deployCosmosDb' -Default $true
+    $envEnabled = Resolve-DeployFlag -P $P -Key 'deployContainerEnv' -Default $true
+    $registry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
+    $jump = Resolve-DeployJumpbox $P
+    # Mirror nullable deployBastion, including deployVM's legacy default.
+    $bastionDefault = $isolated -and $jump -and [string]::IsNullOrWhiteSpace((Get-StringValue $P['existingBastionResourceId']))
+    $legacy = (Get-StringValue $P['deployVM']).Trim()
+    if ($legacy -in 'true', 'false') { $bastionDefault = $bastionDefault -and (ConvertTo-Bool $legacy) }
+    $bastionRaw = (Get-StringValue $P['deployBastion']).Trim()
+    $bastion = if ($bastionRaw -in 'true', 'false') { ConvertTo-Bool $bastionRaw } else { $bastionDefault }
+    $ampls = (Resolve-DeployFlag -P $P -Key 'enablePrivateLogAnalytics' -Default $true) -and
+        (Resolve-DeployFlag -P $P -Key 'deployAppInsights' -Default $true) -and
+        (Resolve-DeployFlag -P $P -Key 'deployLogAnalytics' -Default $true) -and
+        [string]::IsNullOrWhiteSpace((Get-StringValue $P['existingLogAnalyticsWorkspaceResourceId'])) -and
+        [string]::IsNullOrWhiteSpace((Get-StringValue $P['existingApplicationInsightsResourceId']))
+    $foundryPe = $foundry -or $cosmos -or
+        (Resolve-DeployFlag -P $P -Key 'deployStorageAccount' -Default $true) -or
+        (Resolve-DeployFlag -P $P -Key 'deploySearchService' -Default $true) -or
+        (Resolve-DeployFlag -P $P -Key 'deploySpeechService' -Default $false)
+    $applicationPe = $cosmos -or $envEnabled -or $registry -or $ampls -or
+        (Resolve-DeployFlag -P $P -Key 'deployKeyVault' -Default $true) -or
+        (Resolve-DeployFlag -P $P -Key 'deployAppConfig' -Default $true)
+    $ingress = $P['publicIngress']
+    if ($P.ContainsKey('publicIngress')) {
         try {
-            $r = Get-CidrRange -Cidr $v
-            $subnets += [pscustomobject]@{ Name = $k; Cidr = $v; Range = $r }
+            if ($ingress -is [string]) { $ingress = $ingress | ConvertFrom-Json -NoEnumerate -ErrorAction Stop }
+            if ($ingress -is [array] -or
+                ($ingress -isnot [System.Collections.IDictionary] -and $ingress -isnot [pscustomobject]) -or
+                $ingress.enabled -isnot [bool]) {
+                throw 'Expected an object with a Boolean enabled property.'
+            }
+        } catch {
+            Add-Finding -Severity FAIL -Code 'PUBLIC_INGRESS_INVALID' `
+                -Message 'publicIngress must be a valid object with a Boolean enabled property; its subnet consumer requirements could not be determined.'
+            $ingress = $null
         }
+    }
+    $appGateway = (ConvertTo-Bool $ingress.enabled) -and $envEnabled -and
+        (Resolve-DeployFlag -P $P -Key 'deployContainerApps' -Default $true) -and
+        @(Get-ArrayValue $P['containerAppsList']).Count -gt 0
+
+    # Flag, name/prefix parameter stem, defaults, required delegation, largest
+    # allowed prefix, enabled consumer. /29 is Azure's general subnet ceiling;
+    # Power Platform's /24 is capacity only, not a platform-specific minimum.
+    $definitions = @(
+        @('deployAgentSubnet', 'agentSubnet', 'agent-subnet', '192.168.0.0/24', 'Microsoft.App/environments', 27, ($foundry -and (Resolve-DeployFlag -P $P -Key 'deployAiFoundrySubnet' -Default $true))),
+        @('deployPeSubnet', 'peSubnet', 'pe-subnet', '192.168.2.0/26', '', 28, $foundryPe),
+        @('deployApplicationPeSubnet', 'applicationPeSubnet', 'application-pe-subnet', '192.168.3.128/26', '', 28, $applicationPe),
+        @('deployAzureBastionSubnet', 'azureBastionSubnet', 'AzureBastionSubnet', '192.168.2.64/26', '', 26, $bastion),
+        @('deployAzureFirewallSubnet', 'azureFirewallSubnet', 'AzureFirewallSubnet', '192.168.2.128/26', '', 26, (Resolve-DeployFlag -P $P -Key 'deployAzureFirewall' -Default $true)),
+        @('deployGatewaySubnet', 'gatewaySubnet', 'GatewaySubnet', '192.168.2.192/26', '', 29, $false),
+        @('deployAppGatewaySubnet', 'azureAppGatewaySubnet', 'AppGatewaySubnet', '192.168.3.0/27', '', 29, $appGateway),
+        @('deployJumpboxSubnet', 'jumpboxSubnet', 'jumpbox-subnet', '192.168.3.64/27', '', 29, $jump),
+        @('deployAcaEnvironmentSubnet', 'acaEnvironmentSubnet', 'aca-environment-subnet', '192.168.1.0/24', 'Microsoft.App/environments', 27, ($envEnabled -or $cosmos)),
+        @('deployDevopsBuildAgentsSubnet', 'devopsBuildAgentsSubnet', 'devops-build-agents-subnet', '192.168.3.96/27', '', 28, ($registry -and (Resolve-DeployFlag -P $P -Key 'deployAcrTaskAgentPool' -Default $true))),
+        @('deployPowerPlatformSubnet', 'powerPlatformSubnet', 'powerplatform-subnet', '192.168.4.0/24', 'Microsoft.PowerPlatform/enterprisePolicies', 29, $false),
+        @('deployAiGatewaySubnet', 'aiGatewaySubnet', 'ai-gateway-subnet', '192.168.5.0/24', 'Microsoft.Web/serverFarms', 27, $false)
+    )
+    foreach ($d in $definitions) {
+        $nameKey = "$($d[1])Name"
+        $prefixKey = "$($d[1])Prefix"
+        [pscustomobject]@{
+            Flag = $d[0]; NameKey = $nameKey; PrefixKey = $prefixKey
+            Name = if ($P.ContainsKey($nameKey)) { Get-StringValue $P[$nameKey] } else { $d[2] }
+            Cidr = if ($P.ContainsKey($prefixKey)) { Get-StringValue $P[$prefixKey] } else { $d[3] }
+            Delegation = $d[4]; MaxPrefix = $d[5]
+            Managed = $create -and (Resolve-SubnetCreationFlag -P $P -Key $d[0])
+            Required = $isolated -and $d[6]
+        }
+    }
+}
+
+function Test-SubnetRange {
+    param($Subnet, [string]$Cidr, [string[]]$VnetPrefixes, [hashtable]$P)
+    try { $range = Get-CidrRange -Cidr $Cidr -RequireAligned }
+    catch {
+        Add-Finding -Severity FAIL -Code 'SUBNET_CIDR_BAD' -Message "Subnet '$($Subnet.Name)' has invalid IPv4 network CIDR '$Cidr': $_"
+        return
+    }
+    if ($range.Prefix -gt $Subnet.MaxPrefix) {
+        $code = if ($Subnet.Flag -eq 'deployAcaEnvironmentSubnet') { 'ACA_SUBNET_TOO_SMALL' } else { 'SUBNET_TOO_SMALL' }
+        Add-Finding -Severity FAIL -Code $code -Message "Subnet '$($Subnet.Name)' ($Cidr) must be /$($Subnet.MaxPrefix) or larger."
+    }
+    elseif ($Subnet.Flag -eq 'deployAiGatewaySubnet' -and $range.Prefix -gt 24) {
+        Add-Finding -Severity WARN -Code 'AI_GATEWAY_SUBNET_BELOW_RECOMMENDED' -Message "AI Gateway subnet '$($Subnet.Name)' ($Cidr) meets /27 minimum; /24 is recommended for scaling."
+    }
+    if ($Subnet.Flag -eq 'deployAcaEnvironmentSubnet' -and $range.Prefix -in 24, 25, 26, 27 -and
+        @(Get-ArrayValue $P['workloadProfiles'] | Where-Object { $_.workloadProfileType -and $_.workloadProfileType -ne 'Consumption' }).Count -gt 0) {
+        Add-Finding -Severity WARN -Code 'ACA_SUBNET_BELOW_RECOMMENDED' -Message "ACA subnet '$($Subnet.Name)' ($Cidr) is below the recommended /23 for workload-profile environments."
+    }
+    if ($VnetPrefixes.Count -gt 0 -and -not @($VnetPrefixes | Where-Object { Test-CidrContains -Outer $_ -Inner $Cidr }).Count) {
+        Add-Finding -Severity FAIL -Code 'SUBNET_OUTSIDE_VNET' -Message "Subnet '$($Subnet.Name)' ($Cidr) is outside the selected VNet address space: $($VnetPrefixes -join ', ')."
+    }
+}
+
+function Test-VnetPrefixes {
+    param([string[]]$Prefixes)
+    if ($Prefixes.Count -eq 0) {
+        Add-Finding -Severity FAIL -Code 'VNET_CIDR_BAD' -Message 'The selected VNet address space is empty or could not be verified.'
+        return $false
+    }
+    foreach ($prefix in $Prefixes) {
+        try { Get-CidrRange -Cidr $prefix -RequireAligned | Out-Null }
         catch {
-            Add-Finding -Severity FAIL -Code 'SUBNET_CIDR_BAD' -Message "Subnet '$k' value '$v' did not parse: $_"
+            Add-Finding -Severity FAIL -Code 'VNET_CIDR_BAD' -Message "Invalid VNet IPv4 network CIDR '$prefix': $_"
+            return $false
         }
     }
-
-    # Each subnet contained in a vnet prefix
-    foreach ($s in $subnets) {
-        $contained = $false
-        foreach ($vp in $vnetPrefixes) {
-            if (Test-CidrContains -Outer $vp -Inner $s.Cidr) { $contained = $true; break }
-        }
-        if (-not $contained) {
-            Add-Finding -Severity FAIL -Code 'SUBNET_OUTSIDE_VNET' `
-                -Message "Subnet '$($s.Name)' ($($s.Cidr)) is not contained in any vnetAddressPrefixes entry: $($vnetPrefixes -join ', ')." `
-                -Hint "Either widen vnetAddressPrefixes to include this range, or adjust the subnet prefix to fit inside one of the configured VNet ranges."
-        }
-    }
-
-    # Subnets do not overlap each other
-    for ($i = 0; $i -lt $subnets.Count; $i++) {
-        for ($j = $i + 1; $j -lt $subnets.Count; $j++) {
-            if (Test-CidrOverlap -A $subnets[$i].Cidr -B $subnets[$j].Cidr) {
-                Add-Finding -Severity FAIL -Code 'SUBNET_OVERLAP' `
-                    -Message "Subnet overlap: '$($subnets[$i].Name)' ($($subnets[$i].Cidr)) overlaps '$($subnets[$j].Name)' ($($subnets[$j].Cidr))." `
-                    -Hint "Re-partition the spoke VNet so each subnet has a unique range."
+    for ($i = 0; $i -lt $Prefixes.Count; $i++) {
+        for ($j = $i + 1; $j -lt $Prefixes.Count; $j++) {
+            if (Test-CidrOverlap $Prefixes[$i] $Prefixes[$j]) {
+                Add-Finding -Severity FAIL -Code 'VNET_CIDR_OVERLAP' -Message "VNet prefixes '$($Prefixes[$i])' and '$($Prefixes[$j])' overlap."
             }
         }
     }
+    return $true
+}
 
-    # Subnet minimum sizes (Azure platform requirements)
-    $minPrefix = @{
-        'azureBastionSubnetPrefix'      = 26   # Azure Bastion requires /26 or larger
-        'azureFirewallSubnetPrefix'     = 26   # Azure Firewall requires /26 or larger
-        'peSubnetPrefix'                = 28   # AVM PE requirement; we recommend /27
-        'jumpboxSubnetPrefix'           = 29   # one NIC needs only a few addresses
-        'devopsBuildAgentsSubnetPrefix' = 28   # build agents typically a handful of VMs
-    }
-    foreach ($s in $subnets) {
-        $req = $minPrefix[$s.Name]
-        if ($req -and $s.Range.Prefix -gt $req) {
-            Add-Finding -Severity FAIL -Code 'SUBNET_TOO_SMALL' `
-                -Message "Subnet '$($s.Name)' ($($s.Cidr)) is /$($s.Range.Prefix); Azure requires at least /$req for this purpose." `
-                -Hint "Widen the prefix in main.parameters.json (or via the matching env var)."
-        }
-    }
-
-    # ACA env subnet sizing — depends on workloadProfiles
-    $aca = $subnets | Where-Object { $_.Name -eq 'acaEnvironmentSubnetPrefix' }
-    if ($aca) {
-        $wpRaw = $P['workloadProfiles']
-        $hasWorkloadProfile = $false
-        if ($null -ne $wpRaw) {
-            $wpArr = @()
+function Test-SubnetOverlaps {
+    param([object[]]$Subnets)
+    for ($i = 0; $i -lt $Subnets.Count; $i++) {
+        for ($j = $i + 1; $j -lt $Subnets.Count; $j++) {
             try {
-                if ($wpRaw -is [string]) {
-                    $s = ($wpRaw -as [string]).Trim()
-                    if ($s.StartsWith('[')) { $wpArr = $s | ConvertFrom-Json }
+                if (Test-CidrOverlap $Subnets[$i].Cidr $Subnets[$j].Cidr) {
+                    Add-Finding -Severity FAIL -Code 'SUBNET_OVERLAP' -Message "Subnet '$($Subnets[$i].Name)' ($($Subnets[$i].Cidr)) overlaps '$($Subnets[$j].Name)' ($($Subnets[$j].Cidr))."
                 }
-                else { $wpArr = $wpRaw }
-            }
-            catch {}
-            $hasWorkloadProfile = @($wpArr | Where-Object { $_ -and $_.workloadProfileType -and $_.workloadProfileType -ne 'Consumption' }).Count -gt 0
+            } catch { } # Invalid CIDRs are reported by Test-SubnetRange.
         }
-        $required = if ($hasWorkloadProfile) { 27 } else { 27 }  # /27 minimum either way
-        $recommended = if ($hasWorkloadProfile) { 23 } else { 27 }
-        if ($aca.Range.Prefix -gt $required) {
-            Add-Finding -Severity FAIL -Code 'ACA_SUBNET_TOO_SMALL' `
-                -Message "acaEnvironmentSubnetPrefix is /$($aca.Range.Prefix); Container Apps environments require at least /$required." `
-                -Hint "Widen the prefix."
+    }
+}
+
+function Test-LocalCidrSanity {
+    param([hashtable]$P)
+    if (-not (ConvertTo-Bool $P['networkIsolation'])) { return }
+    $selection = @(Get-SubnetSelection -P $P)
+    $active = @($selection | Where-Object { $_.Managed -or $_.Required })
+    $byo = ConvertTo-Bool $P['useExistingVNet']
+    $vnetPrefixes = if ($P.ContainsKey('vnetAddressPrefixes')) { @(Get-ArrayValue $P['vnetAddressPrefixes']) } else { @('192.168.0.0/21') }
+    # BYO containment uses actual Azure address space, never greenfield defaults.
+    if ($byo) { $vnetPrefixes = @() }
+    elseif (-not (Test-VnetPrefixes -Prefixes $vnetPrefixes)) { $vnetPrefixes = @() }
+    foreach ($s in $active) {
+        if ($s.Name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,78}[a-zA-Z0-9_]$' -and $s.Name -notmatch '^[a-zA-Z0-9]$') {
+            Add-Finding -Severity FAIL -Code 'SUBNET_NAME_INVALID' -Message "Parameter '$($s.NameKey)' must be a non-empty Azure subnet name of 1-80 characters, ending in an alphanumeric or underscore."
         }
-        elseif ($hasWorkloadProfile -and $aca.Range.Prefix -gt $recommended) {
-            Add-Finding -Severity WARN -Code 'ACA_SUBNET_BELOW_RECOMMENDED' `
-                -Message "acaEnvironmentSubnetPrefix is /$($aca.Range.Prefix) with workload-profile mode declared; Microsoft recommends /$recommended for workload-profile ACA." `
-                -Hint "Consider widening to /$recommended; see https://aka.ms/aca/networking-subnet-size."
+        $reservedName = switch ($s.Flag) {
+            'deployGatewaySubnet' { 'GatewaySubnet' }
+            'deployAzureBastionSubnet' { 'AzureBastionSubnet' }
+            'deployAzureFirewallSubnet' { 'AzureFirewallSubnet' }
         }
+        if (($reservedName -and $s.Name -cne $reservedName) -or
+            (-not $reservedName -and $s.Name -in 'GatewaySubnet', 'AzureBastionSubnet', 'AzureFirewallSubnet', 'AzureFirewallManagementSubnet', 'RouteServerSubnet')) {
+            Add-Finding -Severity FAIL -Code 'SUBNET_RESERVED_NAME' -Message "Subnet '$($s.NameKey)' uses an invalid reserved name '$($s.Name)'; required reserved name: '$reservedName'."
+        }
+        if (@($active | Where-Object { $_.Name -ieq $s.Name }).Count -gt 1) {
+            Add-Finding -Severity FAIL -Code 'SUBNET_NAME_DUPLICATE' -Message "Subnet name '$($s.Name)' is assigned to more than one subnet purpose."
+        }
+        if (-not $byo -and $s.Required -and -not $s.Managed) {
+            Add-Finding -Severity FAIL -Code 'SUBNET_REQUIRED_NOT_MANAGED' -Message "Enabled consumers require subnet '$($s.Name)' but it will not be created in the new VNet. Enable $($s.Flag) and deploySubnets, reuse a VNet, or disable the consumers."
+        }
+        # Required reuse validates actual properties live, but explicit malformed
+        # requested prefixes must still fail rather than silently default.
+        $containment = if ($s.Managed) { $vnetPrefixes } else { @() }
+        Test-SubnetRange -Subnet $s -Cidr $s.Cidr -VnetPrefixes $containment -P $P
+    }
+    Test-SubnetOverlaps -Subnets @($active | Where-Object Managed)
+    if (@($selection | Where-Object { $_.Managed -and $_.Flag -eq 'deployAiGatewaySubnet' }).Count -and
+        -not (Resolve-DeployFlag -P $P -Key 'deployNsgs' -Default $true)) {
+        Add-Finding -Severity FAIL -Code 'AI_GATEWAY_NSG_REQUIRED' -Message 'AI Gateway integration requires an associated NSG allowing outbound HTTPS to Azure Key Vault. Enable deployNsgs or reuse an externally managed subnet with verified controls.'
     }
 }
 
@@ -964,80 +1055,192 @@ function Test-AzureContext {
     return $ctx
 }
 
+function Get-AzureProperties {
+    # Azure CLI network commands flatten ARM properties; generic REST/resource
+    # responses may retain them. Accept both without inventing missing facts.
+    param($Resource)
+    if ($null -ne $Resource.properties) { return $Resource.properties }
+    return $Resource
+}
+
+function Get-ExistingSubnetPrefixes {
+    param($Subnet)
+    $properties = Get-AzureProperties $Subnet
+    if ($properties.addressPrefixes) { return @($properties.addressPrefixes) }
+    if ($properties.addressPrefix) { return @($properties.addressPrefix) }
+    return @()
+}
+
+function Test-NsgKeyVaultHttps {
+    # Prove a broad outbound TCP/443 NSG path to Azure Key Vault, respecting
+    # priority. A destination-IP/ASG-specific policy cannot be certified from
+    # subnet metadata alone; reject it as unverifiable, never assume an allow.
+    param($Nsg, [string[]]$SubnetPrefixes)
+    $properties = Get-AzureProperties $Nsg
+    $rules = @($properties.securityRules) + @($properties.defaultSecurityRules)
+    foreach ($rule in @($rules | Where-Object { $null -ne $_ } | Sort-Object { (Get-AzureProperties $_).priority })) {
+        $r = Get-AzureProperties $rule
+        if ($r.direction -ine 'Outbound' -or $r.protocol -notin '*', 'Tcp') { continue }
+        $ports = @($r.destinationPortRange) + @($r.destinationPortRanges)
+        $https = @($ports | Where-Object {
+            $_ -eq '*' -or $_ -eq '443' -or ($_ -match '^(\d+)-(\d+)$' -and [int]$matches[1] -le 443 -and [int]$matches[2] -ge 443)
+        }).Count -gt 0
+        if (-not $https) { continue }
+        $destinations = @($r.destinationAddressPrefix) + @($r.destinationAddressPrefixes)
+        $broadDestination = @($destinations | Where-Object { $_ -in '*', 'Internet', 'AzureCloud', 'AzureKeyVault', '0.0.0.0/0' }).Count -gt 0
+        # An earlier deny with a specific destination may block some Key Vault
+        # addresses. Do not claim success based on a later broad allow.
+        if ($r.access -ieq 'Deny') { return $false }
+        if (-not $broadDestination -or $r.access -ine 'Allow') { continue }
+        $sources = @($r.sourceAddressPrefix) + @($r.sourceAddressPrefixes)
+        $sourceCovered = @($sources | Where-Object { $_ -in '*', 'VirtualNetwork', '0.0.0.0/0' }).Count -gt 0
+        if (-not $sourceCovered) {
+            $sourceCovered = $SubnetPrefixes.Count -gt 0
+            foreach ($prefix in $SubnetPrefixes) {
+                $covered = $false
+                foreach ($source in $sources) {
+                    try { if (Test-CidrContains $source $prefix) { $covered = $true } } catch { }
+                }
+                $sourceCovered = $sourceCovered -and $covered
+            }
+        }
+        $sourcePorts = @($r.sourcePortRange) + @($r.sourcePortRanges)
+        if ($sourceCovered -and $sourcePorts -contains '*') { return $true }
+    }
+    return $false
+}
+
+function Test-ReusedSubnetProperties {
+    param($Definition, $Subnet)
+    $properties = Get-AzureProperties $Subnet
+    $delegations = @($properties.delegations | Where-Object { $null -ne $_ } | ForEach-Object { (Get-AzureProperties $_).serviceName })
+    if (($Definition.Delegation -and ($delegations.Count -ne 1 -or $delegations[0] -cne $Definition.Delegation)) -or
+        (-not $Definition.Delegation -and $delegations.Count -gt 0)) {
+        $code = if ($Definition.Flag -eq 'deployAcaEnvironmentSubnet') { 'ACA_SUBNET_NO_DELEGATION' } else { 'BYO_SUBNET_DELEGATION_INVALID' }
+        Add-Finding -Severity FAIL -Code $code -Message "Reused subnet '$($Definition.Name)' must have exactly the intended delegation '$($Definition.Delegation)' (none for an undelegated subnet)."
+    }
+    if ($Definition.Flag -eq 'deployAcaEnvironmentSubnet' -and @($properties.serviceEndpoints).Count -gt 0) {
+        Add-Finding -Severity WARN -Code 'ACA_SUBNET_HAS_SE' -Message "Reused ACA subnet '$($Definition.Name)' has service endpoints. Review their effect on private endpoint routing."
+    }
+    $gateway = $Definition.Flag -eq 'deployGatewaySubnet'
+    $aiGateway = $Definition.Flag -eq 'deployAiGatewaySubnet'
+    if ($gateway -and $properties.networkSecurityGroup.id) {
+        Add-Finding -Severity FAIL -Code 'GATEWAY_SUBNET_NSG_FORBIDDEN' -Message 'GatewaySubnet must never have an NSG attached.'
+    }
+    if ($aiGateway) {
+        $nsgId = Get-StringValue $properties.networkSecurityGroup.id
+        if ([string]::IsNullOrWhiteSpace($nsgId)) {
+            Add-Finding -Severity FAIL -Code 'AI_GATEWAY_NSG_REQUIRED' -Message "Reused AI Gateway subnet '$($Definition.Name)' requires an NSG with outbound HTTPS to Azure Key Vault."
+        } else {
+            $nsg = Invoke-AzCli -Arguments @('network', 'nsg', 'show', '--ids', $nsgId, '-o', 'json')
+            if (-not $nsg -or -not (Test-NsgKeyVaultHttps -Nsg $nsg -SubnetPrefixes @(Get-ExistingSubnetPrefixes $Subnet))) {
+                Add-Finding -Severity FAIL -Code 'AI_GATEWAY_KEYVAULT_HTTPS_NOT_VERIFIED' -Message "Could not verify an allowed outbound TCP/443 NSG path to Azure Key Vault for subnet '$($Definition.Name)'. Review NSG priorities, source coverage, and destination rules."
+            }
+        }
+        if (@($properties.privateEndpoints | Where-Object { $null -ne $_ }).Count) {
+            Add-Finding -Severity FAIL -Code 'AI_GATEWAY_PRIVATE_ENDPOINT_FORBIDDEN' -Message 'Private endpoints must not use the delegated AI Gateway integration subnet.'
+        }
+    }
+    if (($gateway -or $aiGateway) -and $properties.routeTable.id) {
+        $routeTable = Invoke-AzCli -Arguments @('network', 'route-table', 'show', '--ids', $properties.routeTable.id, '-o', 'json')
+        if (-not $routeTable -or $null -eq (Get-AzureProperties $routeTable).routes) {
+            Add-Finding -Severity FAIL -Code 'BYO_SUBNET_ROUTES_NOT_VERIFIED' -Message "Could not read the route table on subnet '$($Definition.Name)'; required route restrictions cannot be verified."
+        } else {
+            $defaults = @((Get-AzureProperties $routeTable).routes | Where-Object { (Get-AzureProperties $_).addressPrefix -eq '0.0.0.0/0' })
+            if ($gateway -and $defaults.Count) {
+                Add-Finding -Severity FAIL -Code 'GATEWAY_SUBNET_DEFAULT_ROUTE_FORBIDDEN' -Message 'GatewaySubnet must never have a default-route UDR.'
+            }
+            if ($aiGateway -and @($defaults | Where-Object { (Get-AzureProperties $_).nextHopType -ine 'Internet' }).Count) {
+                Add-Finding -Severity FAIL -Code 'AI_GATEWAY_KEYVAULT_HTTPS_NOT_VERIFIED' -Message 'AI Gateway default-route UDR redirects or blocks egress; the Key Vault HTTPS path through that next hop cannot be verified by preflight.'
+            }
+        }
+    }
+}
+
+function Test-ExistingVnetSubnets {
+    param([hashtable]$P)
+    if (-not (ConvertTo-Bool $P['networkIsolation']) -or -not (ConvertTo-Bool $P['useExistingVNet'])) { return $null }
+    $vnetId = Get-StringValue $P['existingVnetResourceId']
+    if ($vnetId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+$') {
+        Add-Finding -Severity FAIL -Code 'BYO_VNET_NO_ID' -Message 'useExistingVNet=true requires a full existingVnetResourceId.'
+        return $null
+    }
+    if ($SkipAzureLookups) {
+        Add-Finding -Severity FAIL -Code 'BYO_NETWORK_NOT_VERIFIED' -Message 'BYO address space, existing overlaps, and required reused subnet properties cannot be verified with -SkipAzureLookups. Run live read-only preflight before provisioning.'
+        return $null
+    }
+    $vnet = Invoke-AzCli -Arguments @('network', 'vnet', 'show', '--ids', $vnetId, '-o', 'json')
+    if (-not $vnet) {
+        Add-Finding -Severity FAIL -Code 'BYO_VNET_LOOKUP_FAILED' -Message 'Could not read the selected existing VNet. Address space and required reused subnets are not verified; check the ID, login, and scoped Reader access.'
+        return $null
+    }
+    $properties = Get-AzureProperties $vnet
+    $prefixes = @($properties.addressSpace.addressPrefixes)
+    if (-not (Test-VnetPrefixes -Prefixes $prefixes)) { return $null }
+    if ($null -eq $properties.subnets) {
+        Add-Finding -Severity FAIL -Code 'BYO_NETWORK_NOT_VERIFIED' -Message 'The selected VNet response omitted its subnet collection; existing overlap and reuse checks cannot be completed.'
+        return $null
+    }
+    $selection = @(Get-SubnetSelection -P $P)
+    $ranges = [System.Collections.Generic.List[object]]::new()
+    foreach ($s in @($selection | Where-Object Managed)) {
+        Test-SubnetRange -Subnet $s -Cidr $s.Cidr -VnetPrefixes $prefixes -P $P
+        $ranges.Add([pscustomobject]@{ Name = $s.Name; Cidr = $s.Cidr })
+    }
+    # Managed names use the requested range; required reused names use the
+    # explicit lookup below. All other retained ranges use the VNet listing,
+    # even when an unused subnet happens to share a configured optional name.
+    foreach ($existing in @($properties.subnets)) {
+        if (@($selection | Where-Object { ($_.Managed -or $_.Required) -and $_.Name -ieq $existing.name }).Count) { continue }
+        $existingPrefixes = @(Get-ExistingSubnetPrefixes $existing)
+        if ($existingPrefixes.Count -eq 0) {
+            Add-Finding -Severity FAIL -Code 'BYO_NETWORK_NOT_VERIFIED' -Message "Existing subnet '$($existing.name)' has no readable address prefixes."
+        }
+        foreach ($prefix in $existingPrefixes) {
+            try { Get-CidrRange -Cidr $prefix -RequireAligned | Out-Null }
+            catch { Add-Finding -Severity FAIL -Code 'SUBNET_CIDR_BAD' -Message "Existing subnet '$($existing.name)' has invalid IPv4 CIDR '$prefix'."; continue }
+            $ranges.Add([pscustomobject]@{ Name = $existing.name; Cidr = $prefix })
+        }
+    }
+    foreach ($s in @($selection | Where-Object { $_.Required -and -not $_.Managed })) {
+        $existing = @($properties.subnets | Where-Object { $_.name -ieq $s.Name })
+        if ($existing.Count -eq 0) {
+            Add-Finding -Severity FAIL -Code 'BYO_SUBNET_MISSING' -Message "Enabled consumers require reused subnet '$($s.Name)' ($($s.NameKey)), but it does not exist in the selected VNet. Enable its creation or disable those consumers."
+            continue
+        }
+        # Explicit per-subnet read ensures required properties are available;
+        # never equate a name in a partial VNet listing with verified reuse.
+        $subnet = Invoke-AzCli -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', "$vnetId/subnets/$($s.Name)", '-o', 'json')
+        if (-not $subnet) {
+            Add-Finding -Severity FAIL -Code 'BYO_SUBNET_LOOKUP_FAILED' -Message "Could not verify reused subnet '$($s.Name)' in the selected VNet."
+            continue
+        }
+        $actualPrefixes = @(Get-ExistingSubnetPrefixes $subnet)
+        if ($actualPrefixes.Count -eq 0) {
+            Add-Finding -Severity FAIL -Code 'BYO_NETWORK_NOT_VERIFIED' -Message "Reused subnet '$($s.Name)' has no readable address prefixes."
+        }
+        foreach ($prefix in $actualPrefixes) {
+            Test-SubnetRange -Subnet $s -Cidr $prefix -VnetPrefixes $prefixes -P $P
+            $ranges.Add([pscustomobject]@{ Name = $s.Name; Cidr = $prefix })
+        }
+        Test-ReusedSubnetProperties -Definition $s -Subnet $subnet
+    }
+    Test-SubnetOverlaps -Subnets @($ranges.ToArray())
+    return $vnet
+}
+
 function Test-AzureResources {
     param([hashtable]$P)
 
+    # Network requirements fail closed even when login/context/lookup is absent.
+    # Other legacy BYO checks retain their existing warning behavior.
+    $selectedVnet = Test-ExistingVnetSubnets -P $P
     if ($SkipAzureLookups) {
         Add-Finding -Severity INFO -Code 'AZURE_SKIPPED' -Message "Azure resource lookups skipped (-SkipAzureLookups)."
         return
     }
     $ctx = Test-AzureContext
     if (-not $ctx) { return }
-
-    # BYO VNet (only when useExistingVNet=true)
-    $useExistingVNet = ConvertTo-Bool $P['useExistingVNet']
-    $deploySubnets = ConvertTo-Bool $P['deploySubnets']
-    $existingVnetRid = Get-StringValue $P['existingVnetResourceId']
-    if ($useExistingVNet) {
-        if ([string]::IsNullOrEmpty($existingVnetRid)) {
-            Add-Finding -Severity FAIL -Code 'BYO_VNET_NO_ID' `
-                -Message "useExistingVNet=true but existingVnetResourceId is empty." `
-                -Hint "Set EXISTING_VNET_RESOURCE_ID to the full ARM resource ID of the spoke VNet."
-        }
-        else {
-            $vnet = Invoke-AzCli -Arguments @('network', 'vnet', 'show', '--ids', $existingVnetRid, '-o', 'json')
-            if (-not $vnet) {
-                Add-Finding -Severity WARN -Code 'BYO_VNET_LOOKUP_FAILED' `
-                    -Message "Could not read existing VNet '$existingVnetRid' — verify the ID is correct and the current identity has Reader on it."
-            }
-            else {
-                # Validate subnets present when deploySubnets=false
-                if (-not $deploySubnets) {
-                    $requiredSubnets = @{
-                        'agentSubnetName'             = (Get-StringValue $P['agentSubnetName'])
-                        'peSubnetName'                = (Get-StringValue $P['peSubnetName'])
-                        'acaEnvironmentSubnetName'    = (Get-StringValue $P['acaEnvironmentSubnetName'])
-                        'jumpboxSubnetName'           = (Get-StringValue $P['jumpboxSubnetName'])
-                        'devopsBuildAgentsSubnetName' = (Get-StringValue $P['devopsBuildAgentsSubnetName'])
-                    }
-                    $deployBastion = ConvertTo-Bool $P['deployBastion']
-                    $deployFw = ConvertTo-Bool $P['deployAzureFirewall']
-                    if ($deployBastion) { $requiredSubnets['AzureBastionSubnet'] = 'AzureBastionSubnet' }
-                    if ($deployFw) { $requiredSubnets['AzureFirewallSubnet'] = 'AzureFirewallSubnet' }
-
-                    $existingNames = @($vnet.subnets | ForEach-Object { $_.name })
-                    foreach ($req in $requiredSubnets.GetEnumerator()) {
-                        if ([string]::IsNullOrEmpty($req.Value)) { continue }
-                        if ($existingNames -notcontains $req.Value) {
-                            Add-Finding -Severity FAIL -Code 'BYO_SUBNET_MISSING' `
-                                -Message "Subnet '$($req.Value)' (parameter '$($req.Key)') not found in BYO VNet '$($vnet.name)'." `
-                                -Hint "Either create the subnet, set DEPLOY_SUBNETS=true to let the deployment create it, or correct the *SubnetName parameter."
-                        }
-                    }
-                    # ACA delegation check
-                    $acaName = Get-StringValue $P['acaEnvironmentSubnetName']
-                    $deployContainerEnv = ConvertTo-Bool $P['deployContainerEnv']
-                    $netIso = ConvertTo-Bool $P['networkIsolation']
-                    if ($deployContainerEnv -and $netIso -and (-not [string]::IsNullOrEmpty($acaName))) {
-                        $acaSubnet = $vnet.subnets | Where-Object { $_.name -eq $acaName }
-                        if ($acaSubnet) {
-                            $delegation = $acaSubnet.delegations | Where-Object { $_.serviceName -eq 'Microsoft.App/environments' }
-                            if (-not $delegation) {
-                                Add-Finding -Severity FAIL -Code 'ACA_SUBNET_NO_DELEGATION' `
-                                    -Message "BYO ACA environment subnet '$acaName' is missing delegation 'Microsoft.App/environments'." `
-                                    -Hint "Run: az network vnet subnet update --ids <subnetId> --delegations Microsoft.App/environments"
-                            }
-                            if ($acaSubnet.serviceEndpoints -and @($acaSubnet.serviceEndpoints).Count -gt 0) {
-                                Add-Finding -Severity WARN -Code 'ACA_SUBNET_HAS_SE' `
-                                    -Message "BYO ACA environment subnet '$acaName' has service endpoints configured. Container Apps does not require any and they can interfere with private-endpoint routing." `
-                                    -Hint "Remove service endpoints from this subnet unless you have a deliberate reason to keep them."
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     # BYO Private DNS zones — validate naming
     $expectedZoneName = @{
@@ -1119,7 +1322,10 @@ function Test-AzureResources {
                 -Hint "Verify the ID and that the current identity has Reader on the hub VNet's resource group."
         }
         else {
-            $spokePrefixes = @(Get-ArrayValue $P['vnetAddressPrefixes'] | ForEach-Object { Get-StringValue $_ } | Where-Object { -not [string]::IsNullOrEmpty($_) })
+            $spokePrefixes = if ($selectedVnet) { @((Get-AzureProperties $selectedVnet).addressSpace.addressPrefixes) }
+                elseif (ConvertTo-Bool $P['useExistingVNet']) { @() }
+                elseif ($P.ContainsKey('vnetAddressPrefixes')) { @(Get-ArrayValue $P['vnetAddressPrefixes']) }
+                else { @('192.168.0.0/21') }
             $hubPrefixes = @($hubVnet.addressSpace.addressPrefixes)
             foreach ($sp in $spokePrefixes) {
                 foreach ($hp in $hubPrefixes) {
@@ -1174,6 +1380,8 @@ function Get-RequiredResourceProviders {
         'Microsoft.Search'               = 'Azure AI Search'
         'Microsoft.DocumentDB'           = 'Cosmos DB workload account + AI Foundry-bundled Cosmos'
         'Microsoft.Bing'                 = 'Bing grounding'
+        'Microsoft.PowerPlatform'        = 'Power Platform subnet delegation'
+        'Microsoft.Web'                  = 'AI Gateway outbound integration subnet delegation'
     }
 
     # Always-required providers used implicitly at deploy time (LA workspace
@@ -1255,11 +1463,30 @@ function Get-RequiredResourceProviders {
         'Microsoft.Bing'                 = $deployBing
     }
 
+    $subnetProviders = @(Get-SubnetSelection -P $P | Where-Object { $_.Managed -and $_.Delegation } |
+        ForEach-Object { ($_.Delegation -split '/')[0] } | Sort-Object -Unique)
+    foreach ($ns in $subnetProviders) { [void]$canonical.Add($ns) }
+    $networkSubscription = $SubscriptionId
+    if ((ConvertTo-Bool $P['useExistingVNet']) -and
+        (Get-StringValue $P['existingVnetResourceId']) -match '^/subscriptions/([^/]+)/') {
+        $networkSubscription = $matches[1]
+    }
     $canonical | Sort-Object | ForEach-Object {
         $ns = $_
         $reason = if ($reasonByNamespace.ContainsKey($ns)) { $reasonByNamespace[$ns] } else { 'Discovered in repository Bicep files' }
         $selected = if ($selectionByNamespace.ContainsKey($ns)) { [bool]$selectionByNamespace[$ns] } else { $false }
-        @{ Namespace = $ns; Reason = $reason; Selected = $selected }
+        # Delegation-only namespaces must be checked in the VNet subscription,
+        # not implicitly in the application's current CLI subscription.
+        if ($ns -in 'Microsoft.PowerPlatform', 'Microsoft.Web') {
+            if ($subnetProviders -contains $ns) {
+                @{ Namespace = $ns; Reason = $reason; Selected = $true; SubscriptionId = $networkSubscription; SubnetPrerequisite = $true }
+            }
+        } else {
+            @{ Namespace = $ns; Reason = $reason; Selected = $selected; SubscriptionId = $SubscriptionId }
+        }
+    }
+    if ($subnetProviders -contains 'Microsoft.App') {
+        @{ Namespace = 'Microsoft.App'; Reason = 'Agent/ACA subnet delegation'; Selected = $true; SubscriptionId = $networkSubscription; SubnetPrerequisite = $true }
     }
 }
 
@@ -1298,18 +1525,22 @@ function Get-VmSkuInfo {
 function Test-ResourceProviders {
     param([hashtable]$P = @{})
     if ($SkipAzureLookups) { return }
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) { return }
-
-    # Silent context check — avoids emitting a duplicate AZ_NOT_LOGGED_IN
-    # warning (Test-AzureResources already covers that path).
-    & az account show --output none 2>$null
-    if ($LASTEXITCODE -ne 0) { return }
-
-    foreach ($entry in (Get-RequiredResourceProviders -P $P)) {
+    $providers = @(Get-RequiredResourceProviders -P $P)
+    if (-not (Invoke-AzCli -Arguments @('account', 'show', '-o', 'json'))) {
+        if (@($providers | Where-Object SubnetPrerequisite).Count) {
+            Add-Finding -Severity FAIL -Code 'RP_LOOKUP_FAILED' -Message 'Selected subnet delegation provider prerequisites could not be verified. Log in and rerun read-only preflight.'
+        }
+        return
+    }
+    foreach ($entry in $providers) {
         $ns = $entry.Namespace
-        $state = & az provider show --namespace $ns --query 'registrationState' -o tsv 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($state)) {
-            Add-Finding -Severity WARN -Code 'RP_LOOKUP_FAILED' `
+        $arguments = @('provider', 'show', '--namespace', $ns, '-o', 'json')
+        if ($entry.SubscriptionId) { $arguments += @('--subscription', $entry.SubscriptionId) }
+        $provider = Invoke-AzCli -Arguments $arguments
+        $state = Get-StringValue $provider.registrationState
+        $severity = if ($entry.Selected) { 'FAIL' } else { 'WARN' }
+        if ([string]::IsNullOrWhiteSpace($state)) {
+            Add-Finding -Severity $severity -Code 'RP_LOOKUP_FAILED' `
                 -Message "Could not read registration state for provider '$ns' ($($entry.Reason))." `
                 -Hint "Run: az provider show --namespace $ns --query registrationState -o tsv"
             continue
@@ -1317,7 +1548,7 @@ function Test-ResourceProviders {
         $state = $state.Trim()
         if ($state -eq 'Registered') { continue }
         if ($state -eq 'Registering') {
-            Add-Finding -Severity WARN -Code 'RP_REGISTERING' `
+            Add-Finding -Severity $severity -Code 'RP_REGISTERING' `
                 -Message "Provider '$ns' is currently '$state' — wait until it reaches 'Registered' before deploying." `
                 -Hint "Re-run preflight in a minute, or block on it with: az provider register --namespace $ns --wait"
         }

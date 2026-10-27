@@ -121,15 +121,23 @@ def _create_flag(environment: Mapping[str, str]) -> bool:
 
 
 def validate_application_pe_subnet(environment: Mapping[str, str]) -> None:
-    """Reject malformed optional PE selection before any bootstrap Azure write."""
-    name = (environment.get("AZURE_APPLICATION_PE_SUBNET_NAME") or "").strip()
-    prefix = (environment.get("AZURE_APPLICATION_PE_SUBNET_PREFIX") or "").strip()
-    if not name and not prefix:
+    """Validate dedicated PE defaults and overrides before bootstrap Azure writes."""
+    name = (environment.get(
+        "AZURE_APPLICATION_PE_SUBNET_NAME", "application-pe-subnet"
+    ) or "").strip()
+    prefix = (environment.get(
+        "AZURE_APPLICATION_PE_SUBNET_PREFIX", "192.168.3.128/26"
+    ) or "").strip()
+    isolated = (environment.get("NETWORK_ISOLATION") or "").strip().lower() in {
+        "true", "1", "t",
+    }
+    if not name and not prefix and not isolated:
         return
     if not name or not prefix:
         raise ResourceGroupError(
             "AZURE_APPLICATION_PE_SUBNET_NAME and AZURE_APPLICATION_PE_SUBNET_PREFIX "
-            "must both be supplied, or both omitted for the legacy shared PE subnet."
+            "must not be empty for a dedicated application PE subnet. Omit an "
+            "override to use its default; shared Foundry subnet fallback is not supported."
         )
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,78}[A-Za-z0-9_]|[A-Za-z0-9]", name):
         raise ResourceGroupError(

@@ -75,9 +75,54 @@ function Invoke-ScopedProjection {
     }
 }
 
+function Get-ArchitectureSubnetProjection {
+    $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\architecture-subnets-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    # Both ownership paths emit exactly the same subnet input before AND after.
+    # Reuse that reviewed rule, not a second copy of its large ARM expression.
+    $resources = $fixture.projection.changes.resources.changes
+    $resources.virtualNetwork.changes.properties = @{
+        kind = 'object'
+        changes = @{ parameters = $resources.virtualNetworkSubnets.changes.properties.changes.parameters }
+    }
+    # Four complete pre-change values already exist in reviewed fixtures.
+    # Each was compared with the real origin/develop 9ab6ceb compile. Keep the
+    # before/after association explicit without duplicating those large values.
+    $snapshots = @{}
+    foreach ($name in @('scoped-resource-groups-normalization.json', 'foundry-root-normalization.json')) {
+        $snapshots[$name] = Get-Content (Join-Path $PSScriptRoot "fixtures\$name") -Raw |
+            ConvertFrom-Json -AsHashtable -Depth 100
+    }
+    function Resolve-SubnetBeforeFixture($Rule) {
+        if ($Rule.Contains('beforeFixture')) {
+            $file, $pointer = $Rule.beforeFixture -split '#', 2
+            if (-not $snapshots.Contains($file) -or -not $pointer.StartsWith('/')) {
+                throw 'SCOPED: invalid subnet before-fixture reference.'
+            }
+            $value = $snapshots[$file]
+            foreach ($key in $pointer.TrimStart('/').Split('/')) {
+                if ($value -isnot [System.Collections.IDictionary] -or -not $value.Contains($key)) {
+                    throw 'SCOPED: missing subnet before-fixture value.'
+                }
+                $value = $value[$key]
+            }
+            $Rule.before = $value
+        }
+        if ($Rule.Contains('changes')) {
+            foreach ($child in $Rule.changes.Values) { Resolve-SubnetBeforeFixture $child }
+        }
+    }
+    Resolve-SubnetBeforeFixture $fixture.projection
+    return $fixture.projection
+}
+
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0027: validate the complete reviewed subnet delta before restoring the
+    # previous composition. Never substitute hashes or discard unchecked fields.
+    # The existing adapters then protect all unchanged graph membership/values.
+    $copy = Invoke-ScopedProjection $copy (Get-ArchitectureSubnetProjection)
     # ADR-0025 adds only generic handoff fields. Check their entire compiled
     # values before projecting them away for the ORIGINAL graph fingerprints.
     $egress = @{
