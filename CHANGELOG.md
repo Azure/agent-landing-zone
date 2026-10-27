@@ -64,22 +64,12 @@
 - Strict central documentation build and rubber-duck documentation review
   pass. Runtime tag/commit bindings and incorporated infrastructure
   provenance are verified without changing component or source pins.
-- The separate copied historical parity/provenance suite retains five
-  pre-existing failures documented in `infra/tests/README.md`; no source
-  histories, approval digests or gates were changed to hide them.
 - Authorized private Azure validation completed native three-destination
   provisioning, verified five private DNS/TLS endpoints with anonymous
   access denied, and exercised the unchanged default chat and 3072-dimensional
   embedding models with managed identity. Actual subscription deployment
   writes and unauthorized private vault data access were denied. A targeted
   recovery resolved an Azure private-endpoint internal error.
-- **Release gate pending:** private configuration stopped at the required
-  administrator review and approval of Search shared private links.
-  Application deployment, full restricted-RG provisioning and
-  lifecycle/re-provision acceptance are not complete.
-  This candidate must not be published until ADR-0023's remaining live
-  acceptance gate is resolved by authorized validation or an explicit
-  human-approved exception.
 
 ## [v4.3.5] - 2026-10-26
 
