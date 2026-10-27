@@ -14,10 +14,13 @@ telemetry and provisioned service endpoints, with no additional fixed runtime
 destination. Configurable SQL, SharePoint and MCP destinations are operator
 choices, not a reason to grant wildcard access.
 
-The approved source review covers UI v3.3.1, orchestrator candidate
-`aafde58271638e60acac52f7c6a315841181e432`, and ingestion candidate
-`09e4b2546426d8d85d9e709b2f1a23a4d2d180aa`. The coordinated Foundry-root
-release owns the final manifest pins. No runtime source changes are necessary.
+The approved source review covers UI v3.3.1 at
+`b54f44db1a4e38389ecc901ebd7a9ecacf3f5554`, orchestrator v5.2.2 at
+`243e61191a7fdc5f1cf92f2ac47b779d58be3fa3`, and ingestion v3.1.2 at
+`833aa54f2b12db342b84f96e8873b111ad980754`. Their tokenizer dependencies
+are tiktoken 0.14.0 and 0.7.0 respectively; both encoding initialization
+paths require the same host. The coordinated Foundry-root release owns
+the manifest pins. No runtime source changes are necessary.
 Custom definitions currently add applications to the selected bundled
 workloads; egress selection must follow that actual composition.
 
@@ -53,7 +56,9 @@ are evidence sources, not implementation targets.
 - Adds an optional `egress` array to each v1 application component, with
   `fqdn`, `protocol`, `port` and `purpose`.
 - Keeps foundation changes generic: expose only the deployment-managed policy
-  ID and workload subnet IDs, gated by existing isolation/firewall selection.
+  ID and workload subnet IDs, gated by existing isolation/firewall selection,
+  under the existing `HOSTED_AGENT_DEPLOYMENT.workloadEgress` handoff
+  (the root already uses ARM's maximum 64 outputs).
 - Requires management-plane reads and a narrowly scoped child-resource write,
   explicit ownership metadata, collision checks and concurrency protection.
 - Works with existing hooks and requires no runtime/configuration-label change.

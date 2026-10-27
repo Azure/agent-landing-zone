@@ -4124,6 +4124,14 @@ output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = (deployContainerRegistry ||
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = (deployContainerRegistry || _hostedAgentPrerequisitesEnabled) ? _hostedAgentContainerRegistryEndpoint : ''
 #disable-next-line BCP318
 output HOSTED_AGENT_DEPLOYMENT object = {
+  workloadEgress: {
+    networkIsolation: _networkIsolation
+    managedFirewallPolicyId: firewall.outputs.policyResourceId
+    subnets: {
+      containerapp: _caEnvSubnetId
+      'azure.ai.agent': _agentSubnetId
+    }
+  }
   enabled: deployHostedAgent
   agent: deployHostedAgent ? {
     name: hostedAgent.name

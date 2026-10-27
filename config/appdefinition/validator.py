@@ -17,6 +17,7 @@ from config import find_repo_root
 from .errors import AppDefinitionValidationError, ValidationIssue
 from .loader import KIND_CONTAINER_APP, KIND_HOSTED_AGENT, AppDefinition
 from .profiles import PROFILES
+from .egress import validate_requirement
 
 if TYPE_CHECKING:
     from jsonschema import Draft202012Validator
@@ -161,6 +162,11 @@ def _semantic_issues(definition: AppDefinition, repo_root: Path | None) -> list[
     components = [c for c in document.get("components") or [] if isinstance(c, dict)]
     seen_names: dict[str, int] = {}
     for index, component in enumerate(components):
+        for e_index, requirement in enumerate(component.get("egress", [])):
+            try:
+                validate_requirement(requirement)
+            except ValueError as error:
+                issues.append(ValidationIssue(pointer("components", index, "egress", e_index), str(error)))
         name = component.get("name")
         if isinstance(name, str):
             if name in seen_names:

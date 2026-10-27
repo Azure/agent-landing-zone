@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+- Add optional per-component runtime egress declarations, an offline review
+  plan and source-subnet-scoped reconciliation of owned application rules.
+  Preserve legacy definitions, unrelated rules and shared requirements;
+  external policies are report-only and non-isolated deployments perform
+  no firewall operations.
+- Declare the orchestrator and ingestion cold-cache tiktoken dependency;
+  the UI declares no additional runtime egress.
+
 ### Changed
 - **Foundry-first deployment root.** Use `AZURE_RESOURCE_GROUP` for Foundry,
   grounding and the native azd root; select application resources with

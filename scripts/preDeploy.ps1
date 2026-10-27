@@ -198,6 +198,7 @@ if ($topologyExitCode -ne 0 -or -not $topologyJson) {
 $topologyInfo = ("$topologyJson").Trim() | ConvertFrom-Json
 $hostedMode = [bool]$topologyInfo.deploy_hosted_agent_orchestration
 $administrativePanel = [bool]$topologyInfo.deploy_administrative_panel
+
 $deploymentMode = [string]$topologyInfo.topology
 $selectedComponents = @($topologyInfo.components)
 Write-Host "Agent Landing Zone deployment mode: $deploymentMode" -ForegroundColor Cyan
@@ -209,6 +210,11 @@ if ($networkExitCode -ne 0) {
   Write-Error "Private deployment prerequisites failed. Use a VPN/VNet-connected host; RUN_FROM_JUMPBOX is not a connectivity bypass." -ErrorAction Continue
   exit $networkExitCode
 }
+
+# BEGIN component runtime egress
+Invoke-PythonModule -ModuleName 'config.deployment.egress' -Arguments @('--apply')
+if ($LASTEXITCODE -ne 0) { Write-Error "Component egress reconciliation failed; application deployment has not started."; exit $LASTEXITCODE }
+# END component runtime egress
 
 # Under network isolation the registry has no public access, so ACR Task builds
 # only work through the in-VNet agent pool (#741). Fail before touching any app.
