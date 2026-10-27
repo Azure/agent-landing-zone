@@ -248,15 +248,29 @@ if [[ "$hosted_mode" =~ ^(1|true|t|yes|y)$ ]]; then
   environment_name="$(get_azd_value "$repo_root" "AZURE_ENV_NAME")"
   hosted_startup_command="$(get_azd_value "$repo_root" "HOSTED_AGENT_STARTUP_COMMAND")"
   hosted_prepared="$(get_azd_value "$repo_root" "HOSTED_AGENT_PREPARED" | tr '[:upper:]' '[:lower:]')"
-  deploy_hosted="$(get_azd_value "$repo_root" "DEPLOY_HOSTED_AGENT" | tr '[:upper:]' '[:lower:]')"
-  hosted_agent_digest="$(get_azd_value "$repo_root" "HOSTED_AGENT_IMAGE_VERSION")"
 
   [ -f "$hosted_project/azure.yaml" ] || { red "Hosted agent azd project not found at $hosted_project."; exit 1; }
-  if [ "$hosted_prepared" != "true" ] || [ "$deploy_hosted" != "true" ]; then
-    red "Hosted prerequisites are prepared, but the immutable deploy handoff is not materialized."
-    red "Run: scripts/prepareHostedDeployment.sh && azd provision && azd deploy"
+  # BEGIN automatic hosted image preparation
+  if [ "$hosted_prepared" != "true" ]; then
+    red "Hosted foundation prerequisites are missing. Run azd provision first."
     exit 1
   fi
+  prepared_json="$(cd "$repo_root" && python3 -m config.deployment.hosted_prepare --manifest "$manifest_path" --for-deploy)" || {
+    red "Automatic hosted image preparation failed; agent deployment has not started."
+    exit 1
+  }
+  jq -e 'type == "object" and keys == [
+    "DEPLOY_HOSTED_AGENT", "HOSTED_AGENT_DEPLOYMENT", "HOSTED_AGENT_IMAGE_SOURCE_COMMIT",
+    "HOSTED_AGENT_IMAGE_STARTUP_COMMAND_SHA256", "HOSTED_AGENT_IMAGE_VERSION"
+    ] and all(to_entries[];
+    (.value | type == "string") and (.value | contains("\u0000") | not))' \
+    <<< "$prepared_json" >/dev/null || { red "Invalid hosted image preparation result."; exit 1; }
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    export "$key=$value"
+  done < <(jq -b -j 'to_entries[] | .key, "\u0000", .value, "\u0000"' <<< "$prepared_json")
+  hosted_agent_digest="$HOSTED_AGENT_IMAGE_VERSION"
+  deploy_hosted="$DEPLOY_HOSTED_AGENT"
+  # END automatic hosted image preparation
   export HOSTED_AGENT_RESOURCE_SCOPE="$hosted_scope"
   export AZURE_AI_PROJECT_ENDPOINT="$project_endpoint"
   export AZURE_AI_PROJECT_RESOURCE_ID="$project_resource_id"

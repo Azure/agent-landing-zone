@@ -241,20 +241,33 @@ if ($hostedMode) {
     Write-Error "Hosted agent azd project not found at $hostedProject."
     exit 1
   }
-  if (
-    "$($globalEnv.HOSTED_AGENT_PREPARED)".ToLowerInvariant() -ne 'true' -or
-    "$($globalEnv.DEPLOY_HOSTED_AGENT)".ToLowerInvariant() -ne 'true'
-  ) {
-    Write-Error @"
-Hosted prerequisites are prepared, but the immutable deploy handoff is not materialized.
-Run:
-  pwsh scripts/prepareHostedDeployment.ps1
-  azd provision
-  azd deploy
-The preparation command builds the manifest-pinned image and stores only its immutable digest.
-"@
+  # BEGIN automatic hosted image preparation
+  if ("$($globalEnv.HOSTED_AGENT_PREPARED)".ToLowerInvariant() -ne 'true') {
+    Write-Error "Hosted foundation prerequisites are missing. Run azd provision first."
     exit 1
   }
+  $preparedJson = Invoke-PythonModule -ModuleName 'config.deployment.hosted_prepare' -Arguments @('--manifest', $manifestPath, '--for-deploy')
+  if ($LASTEXITCODE -ne 0) { Write-Error "Automatic hosted image preparation failed; agent deployment has not started."; exit 1 }
+  $preparedKeys = @('HOSTED_AGENT_IMAGE_VERSION', 'HOSTED_AGENT_IMAGE_SOURCE_COMMIT', 'HOSTED_AGENT_IMAGE_STARTUP_COMMAND_SHA256', 'HOSTED_AGENT_DEPLOYMENT', 'DEPLOY_HOSTED_AGENT')
+  try {
+    $preparedValues = ($preparedJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    if ($preparedValues -isnot [pscustomobject] -or @($preparedValues.PSObject.Properties).Count -ne $preparedKeys.Count) {
+      throw "Expected hosted deployment values."
+    }
+    foreach ($prop in $preparedValues.PSObject.Properties) {
+      if ($prop.Name -cnotin $preparedKeys -or $prop.Value -isnot [string] -or $prop.Value.Contains([char]0)) {
+        throw "Invalid hosted deployment value."
+      }
+    }
+  } catch {
+    Write-Error "Invalid hosted image preparation result."
+    exit 1
+  }
+  foreach ($prop in $preparedValues.PSObject.Properties) {
+    Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
+    $globalEnv | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+  }
+  # END automatic hosted image preparation
   Push-Location $repoRoot
   try {
     Invoke-PythonModule -ModuleName 'config.deployment.topology' -Arguments @('--validate-hosted-deploy') | Out-Null

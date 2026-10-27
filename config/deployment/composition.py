@@ -150,6 +150,30 @@ def hosted_startup_command_sha256(environment: Mapping[str, str]) -> str:
     ).hexdigest()
 
 
+def hosted_agent_configuration(environment: Mapping[str, str]) -> dict[str, object]:
+    """Application-owned fields shared by provision and deploy handoffs."""
+    return {
+        "name": environment.get("HOSTED_AGENT_NAME") or HOSTED_AGENT_NAME_DEFAULT,
+        "image": environment.get("HOSTED_AGENT_IMAGE") or HOSTED_AGENT_NAME_DEFAULT,
+        "version": (environment.get("HOSTED_AGENT_IMAGE_VERSION") or "").strip(),
+        "startupCommand": hosted_startup_command(environment),
+        "runtime": {
+            "cpu": environment.get("HOSTED_AGENT_CONTAINER_CPU") or "2",
+            "memory": environment.get("HOSTED_AGENT_CONTAINER_MEMORY") or "4Gi",
+        },
+        "protocols": [
+            {
+                "protocol": "responses",
+                "version": environment.get("HOSTED_AGENT_RESPONSES_PROTOCOL_VERSION") or "2.0.0",
+            },
+            {
+                "protocol": "invocations",
+                "version": environment.get("HOSTED_AGENT_INVOCATIONS_PROTOCOL_VERSION") or "1.0.0",
+            },
+        ],
+    }
+
+
 def validate_hosted_prerequisites(
     environment: Mapping[str, str],
     *,
@@ -711,25 +735,14 @@ def compose_parameters(
             and generated_source_commit.lower()
             != expected_hosted_source_commit.lower()
         ):
-            raise DeploymentTopologyError(
-                "The generated HOSTED_AGENT_IMAGE_VERSION was built from "
-                f"{generated_source_commit}, but manifest.json now pins "
-                f"{expected_hosted_source_commit}. Run the hosted image "
-                "preparation command again before provisioning the deploy "
-                "handoff."
-            )
+            deploy_hosted = False
         if (
             generated_source_commit
             and generated_startup_command_sha256
             and generated_startup_command_sha256
             != hosted_startup_command_sha256(environment)
         ):
-            raise DeploymentTopologyError(
-                "The generated HOSTED_AGENT_IMAGE_VERSION does not match "
-                "the configured HOSTED_AGENT_STARTUP_COMMAND. Run the hosted "
-                "image preparation command again before provisioning the "
-                "deploy handoff."
-            )
+            deploy_hosted = False
     elif hosted:
         validate_hosted_prerequisites(
             environment,
@@ -751,47 +764,12 @@ def compose_parameters(
         parameters["deployAcrTaskAgentPool"] = {"value": True}
 
     if hosted:
+        agent_configuration = hosted_agent_configuration(environment)
+        if not deploy_hosted:
+            # Deploy rebuilds stale generated images after the foundation is ready.
+            agent_configuration["version"] = ""
         parameters["hostedAgent"] = {
-            "value": {
-                "name": (
-                    environment.get("HOSTED_AGENT_NAME")
-                    or HOSTED_AGENT_NAME_DEFAULT
-                ),
-                "image": (
-                    environment.get("HOSTED_AGENT_IMAGE")
-                    or HOSTED_AGENT_NAME_DEFAULT
-                ),
-                "version": digest,
-                "startupCommand": (
-                    hosted_startup_command(environment)
-                ),
-                "runtime": {
-                    "cpu": environment.get("HOSTED_AGENT_CONTAINER_CPU") or "2",
-                    "memory": (
-                        environment.get("HOSTED_AGENT_CONTAINER_MEMORY") or "4Gi"
-                    ),
-                },
-                "protocols": [
-                    {
-                        "protocol": "responses",
-                        "version": (
-                            environment.get(
-                                "HOSTED_AGENT_RESPONSES_PROTOCOL_VERSION"
-                            )
-                            or "2.0.0"
-                        ),
-                    },
-                    {
-                        "protocol": "invocations",
-                        "version": (
-                            environment.get(
-                                "HOSTED_AGENT_INVOCATIONS_PROTOCOL_VERSION"
-                            )
-                            or "1.0.0"
-                        ),
-                    },
-                ],
-            }
+            "value": agent_configuration,
         }
 
     apps_parameter = parameters.get("containerAppsList")

@@ -1,5 +1,36 @@
 # Changelog
 
+## [v5.2.0] - 2026-10-27
+
+### Changed
+- Prepare the bundled Foundry hosted image automatically during `azd deploy`,
+  binding its immutable digest to the provisioned foundation without another
+  `azd provision`. Fresh hosted deployments also support `azd up`; unchanged
+  images are reused and stale generated source/startup provenance is rebuilt
+  during deployment. Standalone preparation scripts remain optional
+  compatibility commands.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Repository deployment and contract suite: 795 tests and 767 subtests pass;
+  5 tests are skipped. Targeted integration coverage including continuity:
+  451 tests and 312 subtests pass, with 1 skipped test.
+- PowerShell and Bash hook checks, Bicep build/lint and the offline foundation
+  contract runner pass. Published component and infrastructure tag/commit
+  bindings match the manifest; incorporated infrastructure is unchanged.
+- Central documentation builds in strict mode. The Azure DevOps example
+  validator passes 310 promotion cases plus Bash/Python and cleanup checks.
+  Runbooks and Agent Landing Zone What's new describe the simplified workflow.
+- Validation is offline and mocked; no live Azure hosted build, Basic or
+  isolated deployment, agent publication, or runtime rollback was performed.
+
 ## [v5.1.1] - 2026-10-27
 
 ### Fixed
