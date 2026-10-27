@@ -70,6 +70,11 @@ Prioritized characteristics and measures:
   this repository; it detects Bicep changes and opens a Terraform sync PR
   against `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone` that requires
   human review. The Terraform module is not renamed (R5, FR-010c).
+
+  **Maintenance update:** The automatic parity-PR workflow has since been
+  retired. Bicep remains authoritative; maintainers still own Terraform
+  parity and review changes in the Terraform repository.
+
 - Infrastructure validation workflows run from this repository (FR-010c).
 - Keep current module usage; AVM adoption is out of scope (R6).
 - `Azure/bicep-ptn-aiml-landing-zone` stays available with history and tags
