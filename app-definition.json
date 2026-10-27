@@ -33,7 +33,7 @@
       "name": "ingestion",
       "kind": "containerapp",
       "path": "ingestion",
-      "source": { "commit": "833aa54f2b12db342b84f96e8873b111ad980754" },
+      "source": { "commit": "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1" },
       "profiles": ["model-user", "conversation-store", "ingestion-writer"],
       "egress": [
         {

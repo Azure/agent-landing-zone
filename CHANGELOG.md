@@ -1,5 +1,31 @@
 # Changelog
 
+## [v5.1.1] - 2026-10-27
+
+### Fixed
+- **SharePoint permission-only synchronization.** Pin Agent App Ingestion
+  v3.1.3 to refresh supported user/group ACLs on every affected item document
+  and document-library chunk independently of content timestamps. Remove
+  revoked principals without reprocessing unchanged content, include
+  Graph-reported inherited file permissions and retry failed ACL updates.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Ingestion's complete maintained suite passes: 1,015 tests and 10 subtests;
+  its evidence-bound quality gate reports no findings.
+- Deployment and lifecycle contracts, Bicep build/lint and all 16 offline
+  foundation entrypoints pass. Exact graph projections reject 27 mutations
+  while preserving historical fingerprints.
+- Published component tag/commit bindings and the strict central
+  documentation build pass.
+
 ## [v5.1.0] - 2026-10-27
 
 ### Added
