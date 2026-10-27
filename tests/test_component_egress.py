@@ -16,7 +16,7 @@ from config.appdefinition import AppDefinition, collect_issues, load_definition
 from config.appdefinition.egress import validate_requirement
 from config.deployment import egress
 from config.deployment.egress_plan import (
-    GROUP_NAME, canonical, collection_name, declaration_plan, reconcile,
+    GROUP_NAME, GROUP_PRIORITY, canonical, collection_name, declaration_plan, reconcile,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +70,7 @@ class FakeNetwork:
         self.calls = []
         self.concurrent = False
         self.list_count = 0
+        self.other_groups = []
 
     def request(self, method, resource_id, **kwargs):
         self.calls.append((method, resource_id, kwargs))
@@ -84,8 +85,8 @@ class FakeNetwork:
                 if result:
                     result["etag"] = 'W/"concurrent-revision"'
                 else:
-                    result = group({"priority": 300, "ruleCollections": []})
-            return {"value": [] if result is None else [result]}
+                    result = group({"priority": GROUP_PRIORITY, "ruleCollections": []})
+            return {"value": copy.deepcopy(self.other_groups) + ([] if result is None else [result])}
         if method == "put":
             assert resource_id == POLICY + "/ruleCollectionGroups/" + GROUP_NAME
             self.current = group(kwargs["body"]["properties"])
@@ -208,7 +209,7 @@ def test_reconcile_preserves_shared_requirement_then_removes_final_owner():
         component["egress"] = []
     removed = reconcile(selected, SOURCES, group(remaining["properties"]))
     assert len(removed["removed"]) == 1
-    assert removed["properties"] == {"priority": 300, "ruleCollections": []}
+    assert removed["properties"] == {"priority": GROUP_PRIORITY, "ruleCollections": []}
 
 
 def test_legacy_absent_preserves_existing_ownership_but_fresh_legacy_adds_nothing():
@@ -240,6 +241,33 @@ def test_unrelated_rules_collections_and_inputs_are_preserved_exactly():
     assert current == before
     assert result["properties"]["ruleCollections"][0]["rules"] == [unrelated_rule]
     assert result["properties"]["ruleCollections"][1] == unrelated_collection
+
+
+def test_unrelated_null_description_is_preserved_when_owned_rules_are_removed():
+    selected = plan()
+    current = group(reconcile(selected, SOURCES, None)["properties"])
+    unrelated = {
+        "name": "operator-exception", "description": None, "ruleType": "ApplicationRule",
+        "protocols": [{"protocolType": "Https", "port": 443}],
+        "targetFqdns": ["operator.example.com"], "sourceAddresses": ["10.88.0.0/24"],
+    }
+    current["properties"]["ruleCollections"][0]["rules"].insert(0, unrelated)
+    before = copy.deepcopy(current)
+    selected["components"] = []
+    report = reconcile(selected, SOURCES, current)
+    assert current == before
+    assert report["properties"]["ruleCollections"][0]["rules"] == [unrelated]
+    assert not reconcile(selected, SOURCES, group(report["properties"]))["changed"]
+
+
+def test_reserved_priority_collision_is_actionable_without_writes():
+    client = FakeNetwork()
+    client.other_groups = [{
+        "name": "operator-group", "properties": {"priority": GROUP_PRIORITY},
+    }]
+    with pytest.raises(ValueError, match=f"priority {GROUP_PRIORITY}"):
+        egress.review_or_apply(plan(), context_env(), apply=True, client=client)
+    assert not any(call[0] == "put" for call in client.calls)
 
 
 @pytest.mark.parametrize("mutation", [
@@ -451,14 +479,14 @@ def test_destination_deduplication_preserves_different_protocols_ports_and_purpo
 def test_network_cli_only_writes_reviewed_child_body_with_conditional_header(tmp_path):
     def run(command, **kwargs):
         body = json.loads(Path(command[command.index("--body") + 1][1:]).read_text())
-        assert body == {"properties": {"priority": 300, "ruleCollections": []}}
+        assert body == {"properties": {"priority": GROUP_PRIORITY, "ruleCollections": []}}
         assert command[command.index("--headers") + 1] == 'If-Match=W/"one"'
         assert command[command.index("--url") + 1] == POLICY + "/ruleCollectionGroups/" + GROUP_NAME + "?api-version=2024-07-01"
         return subprocess.CompletedProcess(command, 0, stdout="{}")
     with patch.object(egress.subprocess, "run", side_effect=run):
         egress.NetworkClient().request(
             "put", POLICY + "/ruleCollectionGroups/" + GROUP_NAME,
-            body={"properties": {"priority": 300, "ruleCollections": []}}, headers=['If-Match=W/"one"'],
+            body={"properties": {"priority": GROUP_PRIORITY, "ruleCollections": []}}, headers=['If-Match=W/"one"'],
         )
 
 
@@ -506,6 +534,18 @@ def test_compiled_generic_handoff_does_not_create_new_resources_or_relax_firewal
         assert firewall["resources"][name]["condition"] == "[and(parameters('deployAzureFirewall'), parameters('networkIsolation'))]"
     assert GROUP_NAME not in json.dumps(firewall)
     assert REQUIREMENT["fqdn"] not in json.dumps(template)
+    foundation_groups = [
+        resource for resource in firewall["resources"].values()
+        if resource["type"].lower() == "microsoft.network/firewallpolicies/rulecollectiongroups"
+    ]
+    assert {resource["properties"]["priority"] for resource in foundation_groups} == {200, 250, 300}
+    assert GROUP_PRIORITY not in {resource["properties"]["priority"] for resource in foundation_groups}
+    client = FakeNetwork()
+    client.other_groups = copy.deepcopy(foundation_groups)
+    before = copy.deepcopy(client.other_groups)
+    egress.review_or_apply(plan(), context_env(), apply=True, client=client)
+    assert client.other_groups == before
+    assert len([call for call in client.calls if call[0] == "put"]) == 1
 
 
 @pytest.mark.skipif(os.environ.get("AGENTLZ_TEST_TOKENIZER_COLD_CACHE") != "true",

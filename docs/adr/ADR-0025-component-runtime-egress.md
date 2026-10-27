@@ -85,6 +85,9 @@ declare the shared tokenizer destination.
 
 An application-owned collection in a dedicated component-egress group
 contains deterministic named rules with a versioned ownership marker.
+Reserve group priority 400, separate from the foundation's default (200),
+ACR build (250) and optional ACS media (300) groups; reject other occupants
+of that reserved priority without modifying them.
 Unmarked rules and other collections survive reconciliation. A malformed
 owned marker or a conflicting collection fails rather than being adopted.
 Remove a requirement only when its last declared owner disappears. For an

@@ -23,7 +23,7 @@ from config.deployment.composition import (
 )
 
 GROUP_NAME = "AgentLzComponentEgress"
-GROUP_PRIORITY = 300
+GROUP_PRIORITY = 400
 MARKER = "agent-lz-egress/v1:"
 
 
@@ -110,6 +110,11 @@ def _owner_prefix(plan: Mapping[str, Any]) -> str:
     return MARKER + plan["applicationId"] + ":"
 
 
+def _is_owned(rule: Mapping[str, Any], plan: Mapping[str, Any]) -> bool:
+    description = rule.get("description")
+    return isinstance(description, str) and description.startswith(_owner_prefix(plan))
+
+
 def subnet_prefixes(values: list[str]) -> list[str]:
     if not values:
         raise ValueError("A workload subnet must have at least one address prefix.")
@@ -183,7 +188,7 @@ def reconcile(
     old_owned = []
     for rule in collection["rules"]:
         description = rule.get("description", "")
-        if not isinstance(description, str) or not description.startswith(_owner_prefix(plan)):
+        if not _is_owned(rule, plan):
             unrelated.append(rule)
             continue
         destination = _owned_destination(rule)
@@ -250,7 +255,7 @@ def reconcile(
             item["rules"] = [
                 ({key: value for key, value in rule.items() if key in {
                     "ruleType", "name", "description", "protocols", "targetFqdns", "sourceAddresses",
-                }} if rule.get("description", "").startswith(_owner_prefix(plan)) else rule)
+                }} if _is_owned(rule, plan) else rule)
                 for rule in item["rules"]
             ]
     changed = properties != previous_properties

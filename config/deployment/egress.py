@@ -125,7 +125,7 @@ def read_group(client: NetworkClient, policy_id: str) -> dict[str, Any] | None:
         raise ValueError("Duplicate component-egress groups.")
     if any(group["name"].lower() != GROUP_NAME.lower()
            and group["properties"]["priority"] == GROUP_PRIORITY for group in groups):
-        raise ValueError("Component-egress group priority 300 is already in use; review the policy.")
+        raise ValueError(f"Component-egress group priority {GROUP_PRIORITY} is already in use; review the policy.")
     if not matches:
         return None
     group = matches[0]
