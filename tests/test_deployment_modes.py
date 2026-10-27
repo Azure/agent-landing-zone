@@ -363,7 +363,7 @@ class DeploymentCompositionTests(unittest.TestCase):
             composed["parameters"]["deployAcrTaskAgentPool"]["value"]
         )
 
-    def test_generated_digest_must_match_manifest_source_commit(self) -> None:
+    def test_stale_generated_source_defers_image_binding_to_deploy(self) -> None:
         environment = {
             "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
             "HOSTED_AGENT_RESOURCE_SCOPE": "api://agent/.default",
@@ -371,16 +371,14 @@ class DeploymentCompositionTests(unittest.TestCase):
             "HOSTED_AGENT_IMAGE_SOURCE_COMMIT": "a" * 40,
         }
 
-        with self.assertRaisesRegex(
-            ValueError, "manifest.json now pins"
-        ):
-            compose_parameters(
-                source_parameters(),
-                environment,
-                expected_hosted_source_commit="b" * 40,
-            )
+        composed = compose_parameters(
+            source_parameters(), environment, expected_hosted_source_commit="b" * 40,
+        )
+        self.assertTrue(composed["parameters"]["prepareHostedAgent"]["value"])
+        self.assertFalse(composed["parameters"]["deployHostedAgent"]["value"])
+        self.assertEqual("", composed["parameters"]["hostedAgent"]["value"]["version"])
 
-    def test_generated_digest_must_match_startup_command(self) -> None:
+    def test_stale_generated_startup_defers_image_binding_to_deploy(self) -> None:
         environment = {
             "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
             "HOSTED_AGENT_RESOURCE_SCOPE": "api://agent/.default",
@@ -389,14 +387,12 @@ class DeploymentCompositionTests(unittest.TestCase):
             "HOSTED_AGENT_IMAGE_STARTUP_COMMAND_SHA256": "0" * 64,
         }
 
-        with self.assertRaisesRegex(
-            ValueError, "does not match.*HOSTED_AGENT_STARTUP_COMMAND"
-        ):
-            compose_parameters(
-                source_parameters(),
-                environment,
-                expected_hosted_source_commit="a" * 40,
-            )
+        composed = compose_parameters(
+            source_parameters(), environment, expected_hosted_source_commit="a" * 40,
+        )
+        self.assertTrue(composed["parameters"]["prepareHostedAgent"]["value"])
+        self.assertFalse(composed["parameters"]["deployHostedAgent"]["value"])
+        self.assertEqual("", composed["parameters"]["hostedAgent"]["value"]["version"])
 
     def test_hosted_with_panel_composes_only_panel_resources(self) -> None:
         environment = {
