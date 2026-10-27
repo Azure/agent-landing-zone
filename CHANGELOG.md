@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- Prepare the bundled Foundry hosted image automatically during `azd deploy`,
+  binding its immutable digest to the provisioned foundation without another
+  `azd provision`. Fresh hosted deployments also support `azd up`; unchanged
+  images are reused and stale generated source/startup provenance is rebuilt
+  during deployment. Standalone preparation scripts remain optional
+  compatibility commands.
+
 ## [v5.1.1] - 2026-10-27
 
 ### Fixed

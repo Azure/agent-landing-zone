@@ -8,13 +8,13 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Mapping
 
 from config.deployment.composition import (
     HOSTED_AGENT_NAME_DEFAULT,
     DeploymentMode,
+    hosted_agent_configuration,
     hosted_startup_command,
     hosted_startup_command_sha256,
     is_truthy,
@@ -25,6 +25,9 @@ from config.deployment.hosted_image import prepare_hosted_image
 from config.deployment.private_network import check_stage
 from config.deployment.context import registry_resource_group
 from util.azure_cli import resolve_az_command
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:
@@ -229,9 +232,84 @@ def persist_digest(
         )
 
 
+def deployment_handoff(environment: Mapping[str, str]) -> dict[str, object]:
+    """Validate foundation bindings without requiring an application image."""
+    handoff = json.loads(_required(environment, "HOSTED_AGENT_DEPLOYMENT"))
+    if not isinstance(handoff, dict):
+        raise ValueError("HOSTED_AGENT_DEPLOYMENT must be an object.")
+    for section, bindings in (
+        ("foundry", {
+            "projectResourceId": "AZURE_AI_PROJECT_RESOURCE_ID",
+            "projectEndpoint": "AZURE_AI_PROJECT_ENDPOINT",
+        }),
+        ("containerRegistry", {"endpoint": "AZURE_CONTAINER_REGISTRY_ENDPOINT"}),
+    ):
+        context = handoff.get(section)
+        if not isinstance(context, dict):
+            raise ValueError(f"Missing provisioned hosted {section} context. Run azd provision first.")
+        for field, variable in bindings.items():
+            if context.get(field) != _required(environment, variable):
+                raise ValueError(f"Hosted foundation {section}.{field} binding mismatch.")
+    return handoff
+
+
+def prepare_deployment(
+    environment: Mapping[str, str], manifest: Mapping[str, object],
+) -> dict[str, str]:
+    """Build/reuse the image and bind it to the already-provisioned foundation."""
+    if resolve_mode(environment) is DeploymentMode.CLASSIC:
+        raise ValueError("Automatic hosted deployment requires a hosted topology.")
+    _required(environment, "AZURE_ENV_NAME")
+    handoff = deployment_handoff(environment)
+    digest, source_commit = prepare_environment(environment, manifest)
+    if digest is None:
+        raise ValueError("Hosted image preparation did not return an image digest.")
+    prepared = {
+        **environment,
+        "HOSTED_AGENT_IMAGE_VERSION": digest,
+    }
+    validate_hosted_prerequisites(prepared, require_foundry_project=True)
+    configuration = hosted_agent_configuration(prepared)
+    handoff["enabled"] = True
+    handoff["agent"] = {
+        "name": configuration["name"],
+        "image": (
+            f"{environment['AZURE_CONTAINER_REGISTRY_ENDPOINT'].rstrip('/')}/"
+            f"{configuration['image']}@{digest}"
+        ),
+        "imageVersion": digest,
+        "startupCommand": configuration["startupCommand"],
+        "runtime": configuration["runtime"],
+        "protocols": configuration["protocols"],
+    }
+    values = {
+        "HOSTED_AGENT_IMAGE_VERSION": digest,
+        "HOSTED_AGENT_IMAGE_SOURCE_COMMIT": source_commit or "",
+        "HOSTED_AGENT_IMAGE_STARTUP_COMMAND_SHA256": (
+            hosted_startup_command_sha256(environment) if source_commit else ""
+        ),
+        "HOSTED_AGENT_DEPLOYMENT": json.dumps(handoff, separators=(",", ":")),
+        "DEPLOY_HOSTED_AGENT": "true",
+    }
+    persist_digest(environment, digest, source_commit)
+    azd = shutil.which("azd") or "azd"
+    for name in ("HOSTED_AGENT_DEPLOYMENT", "DEPLOY_HOSTED_AGENT"):
+        subprocess.run(
+            [azd, "env", "set", name, values[name], "--environment",
+             environment["AZURE_ENV_NAME"], "--no-prompt"],
+            check=True, stdout=subprocess.DEVNULL,
+        )
+    return values
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--for-deploy",
+        action="store_true",
+        help="Prepare and persist the application handoff; emit JSON for the deployment hook.",
+    )
     parser.add_argument(
         "--manifest",
         type=Path,
@@ -248,21 +326,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        if args.for_deploy:
+            if args.image_version:
+                raise ValueError("--image-version cannot be combined with --for-deploy.")
+            values = prepare_deployment(os.environ, manifest)
+            print(json.dumps(values))
+            LOGGER.info("Immutable hosted image and application handoff are ready.")
+            return 0
         digest, generated_source_commit = prepare_environment(
             os.environ,
             manifest,
             image_version_override=args.image_version,
         )
         if digest is None:
-            print("Classic topology selected; hosted image preparation skipped.")
+            LOGGER.info("Classic topology selected; hosted image preparation skipped.")
             return 0
         persist_digest(os.environ, digest, generated_source_commit)
         print(digest)
-        print(
-            "Hosted image digest materialized. Run azd provision again to "
-            "materialize the deploy handoff, then run azd deploy.",
-            file=sys.stderr,
-        )
+        LOGGER.info("Hosted image digest materialized. Run azd deploy to publish the agent.")
         return 0
     except (
         OSError,
@@ -270,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         RuntimeError,
         subprocess.CalledProcessError,
     ) as exc:
-        print(f"Hosted image preparation failed: {exc}", file=sys.stderr)
+        LOGGER.error("Hosted image preparation failed: %s", exc)
         return 1
 
 

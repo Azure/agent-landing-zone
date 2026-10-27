@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import copy
+import json
+import os
 import subprocess
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from config.deployment.composition import hosted_startup_command_sha256
 from config.deployment.hosted_prepare import (
     persist_digest,
+    prepare_deployment,
     prepare_environment,
+    main,
 )
 from config.deployment.private_network import PrivateNetworkError
 
@@ -385,6 +394,144 @@ class PersistDigestTests(unittest.TestCase):
         self.assertEqual(SOURCE_COMMIT, commands[1][source_index + 1])
         self.assertEqual(64, len(commands[2][startup_index + 1]))
         self.assertEqual(DIGEST, commands[3][final_digest_index + 1])
+
+
+def deployment_environment(**overrides: str) -> dict[str, str]:
+    environment = hosted_environment(AZURE_ENV_NAME="test", DEPLOY_HOSTED_AGENT="false")
+    environment["HOSTED_AGENT_DEPLOYMENT"] = json.dumps({
+        "enabled": False,
+        "agent": None,
+        "foundry": {
+            "projectResourceId": environment["AZURE_AI_PROJECT_RESOURCE_ID"],
+            "projectEndpoint": environment["AZURE_AI_PROJECT_ENDPOINT"],
+            "projectPrincipalId": "project-principal",
+            "agentSubnetResourceId": "agent-subnet",
+        },
+        "containerRegistry": {
+            "endpoint": environment["AZURE_CONTAINER_REGISTRY_ENDPOINT"],
+            "resourceId": "registry-id",
+        },
+        "privateBuild": {"required": False, "acrTaskAgentPoolName": ""},
+        "workloadEgress": {"networkIsolation": False, "managedFirewallPolicyId": ""},
+    })
+    environment.update(overrides)
+    return environment
+
+
+class PrepareDeploymentTests(unittest.TestCase):
+    @patch("config.deployment.hosted_prepare.resolve_az_command", return_value="az")
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image", return_value=NEW_DIGEST)
+    def test_prepare_only_foundation_is_sufficient(self, build, run, resolve) -> None:
+        environment = deployment_environment()
+        original = copy.deepcopy(environment)
+        values = prepare_deployment(environment, MANIFEST)
+        self.assertEqual(original, environment)
+        self.assertEqual(NEW_DIGEST, values["HOSTED_AGENT_IMAGE_VERSION"])
+        self.assertEqual(SOURCE_COMMIT, values["HOSTED_AGENT_IMAGE_SOURCE_COMMIT"])
+        self.assertEqual("true", values["DEPLOY_HOSTED_AGENT"])
+        handoff = json.loads(values["HOSTED_AGENT_DEPLOYMENT"])
+        foundation = json.loads(environment["HOSTED_AGENT_DEPLOYMENT"])
+        for section in ("foundry", "containerRegistry", "privateBuild", "workloadEgress"):
+            self.assertEqual(foundation[section], handoff[section])
+        self.assertTrue(handoff["enabled"])
+        agent = handoff["agent"]
+        self.assertEqual(NEW_DIGEST, agent["imageVersion"])
+        self.assertEqual(f"registry.azurecr.io/agent-app-orchestrator@{NEW_DIGEST}", agent["image"])
+        self.assertEqual({"cpu": "2", "memory": "4Gi"}, agent["runtime"])
+        self.assertEqual(["responses", "invocations"], [p["protocol"] for p in agent["protocols"]])
+        self.assertIn("src.api.hosted_entrypoint:app", agent["startupCommand"])
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(6, len(commands))
+        self.assertTrue(all(command[1:3] == ["env", "set"] for command in commands))
+        self.assertEqual(
+            ["HOSTED_AGENT_DEPLOYMENT", "DEPLOY_HOSTED_AGENT"],
+            [command[3] for command in commands[-2:]],
+        )
+        self.assertEqual(SOURCE_COMMIT, build.call_args.kwargs["source_commit"])
+
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    def test_explicit_and_unchanged_generated_digests_skip_builds(self, run) -> None:
+        environment = deployment_environment(HOSTED_AGENT_IMAGE_VERSION=DIGEST)
+        for provenance in (
+            {},
+            {
+                "HOSTED_AGENT_IMAGE_SOURCE_COMMIT": SOURCE_COMMIT,
+                "HOSTED_AGENT_IMAGE_STARTUP_COMMAND_SHA256": hosted_startup_command_sha256(environment),
+            },
+        ):
+            with self.subTest(provenance=provenance), patch(
+                "config.deployment.hosted_image.clone_pinned_source"
+            ) as clone:
+                values = prepare_deployment({**environment, **provenance}, MANIFEST)
+                self.assertEqual(DIGEST, values["HOSTED_AGENT_IMAGE_VERSION"])
+                clone.assert_not_called()
+
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image")
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    def test_invalid_foundation_never_builds_or_persists(self, run, build) -> None:
+        environment = deployment_environment()
+        for raw in ("", "[]", "{", "{}", json.dumps({
+            **json.loads(environment["HOSTED_AGENT_DEPLOYMENT"]),
+            "foundry": {"projectEndpoint": "https://different.example.test"},
+        }), json.dumps({
+            **json.loads(environment["HOSTED_AGENT_DEPLOYMENT"]),
+            "containerRegistry": {"endpoint": "other.azurecr.io"},
+        })):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                prepare_deployment({**environment, "HOSTED_AGENT_DEPLOYMENT": raw}, MANIFEST)
+        build.assert_not_called()
+        run.assert_not_called()
+
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image")
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    def test_missing_prerequisites_and_mutable_digest_never_publish(self, run, build) -> None:
+        for overrides in (
+            {"HOSTED_AGENT_PREPARED": "false"},
+            {"HOSTED_AGENT_RESOURCE_SCOPE": ""},
+            {"HOSTED_AGENT_STARTUP_COMMAND": "python custom.py"},
+            {"AZURE_ENV_NAME": ""},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                prepare_deployment(deployment_environment(**overrides), MANIFEST)
+        build.return_value = "latest"
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            prepare_deployment(deployment_environment(HOSTED_AGENT_IMAGE_VERSION="latest"), MANIFEST)
+        run.assert_not_called()
+
+    @patch("config.deployment.hosted_prepare.prepare_environment")
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    def test_build_failure_never_persists_handoff(self, run, prepare) -> None:
+        prepare.side_effect = RuntimeError("ACR build failed")
+        with self.assertRaisesRegex(RuntimeError, "ACR build failed"):
+            prepare_deployment(deployment_environment(), MANIFEST)
+        run.assert_not_called()
+
+    @patch("config.deployment.hosted_prepare.prepare_environment", return_value=(DIGEST, SOURCE_COMMIT))
+    @patch("config.deployment.hosted_prepare.subprocess.run")
+    def test_cli_emits_only_json_after_all_persistence_succeeds(self, run, prepare) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "manifest.json"
+            manifest.write_text(json.dumps(MANIFEST), encoding="utf-8")
+            for fail_at in (None, *range(6)):
+                output = StringIO()
+                run.reset_mock()
+                run.side_effect = (
+                    None if fail_at is None else [
+                        *([subprocess.CompletedProcess([], 0)] * fail_at),
+                        subprocess.CalledProcessError(1, ["azd"]),
+                    ]
+                )
+                with self.subTest(fail_at=fail_at), patch.dict(
+                    os.environ, deployment_environment(), clear=True
+                ), redirect_stdout(output):
+                    code = main(["--manifest", str(manifest), "--for-deploy"])
+                if fail_at is None:
+                    self.assertEqual(0, code)
+                    self.assertEqual(DIGEST, json.loads(output.getvalue())["HOSTED_AGENT_IMAGE_VERSION"])
+                else:
+                    self.assertEqual(1, code)
+                    self.assertEqual("", output.getvalue())
 
 
 if __name__ == "__main__":

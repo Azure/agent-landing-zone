@@ -545,7 +545,7 @@ class LifecycleParityTests(unittest.TestCase):
     def test_both_predeploy_hooks_fail_closed_on_missing_hosted_prerequisites(
         self,
     ) -> None:
-        # preDeploy accepts only the second, digest-backed handoff phase.
+        # A prepare-only foundation is sufficient; deploy owns the image binding.
         scripts = ROOT / "scripts"
 
         ps1 = (scripts / "preDeploy.ps1").read_text(encoding="utf-8-sig")
@@ -602,6 +602,10 @@ class LifecycleParityTests(unittest.TestCase):
             content = (scripts / name).read_text(encoding="utf-8-sig")
             self.assertNotIn("config.deployment.hosted_image", content)
             self.assertNotIn("azd provision --environment", content)
+            self.assertIn("config.deployment.hosted_prepare", content)
+            self.assertIn("--for-deploy", content)
+            self.assertNotIn("scripts/prepareHostedDeployment", content)
+            self.assertLess(content.index("--for-deploy"), content.index("--validate-hosted-deploy"))
 
     def test_exact_upstream_prepare_deploy_contract_is_mapped(self) -> None:
         parameters = json.loads(
