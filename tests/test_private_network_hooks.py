@@ -75,6 +75,7 @@ function git {
 function docker { $global:LASTEXITCODE = 0 }
 function python {
     $call = $args -join ' '
+    if ($call -match 'config.deployment.egress') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.outputs') {
         $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
@@ -129,6 +130,7 @@ exit "$FAKE_AZD_EXIT"
 """,
     "python3": """#!/usr/bin/env bash
 case "$*" in
+  *config.deployment.egress*) exit 0 ;;
   *config.deployment.resource_groups*) exit 0 ;;
   *config.deployment.outputs*) [ "${FAKE_RG_MISSING:-0}" != 1 ]; exit $? ;;
   *config.deployment.private_network*)

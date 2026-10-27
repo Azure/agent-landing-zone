@@ -31,6 +31,10 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'egress external policy adoption'; Change = { param($t) $t.resources.firewall.properties.template.outputs.policyResourceId.value = '/external/policy' } },
+        @{ Name = 'egress source wildcard'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.subnets.containerapp = '*' } },
+        @{ Name = 'egress isolation gate removed'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.networkIsolation = $true } },
+        @{ Name = 'egress extra selector'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.subnets.unexpected = '*' } },
         @{ Name = 'wrong Foundry scope'; Change = { param($t) $t.resources.aiFoundry.resourceGroup = 'wrong-group' } },
         @{ Name = 'wrong network scope'; Change = { param($t) $t.resources.virtualNetwork.resourceGroup = 'wrong-group' } },
         @{ Name = 'grounding Storage moved to app'; Change = { param($t) $t.resources.storageAccount.resourceGroup = '[resourceGroup().name]' } },

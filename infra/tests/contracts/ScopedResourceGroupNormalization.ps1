@@ -78,6 +78,25 @@ function Invoke-ScopedProjection {
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0025 adds only generic handoff fields. Check their entire compiled
+    # values before projecting them away for the ORIGINAL graph fingerprints.
+    $egress = @{
+        networkIsolation = "[variables('_networkIsolation')]"
+        managedFirewallPolicyId = "[reference('firewall').outputs.policyResourceId.value]"
+        subnets = @{
+            containerapp = "[if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('acaEnvironmentSubnetName')), '')]"
+            'azure.ai.agent' = "[if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('agentSubnetName')), '')]"
+        }
+    }
+    Assert-ScopedValue $copy.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress $egress '/outputs/HOSTED_AGENT_DEPLOYMENT/value/workloadEgress'
+    $null = $copy.outputs.HOSTED_AGENT_DEPLOYMENT.value.Remove('workloadEgress')
+    $policy = @{
+        type = 'string'
+        metadata = @{ description = 'Deployment-owned policy only; empty for non-isolated or externally managed egress.' }
+        value = "[if(and(parameters('deployAzureFirewall'), parameters('networkIsolation')), resourceId('Microsoft.Network/firewallPolicies', format('{0}{1}', variables('_1.abbrs').networking.firewallPolicy, parameters('resourceToken'))), '')]"
+    }
+    Assert-ScopedValue $copy.resources.firewall.properties.template.outputs.policyResourceId $policy '/resources/firewall/properties/template/outputs/policyResourceId'
+    $null = $copy.resources.firewall.properties.template.outputs.Remove('policyResourceId')
     $foundryRoot = Get-Content (Join-Path $PSScriptRoot 'fixtures\foundry-root-normalization.json') -Raw |
         ConvertFrom-Json -AsHashtable -Depth 100
     return Invoke-ScopedProjection $copy $foundryRoot.projection

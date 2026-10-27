@@ -662,3 +662,6 @@ resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-p
 
 #disable-next-line BCP318
 output privateIp string = (deployAzureFirewall && networkIsolation) ? azureFirewall!.properties.ipConfigurations[0].properties.privateIPAddress : ''
+
+@description('Deployment-owned policy only; empty for non-isolated or externally managed egress.')
+output policyResourceId string = (deployAzureFirewall && networkIsolation) ? firewallPolicy.id : ''

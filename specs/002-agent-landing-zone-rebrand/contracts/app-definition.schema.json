@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aka.ms/agent-lz/contracts/app-definition-v1.schema.json",
   "title": "Agent Landing Zone application definition (v1)",
+  "$comment": "Contract revision 1.1: optional component runtime egress; schemaVersion 1 remains compatible.",
   "description": "Design draft. Structural contract for app-definition.json. Semantic rules (unique component names, settings key collisions, path existence, source/kind compatibility) live in data-model.md and config/appdefinition/validator.py. Published copy: contracts/app-definition-v1.schema.json.",
   "type": "object",
   "additionalProperties": false,
@@ -48,6 +49,12 @@
           }
         },
         "ingress": { "enum": ["external", "internal"], "default": "internal" },
+        "egress": {
+          "type": "array",
+          "description": "Additional runtime egress. Empty means none; absent is a legacy declaration with unspecified requirements.",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/egress" }
+        },
         "resources": {
           "type": "object",
           "additionalProperties": false,
@@ -69,6 +76,21 @@
             { "required": ["resources"] }
           ]
         }
+      }
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fqdn", "protocol", "port", "purpose"],
+      "properties": {
+        "fqdn": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
+        },
+        "protocol": { "enum": ["https", "http"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 64000 },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x1f\\x7f]+$" }
       }
     },
     "source": {
