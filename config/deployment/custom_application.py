@@ -27,6 +27,7 @@ from config.deployment.hosted_image import (
 from config.deployment.private_network import check_stage
 from config.deployment.hosted_access import discover_instance
 from config.deployment.context import registry_resource_group
+from config.deployment.resource_groups import resource_group_for
 from util.azure_cli import resolve_az_command
 
 LOGGER = logging.getLogger("config.deployment.custom_application")
@@ -143,20 +144,25 @@ def deploy_service(definition_path: str, name: str, environment: Mapping[str, st
     image = prepare_image(components[0], service, definition.folder, environment)
     if components[0]["kind"] == KIND_CONTAINER_APP:
         configure_service_registry(component_service_name(definition, components[0]), image, environment)
+    rendered = copy.deepcopy(project)
+    rendered_service = rendered["services"][name]
+    if components[0]["kind"] == KIND_CONTAINER_APP:
+        rendered_service["resourceGroup"] = resource_group_for(environment, "application")
+    if image:
+        rendered_service["image"] = image
+        rendered_service["docker"] = {"imagePassthrough": True}
+    overlay = rendered != project
     try:
-        if image:
-            rendered = copy.deepcopy(project)
-            rendered_service = rendered["services"][name]
-            rendered_service["image"] = image
-            rendered_service["docker"] = {"imagePassthrough": True}
+        if overlay:
             path.write_text(yaml.safe_dump(rendered, sort_keys=False), encoding="utf-8")
+        if image:
             LOGGER.info("Deploying custom service %s with immutable image %s", name, image)
         subprocess.run(
             ["azd", "deploy", name, "--environment", env_name, "--no-prompt"],
             cwd=definition.folder, env={**os.environ, **environment}, check=True,
         )
     finally:
-        if image:
+        if overlay:
             path.write_bytes(original)
     if components[0]["kind"] == KIND_HOSTED_AGENT:
         instance = discover_instance(environment, name=agent_name)

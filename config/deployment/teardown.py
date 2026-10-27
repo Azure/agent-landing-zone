@@ -22,6 +22,7 @@ from config.deployment.resource_groups import (
 LOGGER = logging.getLogger(__name__)
 RESOURCE_GROUP_KEYS = (
     "AZURE_RESOURCE_GROUP",
+    "AZURE_APP_RESOURCE_GROUP",
     "AZURE_FOUNDRY_RESOURCE_GROUP",
     "AZURE_NETWORK_RESOURCE_GROUP",
 )
@@ -39,7 +40,7 @@ def require_single_resource_group(environment: Mapping[str, str]) -> None:
     if not root:
         if any(overrides):
             raise TeardownError(
-                "Cannot determine the application's resource group. "
+                "Cannot determine the Foundry/root resource group. "
                 "Automatic teardown is blocked; inspect the selected azd environment."
             )
         return
@@ -95,7 +96,10 @@ def require_safe_teardown(
             raise TeardownError("The selected azd environment does not match its values.")
         context["AZURE_ENV_NAME"] = environment_name
     name = resolve_env_name(azure_dir, context)
-    bound = read_binding(azure_dir, name)
+    try:
+        bound = read_binding(azure_dir, name)
+    except ResourceGroupError as exc:
+        raise TeardownError(f"Automatic teardown is blocked by the recorded binding: {exc}") from exc
     if bound is not None and bound.split:
         raise TeardownError(
             "azd down is blocked by this environment's recorded multi-resource-group "

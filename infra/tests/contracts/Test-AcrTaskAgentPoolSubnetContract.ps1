@@ -5,7 +5,9 @@
 .DESCRIPTION
     Compiles the real orchestrator with Azure CLI Bicep and checks exact symbolic
     dependencies, bounded expressions, pool properties, and serialized cross-scope
-    child subnet deployments. No graph-fixture exemptions or Azure access are used.
+    child subnet deployments. ADR-0024 application wrappers are checked by an
+    exact before/after projection before the original assertions. No original
+    fingerprint is replaced and no Azure access is used.
 
     A1/A2 cover BYO subnet creation/reuse; A3 covers a new VNet; A4-A6 cover
     disabled gates; A7 covers count zero in both BYO paths; A8 protects the
@@ -34,6 +36,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
 $failures = [System.Collections.Generic.List[string]]::new()
 $compiledFile = Join-Path ([System.IO.Path]::GetTempPath()) "acr-task-agent-pool-subnet-contract-$([guid]::NewGuid()).json"
 
@@ -71,7 +74,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Bicep compilation failed with exit code $LASTEXITCODE."
     }
-    $template = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -Depth 100
+    $actual = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+    $template = ConvertTo-ApplicationRootResourceGroupGraph $actual |
+        ConvertTo-Json -Depth 100 -Compress | ConvertFrom-Json -Depth 100
     Write-Host "ACR Task agent pool subnet contract (#159); compilation succeeded with Bicep $($template.metadata._generator.version)." -ForegroundColor Cyan
 
     $pool = $template.resources.acrTaskAgentPool

@@ -5,7 +5,7 @@
 
     "environmentName":                     { "value": "${AZURE_ENV_NAME}" },
     "location":                            { "value": "${AZURE_LOCATION}" },
-    "foundryResourceGroupName":             { "value": "${AZURE_FOUNDRY_RESOURCE_GROUP=}" },
+    "applicationResourceGroupName":         { "value": "${AZURE_APP_RESOURCE_GROUP=}" },
     "networkResourceGroupName":             { "value": "${AZURE_NETWORK_RESOURCE_GROUP=}" },
     "aiFoundryLocation":                   { "value": "${AZURE_AI_FOUNDRY_LOCATION}" },
     "cosmosLocation":                        { "value": "${AZURE_COSMOS_LOCATION}" },

@@ -18,6 +18,7 @@ from config.deployment.existing_images import (
     apply_existing_images,
     discover_existing_images,
 )
+from config.deployment.resource_groups import resource_group_for
 from config.panel.settings import (
     FEEDBACK_CONTAINER_CONFIG_KEY,
     FEEDBACK_CONTAINER_NAME,
@@ -946,7 +947,9 @@ def main() -> int:
         os.environ.get("RESET_CONTAINER_APP_IMAGES")
     ):
         existing_images = discover_existing_images(
-            os.environ.get("AZURE_RESOURCE_GROUP", ""),
+            resource_group_for(os.environ, "application")
+            if os.environ.get("AZURE_RESOURCE_GROUP") or os.environ.get("AZURE_APP_RESOURCE_GROUP")
+            else "",
             os.environ.get("AZURE_SUBSCRIPTION_ID") or None,
             os.environ.get("AZURE_ENV_NAME") or None,
         )

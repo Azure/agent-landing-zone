@@ -61,10 +61,10 @@ import * as storageTypes from 'constants/storage-types.bicep'
 @description('Name of the Azure Developer CLI environment')
 param environmentName string
 
-@description('Foundry and grounding destination in the workload subscription. Empty uses the application/root resource group. Intended for new environments only.')
-param foundryResourceGroupName string = ''
+@description('Application destination in the workload subscription. Empty uses the Foundry/root resource group. Intended for new environments only.')
+param applicationResourceGroupName string = ''
 
-@description('Locally owned networking destination in the workload subscription. Empty uses the application/root resource group. Explicit BYO resource IDs retain precedence.')
+@description('Locally owned networking destination in the workload subscription. Empty uses the Foundry/root resource group. Explicit BYO resource IDs retain precedence.')
 param networkResourceGroupName string = ''
 
 @description('The Azure region where your resources will be created.')
@@ -1069,7 +1069,8 @@ var _azdTags = { 'azd-env-name': environmentName }
 var _modeTags = { deploymentMode: deploymentMode, 'ai-lz-version': 'v2.0.0' }
 var _tags = union(_azdTags, _modeTags, deploymentTags)
 
-var _foundryResourceGroupName = empty(foundryResourceGroupName) ? resourceGroup().name : foundryResourceGroupName
+var _foundryResourceGroupName = resourceGroup().name
+var _applicationResourceGroupName = empty(applicationResourceGroupName) ? resourceGroup().name : applicationResourceGroupName
 var _networkResourceGroupName = empty(networkResourceGroupName) ? resourceGroup().name : networkResourceGroupName
 
 // Derive the list of additional Git repositories to clone onto the jumpbox
@@ -1089,7 +1090,7 @@ var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIs
 var _hostedAgentPrerequisitesEnabled = prepareHostedAgent || deployHostedAgent
 
 #disable-next-line BCP318
-var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containerRegistry.id : hostedAgentContainerRegistryResourceId
+var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containerRegistry.outputs.resourceId : hostedAgentContainerRegistryResourceId
 var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
 var _hostedAgentImageReference = deployHostedAgent ? '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}' : ''
 var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
@@ -1176,19 +1177,19 @@ var _hasExistingAI            = !empty(existingApplicationInsightsResourceId ?? 
 var _createLogAnalytics       = deployLogAnalytics && !_hasExistingLaw
 var _createAppInsights        = deployAppInsights && !_hasExistingAI && (_createLogAnalytics || _hasExistingLaw)
 #disable-next-line BCP318
-var _lawResourceId            = _hasExistingLaw ? existingLogAnalyticsWorkspaceResourceId! : (_createLogAnalytics ? logAnalytics.id : '')
+var _lawResourceId            = _hasExistingLaw ? existingLogAnalyticsWorkspaceResourceId! : (_createLogAnalytics ? logAnalytics.outputs.resourceId : '')
 #disable-next-line BCP318
-var _appInsightsResourceId    = _hasExistingAI ? existingApplicationInsightsResourceId! : (_createAppInsights ? appInsights.id : '')
+var _appInsightsResourceId    = _hasExistingAI ? existingApplicationInsightsResourceId! : (_createAppInsights ? appInsights.outputs.resourceId : '')
 #disable-next-line BCP318
-var _appInsightsConnectionString = _hasExistingAI ? (existingApplicationInsightsConnectionString ?? '') : (_createAppInsights ? appInsights.properties.ConnectionString : '')
+var _appInsightsConnectionString = _hasExistingAI ? (existingApplicationInsightsConnectionString ?? '') : (_createAppInsights ? appInsights.outputs.properties.ConnectionString : '')
 // Instrumentation key is the first KV pair in a v2 connection string
 // ("InstrumentationKey=<guid>;..."). We split safely so an empty string
 // returns an empty key rather than failing the template.
 var _appInsightsInstrumentationKey = !empty(_appInsightsConnectionString)
   ? split(split(_appInsightsConnectionString, ';')[0], '=')[1]
   : ''
-var _hasEffectiveLaw          = !empty(_lawResourceId)
-var _hasEffectiveAI           = !empty(_appInsightsResourceId)
+var _hasEffectiveLaw          = _hasExistingLaw || _createLogAnalytics
+var _hasEffectiveAI           = _hasExistingAI || _createAppInsights
 
 // ----------------------------------------------------------------------
 // Gap 6 — External egress / route table reuse
@@ -1731,7 +1732,7 @@ var _testVmPrincipalId = _deployJumpbox
   : ''
 
 var _testVmDestinationReaderRoles = map(union(
-  toLower(_foundryResourceGroupName) == toLower(resourceGroup().name) ? [] : [toLower(_foundryResourceGroupName)],
+  toLower(_applicationResourceGroupName) == toLower(resourceGroup().name) ? [] : [toLower(_applicationResourceGroupName)],
   toLower(_networkResourceGroupName) == toLower(resourceGroup().name) ? [] : [toLower(_networkResourceGroupName)]
 ), destination => {
   roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.Reader.guid)
@@ -1776,21 +1777,21 @@ var _testVmRoles = _deployJumpbox ? concat(
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryRepositoryWriter.guid)
       principalId: _testVmPrincipalId
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
     {
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryContributorDataAccessConfigurationAdministrator.guid)
       principalId: _testVmPrincipalId
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
     {
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryTasksContributor.guid)
       principalId: _testVmPrincipalId
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
   ] : [],
@@ -1799,7 +1800,7 @@ var _testVmRoles = _deployJumpbox ? concat(
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataOwner.guid)
       principalId: _testVmPrincipalId
       #disable-next-line BCP318
-      resourceId: appConfig.id
+      resourceId: appConfig.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
   ] : [],
@@ -1808,7 +1809,7 @@ var _testVmRoles = _deployJumpbox ? concat(
       principalId: _testVmPrincipalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
   ] : [],
@@ -1817,21 +1818,21 @@ var _testVmRoles = _deployJumpbox ? concat(
       principalId: _testVmPrincipalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultContributor.guid)
       #disable-next-line BCP318
-      resourceId: keyVault.id
+      resourceId: keyVault.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
     {
       principalId: _testVmPrincipalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsOfficer.guid)
       #disable-next-line BCP318
-      resourceId: keyVault.id
+      resourceId: keyVault.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
     {
       principalId: _testVmPrincipalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultCertificatesOfficer.guid)
       #disable-next-line BCP318
-      resourceId: keyVault.id
+      resourceId: keyVault.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
   ] : [],
@@ -1902,13 +1903,14 @@ module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if 
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> TestVm
 module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (_deployJumpbox && deployCosmosDb) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'assignCosmosDBCosmosDbBuiltInDataContributorTestVm'
   params: {
     #disable-next-line BCP318
     cosmosDbAccountName: cosmosDBAccount.outputs.name
     principalId: _testVmPrincipalId
     roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
+    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_applicationResourceGroupName}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
   }
 }
 
@@ -2126,7 +2128,7 @@ var _peList = concat(
         {
           name: 'kvConnection${useExistingVNet?'-byon':''}'
           #disable-next-line BCP318
-          properties: { privateLinkServiceId: keyVault.id, groupIds: ['vault'] }
+          properties: { privateLinkServiceId: keyVault.outputs.resourceId, groupIds: ['vault'] }
         }
       ]
       privateDnsZoneGroup: _peDnsZoneGroups.?keyVault
@@ -2140,7 +2142,7 @@ var _peList = concat(
         {
           name: 'appConfigConnection${useExistingVNet?'-byon':''}'
           #disable-next-line BCP318
-          properties: { privateLinkServiceId: appConfig.id, groupIds: ['configurationStores'] }
+          properties: { privateLinkServiceId: appConfig.outputs.resourceId, groupIds: ['configurationStores'] }
         }
       ]
       privateDnsZoneGroup: _peDnsZoneGroups.?appConfig
@@ -2154,7 +2156,7 @@ var _peList = concat(
         {
           name: 'ccaConnection'
           #disable-next-line BCP318
-          properties: { privateLinkServiceId: containerEnv.id, groupIds: ['managedEnvironments'] }
+          properties: { privateLinkServiceId: containerEnv.outputs.resourceId, groupIds: ['managedEnvironments'] }
         }
       ]
       privateDnsZoneGroup: _peDnsZoneGroups.?containerApps
@@ -2168,7 +2170,7 @@ var _peList = concat(
         {
           name: '${resourceNames.containerRegistryName}-registry-connection'
           #disable-next-line BCP318
-          properties: { privateLinkServiceId: containerRegistry.id, groupIds: ['registry'] }
+          properties: { privateLinkServiceId: containerRegistry.outputs.resourceId, groupIds: ['registry'] }
         }
       ]
       privateDnsZoneGroup: _peDnsZoneGroups.?acr
@@ -2559,29 +2561,27 @@ module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account
 //////////////////////////////////////////////////////////////////////////
 var appInsightsInvalidLocations = ['westcentralus']
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (_createAppInsights) {
-  name: resourceNames.appInsightsName
-  location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
-  kind: 'web'
-  tags: _tags
-  properties: {
-    Application_Type: 'web'
-    WorkspaceResourceId: _lawResourceId
-    DisableIpMasking: false
-    publicNetworkAccessForIngestion: 'Enabled'
-    publicNetworkAccessForQuery: 'Enabled'
+module appInsights 'modules/application/app-insights.bicep' = if (_createAppInsights) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'applicationInsights'
+  params: {
+    name: resourceNames.appInsightsName
+    location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
+    tags: _tags
+    workspaceResourceId: _lawResourceId
   }
 }
 
 //private link scope
-resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-preview' = if (_deployAmpls) {
-  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}'
-  location: 'global'
-  properties :{
-    accessModeSettings : {
-      queryAccessMode : 'Open'
-      ingestionAccessMode : 'Open'
-    }
+module privateLinkScope 'modules/application/monitor-private-link-scope.bicep' = if (_deployAmpls) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'applicationMonitorPrivateLinkScope'
+  params: {
+    name: '${const.abbrs.networking.privateLinkScope}${resourceToken}'
+    workspaceName: resourceNames.logAnalyticsWorkspaceName
+    workspaceResourceId: _lawResourceId
+    appInsightsName: resourceNames.appInsightsName
+    appInsightsResourceId: _appInsightsResourceId
   }
   dependsOn: [
     appInsights!
@@ -2601,7 +2601,7 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
       {
         name: 'privateLinkScopeConnection'
         properties: {
-          privateLinkServiceId: privateLinkScope.id
+          privateLinkServiceId: privateLinkScope.outputs.resourceId
           groupIds: ['azuremonitor']
         }
       }
@@ -2625,58 +2625,45 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
   ]
 }
 
-resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
-  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${resourceNames.logAnalyticsWorkspaceName}'!
-  properties :{
-    #disable-next-line BCP318
-    linkedResourceId: _lawResourceId
-  }
-  dependsOn: [
-    privateLinkScope
-  ]
-}
-
-resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
-  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${resourceNames.appInsightsName}'!
-  properties :{
-    linkedResourceId: _appInsightsResourceId
-  }
-  dependsOn: [
-    privateLinkScope
-  ]
-}
-
 // Container Resources
 //////////////////////////////////////////////////////////////////////////
 
 //Container Apps Env User Managed Identity
-resource containerEnvUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerEnv) {
-  name: '${const.abbrs.security.managedIdentity}${resourceNames.containerEnvName}'
-  location: location
+module containerEnvUAI 'modules/security/managed-identity.bicep' = if (_useUAI && deployContainerEnv) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'containerEnvironmentIdentity'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${resourceNames.containerEnvName}'
+    location: location
+  }
 }
 
 // Container Apps Environment
-resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deployContainerEnv) {
-  name: resourceNames.containerEnvName
-  location: location
-  tags: _tags
-  identity: {
-    type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
-    userAssignedIdentities: _useUAI ? { '${containerEnvUAI.id}': {} } : null
-  }
-  properties: {
-    appLogsConfiguration: {
-      destination: null
+module containerEnv 'modules/application/container-environment.bicep' = if (deployContainerEnv) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'containerEnvironment'
+  params: {
+    name: resourceNames.containerEnvName
+    location: location
+    tags: _tags
+    identity: {
+      type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
+      userAssignedIdentities: _useUAI ? { '${containerEnvUAI.outputs.resourceId}': {} } : null
     }
-    appInsightsConfiguration: _hasEffectiveAI ? {
-      connectionString: _appInsightsConnectionString
-    } : null
-    zoneRedundant: useZoneRedundancy
-    workloadProfiles: workloadProfiles
-    vnetConfiguration: networkIsolation ? {
-      infrastructureSubnetId: _caEnvSubnetId
-      internal: true
-    } : null
+    properties: {
+      appLogsConfiguration: {
+        destination: null
+      }
+      appInsightsConfiguration: _hasEffectiveAI ? {
+        connectionString: _appInsightsConnectionString
+      } : null
+      zoneRedundant: useZoneRedundancy
+      workloadProfiles: workloadProfiles
+      vnetConfiguration: networkIsolation ? {
+        infrastructureSubnetId: _caEnvSubnetId
+        internal: true
+      } : null
+    }
   }
   dependsOn: [
     #disable-next-line BCP321
@@ -2687,34 +2674,40 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deplo
 }
 
 //Container Registry User Managed Identity
-resource containerRegistryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerRegistry) {
-  name: '${const.abbrs.security.managedIdentity}${resourceNames.containerRegistryName}'
-  location: location
+module containerRegistryUAI 'modules/security/managed-identity.bicep' = if (_useUAI && deployContainerRegistry) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'containerRegistryIdentity'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${resourceNames.containerRegistryName}'
+    location: location
+  }
 }
 
 // Container Registry
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = if (deployContainerRegistry) {
-  name: resourceNames.containerRegistryName
-  location: location
-  tags: _tags
-  sku: {
-    name: _networkIsolation ? 'Premium' : 'Basic'
-  }
-  identity: {
-    type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
-    userAssignedIdentities: _useUAI ? { '${containerRegistryUAI.id}': {} } : null
-  }
-  properties: {
-    publicNetworkAccess: _publicNetworkAccess
-    zoneRedundancy: useZoneRedundancy ? 'Enabled' : 'Disabled'
-    dataEndpointEnabled: _networkIsolation
-    networkRuleSet: _applyIpRules ? {
-      defaultAction: 'Deny'
-      ipRules: _acrIpRules
-    } : null
-    policies: {
-      exportPolicy: {
-        status: 'enabled'
+module containerRegistry 'modules/application/container-registry.bicep' = if (deployContainerRegistry) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'containerRegistry'
+  params: {
+    name: resourceNames.containerRegistryName
+    location: location
+    tags: _tags
+    skuName: _networkIsolation ? 'Premium' : 'Basic'
+    identity: {
+      type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
+      userAssignedIdentities: _useUAI ? { '${containerRegistryUAI.outputs.resourceId}': {} } : null
+    }
+    properties: {
+      publicNetworkAccess: _publicNetworkAccess
+      zoneRedundancy: useZoneRedundancy ? 'Enabled' : 'Disabled'
+      dataEndpointEnabled: _networkIsolation
+      networkRuleSet: _applyIpRules ? {
+        defaultAction: 'Deny'
+        ipRules: _acrIpRules
+      } : null
+      policies: {
+        exportPolicy: {
+          status: 'enabled'
+        }
       }
     }
   }
@@ -2723,29 +2716,35 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
 // ACR Task agent pool — enables `az acr build --agent-pool <name>` to run image
 // builds inside the VNet when publicNetworkAccess on the registry is Disabled.
 // Gated on networkIsolation (Premium SKU) and deployAcrTaskAgentPool.
-resource acrTaskAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview' = if (_deployAcrTaskAgentPool) {
-  parent: containerRegistry
-  name: acrTaskAgentPoolName
-  location: location
-  tags: _tags
-  properties: {
+module acrTaskAgentPool 'modules/application/acr-agent-pool.bicep' = if (_deployAcrTaskAgentPool) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'containerRegistryAgentPool'
+  params: {
+    registryName: resourceNames.containerRegistryName
+    name: acrTaskAgentPoolName
+    location: location
+    tags: _tags
     count: acrTaskAgentPoolCount
     tier: acrTaskAgentPoolTier
-    os: 'Linux'
     #disable-next-line BCP318
-    virtualNetworkSubnetResourceId: _networkIsolation ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
+    subnetResourceId: _networkIsolation ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
   }
   dependsOn: [
+    containerRegistry
     // The constructed BYO subnet ID does not imply subnet creation order.
     virtualNetworkSubnets
   ]
 }
 
 //Container Apps User Managed Identity
-resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [
+module containerAppsUAI 'modules/security/managed-identity.bicep' = [
   for app in containerAppsList: if (_useUAI && _deployContainerApps) {
-    name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
-    location: location
+    scope: resourceGroup(_applicationResourceGroupName)
+    name: 'containerAppIdentity-${app.service_name}'
+    params: {
+      name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
+      location: location
+    }
   }
 ]
 
@@ -2764,7 +2763,7 @@ resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023
 var _containerRuntimeEnv = [
   { name: 'SUBSCRIPTION_ID',           value: subscription().subscriptionId }
   { name: 'AZURE_RESOURCE_GROUP',      value: resourceGroup().name }
-  { name: 'AZURE_FOUNDRY_RESOURCE_GROUP', value: _foundryResourceGroupName }
+  { name: 'AZURE_APP_RESOURCE_GROUP', value: _applicationResourceGroupName }
   { name: 'AZURE_NETWORK_RESOURCE_GROUP', value: _networkResourceGroupName }
   { name: 'LOCATION',                  value: location }
   { name: 'ENVIRONMENT_NAME',          value: environmentName }
@@ -2858,12 +2857,13 @@ var _containerAppBaseEnvironmentVariables = [
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
   for (app, index) in containerAppsList: if (_deployContainerApps) {
+    scope: resourceGroup(_applicationResourceGroupName)
     name: _containerAppNames[index]
     params: {
       name: _containerAppNames[index]
       location: location
       #disable-next-line BCP318
-      environmentResourceId: containerEnv.id
+      environmentResourceId: containerEnv.outputs.resourceId
       workloadProfileName: app.profile_name
 
       ingressExternal: app.external
@@ -2876,7 +2876,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       managedIdentities: {
         systemAssigned: (_useUAI) ? false : true
         #disable-next-line BCP318
-        userAssignedResourceIds: (_useUAI) ? [containerAppsUAI[index].id] : []
+        userAssignedResourceIds: (_useUAI) ? [containerAppsUAI[index].outputs.resourceId] : []
       }
 
       // A preserved ACR image needs its registry pull identity, otherwise the PUT drops it.
@@ -2884,7 +2884,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
         {
           server: split(app.image, '/')[0]
           #disable-next-line BCP318
-          identity: _useUAI ? containerAppsUAI[index].id : 'system'
+          identity: _useUAI ? containerAppsUAI[index].outputs.resourceId : 'system'
         }
       ] : []
 
@@ -2912,7 +2912,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
               {
                 name: 'AZURE_CLIENT_ID'
                 #disable-next-line BCP318
-                value: containerAppsUAI[index].properties.clientId
+                value: containerAppsUAI[index].outputs.clientId
               }
             ] : [],
             // Bootstrap runtime config when the consumer opts out of App Config
@@ -2948,21 +2948,26 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
 //////////////////////////////////////////////////////////////////////////
 
 //Cosmos User Managed Identity
-resource cosmosUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
-  name: '${const.abbrs.security.managedIdentity}${resourceNames.dbAccountName}'
-  location: location
+module cosmosUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'cosmosIdentity'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${resourceNames.dbAccountName}'
+    location: location
+  }
 }
 
 // Declared locally so every deployment sends the full account property set.
 // See modules/cosmos-db/database-account.bicep for details.
 module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCosmosDb) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'CosmosDBAccount'
   params: {
     name: resourceNames.dbAccountName
     location: cosmosLocation
     systemAssignedIdentity: !_useUAI
     #disable-next-line BCP318
-    userAssignedResourceIds: _useUAI ? [cosmosUAI.id] : []
+    userAssignedResourceIds: _useUAI ? [cosmosUAI.outputs.resourceId] : []
     isZoneRedundant: useZoneRedundancy
     defaultConsistencyLevel: 'Session'
     capabilities: ['EnableServerless']
@@ -2985,6 +2990,7 @@ module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCo
 // deploy its database and containers through a fixed-name local module so
 // resource names remain unchanged and deployment-name length is constant.
 module cosmosSqlDatabase 'modules/cosmos-db/sql-database.bicep' = if (deployCosmosDb) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'cosmosSqlDatabase'
   params: {
     databaseAccountName: resourceNames.dbAccountName
@@ -3008,58 +3014,33 @@ module cosmosSqlDatabase 'modules/cosmos-db/sql-database.bicep' = if (deployCosm
 // Key Vault
 //////////////////////////////////////////////////////////////////////////
 
-resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = if (deployKeyVault) {
-  name: resourceNames.keyVaultName
-  location: location
-  tags: _tags
-  properties: {
-    tenantId: subscription().tenantId
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
-    enableRbacAuthorization: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 90
+module keyVault 'modules/application/key-vault.bicep' = if (deployKeyVault) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'applicationKeyVault'
+  params: {
+    name: resourceNames.keyVaultName
+    location: location
+    tags: _tags
     publicNetworkAccess: _publicNetworkAccess
     networkAcls: _applyIpRules ? {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
       ipRules: _keyVaultIpRules
     } : null
+    secrets: { values: _containerAppsKeyVaultKeys }
   }
 }
-
-// Provision Container App secrets in Key Vault (only happens when useAPIKeys is true)
-resource secret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = [for (config, i) in _containerAppsKeyVaultKeys: {
-  parent: keyVault
-  name: replace(config.name, '_', '-')
-  properties: {
-      contentType: config.contentType
-      value:  config.value
-  }
-  tags: {}
-}
-]
 
 // Log Analytics Workspace
 //////////////////////////////////////////////////////////////////////////
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (_createLogAnalytics) {
-  name: resourceNames.logAnalyticsWorkspaceName
-  location: location
-  tags: _tags
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    sku: {
-      name: 'PerGB2018'
-    }
-    retentionInDays: 30
-    features: {
-      disableLocalAuth: false
-    }
+module logAnalytics 'modules/application/log-analytics.bicep' = if (_createLogAnalytics) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'applicationLogAnalytics'
+  params: {
+    name: resourceNames.logAnalyticsWorkspaceName
+    location: location
+    tags: _tags
   }
 }
 
@@ -3370,14 +3351,14 @@ var _executorRoles = concat(
       principalId: principalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: principalType
     }
     {
       principalId: principalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
       #disable-next-line BCP318
-      resourceId: containerRegistry.id
+      resourceId: containerRegistry.outputs.resourceId
       principalType: principalType
     }
   ] : [],
@@ -3386,14 +3367,14 @@ var _executorRoles = concat(
       principalId: principalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultContributor.guid)
       #disable-next-line BCP318
-      resourceId: keyVault.id
+      resourceId: keyVault.outputs.resourceId
       principalType: principalType
     }
     {
       principalId: principalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsOfficer.guid)
       #disable-next-line BCP318
-      resourceId: keyVault.id
+      resourceId: keyVault.outputs.resourceId
       principalType: principalType
     }
   ] : [],
@@ -3481,13 +3462,14 @@ module assignExecutorRoles 'modules/security/resource-role-assignment.bicep' = i
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> Executor (data plane, separate module)
 module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (deployCosmosDb) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'assignCosmosDBCosmosDbBuiltInDataContributorExecutor'
   params: {
     #disable-next-line BCP318
     cosmosDbAccountName: cosmosDBAccount.outputs.name
     principalId: principalId
     roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
+    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_applicationResourceGroupName}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
   }
 }
 
@@ -3508,9 +3490,9 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsUser.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
-            resourceId: keyVault.id
+            resourceId: keyVault.outputs.resourceId
             principalType: 'ServicePrincipal'
           }
         ] : [],
@@ -3518,9 +3500,9 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataReader.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
-            resourceId: appConfig.id
+            resourceId: appConfig.outputs.resourceId
             principalType: 'ServicePrincipal'
           }
         ] : [],
@@ -3528,7 +3510,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             resourceId: aiFoundryAccountResourceId
             principalType: 'ServicePrincipal'
           }
@@ -3537,7 +3519,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             resourceId: aiFoundryAccountResourceId
             principalType: 'ServicePrincipal'
           }
@@ -3546,7 +3528,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: speechService.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3556,9 +3538,9 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
-            resourceId: containerRegistry.id
+            resourceId: containerRegistry.outputs.resourceId
             principalType: 'ServicePrincipal'
           }
         ] : [],
@@ -3566,7 +3548,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataReader.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: searchService.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3576,7 +3558,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataContributor.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: searchService.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3586,7 +3568,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataContributor.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: storageAccount.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3596,7 +3578,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataReader.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: storageAccount.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3606,7 +3588,7 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
           {
             roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDelegator.guid)
             #disable-next-line BCP318
-            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
             #disable-next-line BCP318
             resourceId: storageAccount.outputs.resourceId
             principalType: 'ServicePrincipal'
@@ -3690,14 +3672,15 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
     app.roles,
     const.roles.CosmosDBBuiltInDataContributor.key
   )) {
+    scope: resourceGroup(_applicationResourceGroupName)
     name: 'assignCosmosDBCosmosDbBuiltInDataContributor-${app.service_name}'
     params: {
       #disable-next-line BCP318
       cosmosDbAccountName: cosmosDBAccount.outputs.name
       #disable-next-line BCP318
-      principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+      principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
       roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-      scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
+      scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_applicationResourceGroupName}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
     }
   }
 ]
@@ -3715,38 +3698,18 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
 // App Configuration Store
 //////////////////////////////////////////////////////////////////////////
 
-resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' = if (deployAppConfig) {
-  name: resourceNames.appConfigName
-  location: location
-  tags: _tags
-  sku: {
-    name: 'Standard'
-  }
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    dataPlaneProxy: {
-      authenticationMode: 'Pass-through'
-      privateLinkDelegation: _networkIsolation ? 'Enabled' : 'Disabled'
-    }
-    // Note: App Configuration does not expose `networkAcls.ipRules` like the
-    // other workload services, so `allowedIpRanges` is intentionally ignored
-    // here. The public surface still tracks `_publicNetworkAccess` so the
-    // service follows the same Enabled/Disabled logic as the rest of the stack.
+module appConfig 'modules/application/app-configuration-store.bicep' = if (deployAppConfig) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'applicationConfiguration'
+  params: {
+    name: resourceNames.appConfigName
+    location: location
+    tags: _tags
+    networkIsolation: _networkIsolation
     publicNetworkAccess: _publicNetworkAccess
-    disableLocalAuth: false
-  }
-}
-
-resource appConfigDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployAppConfig) {
-  #disable-next-line use-resource-id-functions
-  name: guid(appConfig.id, principalId, const.roles.AppConfigurationDataOwner.guid)
-  scope: appConfig
-  properties: {
     principalId: principalId
     principalType: principalType
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataOwner.guid)
+    dataOwnerRoleGuid: const.roles.AppConfigurationDataOwner.guid
   }
 }
 
@@ -3762,7 +3725,7 @@ module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' 
         serviceName: containerAppsList[i].service_name
         canonical_name: containerAppsList[i].canonical_name
         #disable-next-line BCP318
-        principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+        principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
         #disable-next-line BCP318
         fqdn: containerApps[i].outputs.fqdn
       }
@@ -3774,6 +3737,7 @@ module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' 
 // internal Container Apps environment. See `modules/networking/public-ingress.bicep`
 // and the README "Optional Public Ingress" section for the runbook.
 module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIngressEnabled) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'publicIngressDeployment'
   params: {
     namePrefix: 'agw-${resourceToken}'
@@ -3791,7 +3755,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
     sslPolicy: publicIngress.?sslPolicy ?? {}
     sslCertSecretId: publicIngress.?sslCertSecretId ?? ''
     frontendHostName: publicIngress.?frontendHostName ?? ''
-    keyVaultResourceId: deployKeyVault ? keyVault.id : ''
+    keyVaultResourceId: deployKeyVault ? keyVault.outputs.resourceId : ''
     keyVaultName: deployKeyVault ? resourceNames.keyVaultName : ''
   }
 }
@@ -3841,15 +3805,16 @@ var _modelDeploymentSettings = [
 
 // Populate App Configuration store with Container App API keys (only when useAPIKeys is true).
 module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (_deployContainerApps && deployAppConfig && _runtimeConfigIsAppConfig && deployKeyVault && _useCAppAPIKey) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'appConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.name
+    storeName: appConfig.outputs.name
     keyValues:  [ 
       for app in containerAppsList: {
             name: '${app.canonical_name}_APIKEY'
             #disable-next-line BCP318
-            value: '{"uri":"${keyVault.properties.vaultUri}secrets/${replace(app.canonical_name, '_', '-')}-APIKEY"}'
+            value: '{"uri":"${keyVault.outputs.properties.vaultUri}secrets/${replace(app.canonical_name, '_', '-')}-APIKEY"}'
             label: appConfigLabel
             contentType: 'application/vnd.microsoft.appconfig.keyvaultref+json;charset=utf-8'
       }
@@ -3858,10 +3823,11 @@ module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bi
 }
 
 module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployCosmosDb && deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'cosmosConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.name
+    storeName: appConfig.outputs.name
     keyValues: concat(
       [
         #disable-next-line BCP318
@@ -3887,10 +3853,11 @@ var _normalizedAdditionalAppConfigSettings = [
 var _additionalAppConfigKeys = map(_normalizedAdditionalAppConfigSettings, s => empty(s.label) ? s.name : '${s.name}$${s.label}')
 
 module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
+  scope: resourceGroup(_applicationResourceGroupName)
   name: 'appConfigPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.name
+    storeName: appConfig.outputs.name
     keyValues: concat(
       filter(
       concat(
@@ -3906,7 +3873,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'AZURE_TENANT_ID',     value: tenant().tenantId,                      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SUBSCRIPTION_ID',     value: subscription().subscriptionId,          label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name,                  label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'AZURE_FOUNDRY_RESOURCE_GROUP', value: _foundryResourceGroupName, label: 'agent-lz', contentType: 'text/plain' }
+      { name: 'AZURE_APP_RESOURCE_GROUP', value: _applicationResourceGroupName, label: 'agent-lz', contentType: 'text/plain' }
       { name: 'AZURE_NETWORK_RESOURCE_GROUP', value: _networkResourceGroupName, label: 'agent-lz', contentType: 'text/plain' }
       { name: 'LOCATION',            value: location,                               label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENVIRONMENT_NAME',    value: environmentName,                        label: appConfigLabel, contentType: 'text/plain' }
@@ -3944,14 +3911,14 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       //── Resource IDs ─────────────────────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.id : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_ACCOUNT_RESOURCE_ID', value: deployStorageAccount ? storageAccount.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID', value: _documentsContainerResourceId, label: 'agent-lz', contentType: 'text/plain' }
       { name: 'APP_INSIGHTS_RESOURCE_ID', value: _appInsightsResourceId, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'LOG_ANALYTICS_RESOURCE_ID', value: _lawResourceId, label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.id : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryAccountResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_PROJECT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryProjectResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       // { name: 'AI_FOUNDRY_PROJECT_WORKSPACE_ID', value: (deployAiFoundry) ? aiFoundryFormatProjectWorkspaceId!.outputs.projectWorkspaceIdGuid : '', label: appConfigLabel, contentType: 'text/plain' }
@@ -3996,7 +3963,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       // ── Endpoints / URIs ──────────────────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'KEY_VAULT_URI',                   value: deployKeyVault ? keyVault.properties.vaultUri : '',                        label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'KEY_VAULT_URI',                   value: deployKeyVault ? keyVault.outputs.properties.vaultUri : '',                        label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_BLOB_ENDPOINT',           value: deployStorageAccount ? storageAccount.outputs.primaryBlobEndpoint : '',  label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT',     value: (deployAiFoundry) ? aiFoundryAccountEndpoint : '', label: appConfigLabel, contentType: 'text/plain' }      
@@ -4017,7 +3984,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       //── Managed Identity Principals ───────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'CONTAINER_ENV_PRINCIPAL_ID', value: deployContainerEnv ? ((_useUAI) ? containerEnvUAI.properties.principalId : (containerEnv.?identity.?principalId ?? '')) : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_ENV_PRINCIPAL_ID', value: deployContainerEnv ? ((_useUAI) ? containerEnvUAI.outputs.principalId : (containerEnv.outputs.identity.?principalId ?? '')) : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_PRINCIPAL_ID', value: deploySearchService ? ((_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
 
@@ -4046,8 +4013,8 @@ output TENANT_ID string = tenant().tenantId
 output SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 
-@description('Effective Foundry and grounding resource group.')
-output AZURE_FOUNDRY_RESOURCE_GROUP string = _foundryResourceGroupName
+@description('Effective application resource group; defaults to the Foundry/root group.')
+output AZURE_APP_RESOURCE_GROUP string = _applicationResourceGroupName
 
 @description('Effective locally owned networking resource group; explicit BYO resources retain their actual IDs.')
 output AZURE_NETWORK_RESOURCE_GROUP string = _networkResourceGroupName
@@ -4086,9 +4053,9 @@ output ACR_TASK_AGENT_POOL string = _deployAcrTaskAgentPool ? acrTaskAgentPoolNa
 // Endpoints / URIs
 // ──────────────────────────────────────────────────────────────────────
 #disable-next-line BCP318
-output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.properties.endpoint : ''
+output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.outputs.properties.endpoint : ''
 @description('Application Key Vault URI for downstream bootstrap. Empty when Key Vault is not deployed.')
-output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''
+output KEY_VAULT_URI string = deployKeyVault ? keyVault!.outputs.properties.vaultUri : ''
 output RETRIEVAL_BACKEND string = retrievalBackend
 output FOUNDRY_IQ_PATTERN string = foundryIqPattern
 output KNOWLEDGE_BASE_NAME string = retrievalBackend == 'foundry_iq' ? knowledgeBaseName : ''
@@ -4132,7 +4099,7 @@ output PUBLIC_INGRESS_LIVE bool = _publicIngressEnabled ? publicIngressM!.output
 output APP_GATEWAY_SUBNET_RESOURCE_ID string = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${azureAppGatewaySubnetName}' : ''
 output VNET_RESOURCE_ID string = virtualNetworkResourceId
 #disable-next-line BCP318
-output KEY_VAULT_RESOURCE_ID string = deployKeyVault ? keyVault.id : ''
+output KEY_VAULT_RESOURCE_ID string = deployKeyVault ? keyVault.outputs.resourceId : ''
 output KEY_VAULT_NAME string = deployKeyVault ? resourceNames.keyVaultName : ''
 #disable-next-line BCP318
 output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId

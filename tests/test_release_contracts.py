@@ -34,21 +34,21 @@ class IntegrationPinTests(unittest.TestCase):
             manifest["infra"]["source"],
         )
         self.assertEqual(
-            ("v5.2.1", "27f952fcf8d48a2ba6267c237ea6bea8361fedd2"),
+            ("v5.2.2", "243e61191a7fdc5f1cf92f2ac47b779d58be3fa3"),
             (
                 components["agent-app-orchestrator"]["tag"],
                 components["agent-app-orchestrator"]["commit"],
             ),
         )
         self.assertEqual(
-            ("v3.1.1", "72efd8d7d51e10d38bf8b89f03b7eb42e1ed8ff2"),
+            ("v3.1.2", "833aa54f2b12db342b84f96e8873b111ad980754"),
             (
                 components["agent-app-ingestion"]["tag"],
                 components["agent-app-ingestion"]["commit"],
             ),
         )
         self.assertEqual(
-            ("v3.3.0", "858ed4205d866b7bfbff43ca9ed20ab812baa24e"),
+            ("v3.3.1", "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554"),
             (
                 components["agent-app-ui"]["tag"],
                 components["agent-app-ui"]["commit"],
@@ -372,7 +372,7 @@ class LifecycleParityTests(unittest.TestCase):
 
         foundation = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
         self.assertIn(
-            "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''",
+            "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.outputs.properties.vaultUri : ''",
             foundation,
         )
         project = yaml.safe_load(

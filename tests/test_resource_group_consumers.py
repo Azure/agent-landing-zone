@@ -18,8 +18,8 @@ from config.deployment import outputs
 SUB = "11111111-1111-1111-1111-111111111111"
 BASE = {
     "AZURE_SUBSCRIPTION_ID": SUB,
-    "AZURE_RESOURCE_GROUP": "rg-app",
-    "AZURE_FOUNDRY_RESOURCE_GROUP": "rg-ai",
+    "AZURE_APP_RESOURCE_GROUP": "rg-app",
+    "AZURE_RESOURCE_GROUP": "rg-ai",
     "AZURE_NETWORK_RESOURCE_GROUP": "rg-net",
     "AZURE_STORAGE_ACCOUNT_NAME": "sttest",
     "STORAGE_BLOB_ENDPOINT": "https://sttest.blob.core.windows.net/",
@@ -29,9 +29,9 @@ BASE = {
 }
 
 
-@pytest.mark.parametrize("foundry,network", [("", ""), ("rg-ai", ""), ("rg-ai", "rg-net"), ("RG-APP", "rg-app")])
-def test_flat_destinations_preserve_json_v1(foundry, network):
-    environment = {**BASE, "AZURE_FOUNDRY_RESOURCE_GROUP": foundry, "AZURE_NETWORK_RESOURCE_GROUP": network}
+@pytest.mark.parametrize("application,network", [("", ""), ("rg-app", ""), ("rg-app", "rg-net"), ("RG-AI", "rg-ai")])
+def test_flat_destinations_preserve_json_v1(application, network):
+    environment = {**BASE, "AZURE_APP_RESOURCE_GROUP": application, "AZURE_NETWORK_RESOURCE_GROUP": network}
     document = outputs.build_platform_outputs({
         **environment, "AI_FOUNDRY_ACCOUNT_NAME": "account",
         "AZURE_CONTAINER_REGISTRY_ENDPOINT": "registry.azurecr.io",
@@ -40,10 +40,10 @@ def test_flat_destinations_preserve_json_v1(foundry, network):
     settings = outputs.platform_settings(document, environment)
     assert json.loads(settings[outputs.PLATFORM_OUTPUTS_KEY]) == document
     outputs.validate_platform_outputs(document)
-    assert settings["AZURE_RESOURCE_GROUP"] == "rg-app"
-    assert settings["AZURE_FOUNDRY_RESOURCE_GROUP"] == (foundry or "rg-app")
+    assert settings["AZURE_APP_RESOURCE_GROUP"] == (application or "rg-ai")
+    assert settings["AZURE_RESOURCE_GROUP"] == "rg-ai"
     assert settings["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"].lower() == (
-        f"/subscriptions/{SUB}/resourceGroups/{foundry or 'rg-app'}/providers/"
+        f"/subscriptions/{SUB}/resourceGroups/rg-ai/providers/"
         "Microsoft.Storage/storageAccounts/sttest/blobServices/default/containers/documents"
     ).lower()
 
@@ -102,8 +102,8 @@ def test_postprovision_registry_lookup_supports_isolated_python(tmp_path, extern
 def test_flat_context_does_not_clobber_bicep_document_scope_without_storage_outputs():
     env = {key: value for key, value in BASE.items() if key not in ("AZURE_STORAGE_ACCOUNT_NAME", "STORAGE_BLOB_ENDPOINT")}
     assert context_settings(env) == {
-        "AZURE_RESOURCE_GROUP": "rg-app",
-        "AZURE_FOUNDRY_RESOURCE_GROUP": "rg-ai",
+        "AZURE_APP_RESOURCE_GROUP": "rg-app",
+        "AZURE_RESOURCE_GROUP": "rg-ai",
         "AZURE_NETWORK_RESOURCE_GROUP": "rg-net",
     }
     explicit = f"/subscriptions/{SUB}/resourceGroups/rg-ai/providers/Microsoft.Storage/storageAccounts/sttest/blobServices/default/containers/documents"
@@ -137,8 +137,8 @@ def test_shell_platform_publication_hydrates_missing_azd_outputs_from_flat_agent
     values = outputs.load_platform_environment(environment, run_az=read)
     settings = outputs.platform_settings(outputs.build_platform_outputs(values), values)
     assert settings["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"] == metadata["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"]
-    assert settings["AZURE_RESOURCE_GROUP"] == "rg-app"
-    assert settings["AZURE_FOUNDRY_RESOURCE_GROUP"] == "rg-ai"
+    assert settings["AZURE_APP_RESOURCE_GROUP"] == "rg-app"
+    assert settings["AZURE_RESOURCE_GROUP"] == "rg-ai"
     assert "STORAGE_BLOB_ENDPOINT" not in environment
     assert all("set" not in call and "secret" not in str(call).lower() for call in calls)
     assert "resourceGroups" not in settings[outputs.PLATFORM_OUTPUTS_KEY]
@@ -190,7 +190,7 @@ def test_foundation_verifies_every_destination_and_project_without_changing_runt
 def test_classic_foundation_accepts_shared_resolver_valid_foundry_groups(group):
     environment = {
         **BASE, "DEPLOYMENT_TOPOLOGY": "classic",
-        "AZURE_FOUNDRY_RESOURCE_GROUP": group,
+        "AZURE_RESOURCE_GROUP": group,
         "AZURE_AI_PROJECT_RESOURCE_ID": BASE["AZURE_AI_PROJECT_RESOURCE_ID"].replace("rg-ai", group),
     }
     calls = []
@@ -206,7 +206,7 @@ def test_classic_foundation_accepts_shared_resolver_valid_foundry_groups(group):
 def test_unicode_foundation_group_keeps_subscription_destination_and_endpoint_checks(wrong_binding):
     group = "rg-équipe"
     environment = {
-        **BASE, "AZURE_FOUNDRY_RESOURCE_GROUP": group,
+        **BASE, "AZURE_RESOURCE_GROUP": group,
         "AZURE_AI_PROJECT_RESOURCE_ID": BASE["AZURE_AI_PROJECT_RESOURCE_ID"].replace("rg-ai", group),
     }
     if wrong_binding == "subscription":
@@ -263,15 +263,15 @@ def test_foundation_never_falls_back_when_destination_read_fails():
 def test_capability_roles_discover_actual_target_across_unique_destinations(groups):
     from config.appdefinition.roles import resolve_scope
     env = {
-        **BASE, "AZURE_FOUNDRY_RESOURCE_GROUP": groups[min(1, len(groups) - 1)],
+        **BASE, "AZURE_RESOURCE_GROUP": groups[min(1, len(groups) - 1)],
         "AZURE_NETWORK_RESOURCE_GROUP": groups[-1], "SEARCH_SERVICE_NAME": "search",
     }
-    target = f"/subscriptions/{SUB}/resourceGroups/{env['AZURE_FOUNDRY_RESOURCE_GROUP']}/providers/Microsoft.Search/searchServices/search"
+    target = f"/subscriptions/{SUB}/resourceGroups/{env['AZURE_RESOURCE_GROUP']}/providers/Microsoft.Search/searchServices/search"
     calls = []
     def read(arguments, **kwargs):
         calls.append(arguments)
         group = arguments[arguments.index("--resource-group") + 1]
-        return json.dumps([{"id": target, "name": "search"}] if group == env["AZURE_FOUNDRY_RESOURCE_GROUP"] else [])
+        return json.dumps([{"id": target, "name": "search"}] if group == env["AZURE_RESOURCE_GROUP"] else [])
     assert resolve_scope("searchService", env, "rg-app", read) == target
     assert len(calls) == len(groups)
     assert all(SUB in call and "create" not in call for call in calls)
@@ -309,29 +309,29 @@ def test_image_discovery_failures_cannot_reset_existing_images(failure):
         discover_existing_images("rg-app", SUB)
 
 
-@pytest.mark.parametrize("foundry,network", [("", ""), ("rg-ai", ""), ("rg-ai", "rg-net")])
-def test_image_discovery_and_runtime_selection_remain_application_owned(foundry, network):
+@pytest.mark.parametrize("application,network", [("", ""), ("rg-app", ""), ("rg-app", "rg-net")])
+def test_image_discovery_and_runtime_selection_remain_application_owned(application, network):
     from config.deployment.existing_images import definition_placeholder_plan
     from config.deployment.composition import resolve_mode
     env = {
-        **BASE, "AZURE_FOUNDRY_RESOURCE_GROUP": foundry, "AZURE_NETWORK_RESOURCE_GROUP": network,
+        **BASE, "AZURE_APP_RESOURCE_GROUP": application, "AZURE_NETWORK_RESOURCE_GROUP": network,
         "DEPLOYMENT_TOPOLOGY": "hosted-no-panel", "AGENTLZ_APP_DEFINITION": "",
     }
     with patch("config.deployment.existing_images.discover_existing_images", return_value={"frontend": "cr.azurecr.io/ui@sha256:" + "a" * 64}) as read:
         plan = definition_placeholder_plan(env)
     assert plan["ui"].endswith("a" * 64)
     assert resolve_mode(env).value == "hosted-no-panel"
-    assert read.call_args.args[0] == "rg-app"
+    assert read.call_args.args[0] == (application or "rg-ai")
 
 
-@pytest.mark.parametrize("configured", ["", "rg-ai", "rg-app"])
-def test_foundry_configuration_uses_its_destination_with_legacy_fallback(configured):
+@pytest.mark.parametrize("configured", ["rg-ai", "rg-app", "rg-ai(team)"])
+def test_foundry_configuration_uses_the_root_destination(configured):
     from config.aifoundry import setup
     client = object()
-    settings = {"AZURE_RESOURCE_GROUP": "rg-app", "AZURE_FOUNDRY_RESOURCE_GROUP": configured}
-    with patch.object(setup, "cfg", side_effect=lambda client, key, **kwargs: settings[key]), \
+    settings = {"AZURE_APP_RESOURCE_GROUP": "rg-app", "AZURE_RESOURCE_GROUP": configured}
+    with patch.object(setup, "cfg", side_effect=lambda client, key, **kwargs: settings.get(key, "")), \
             patch.dict("os.environ", {}, clear=True):
-        assert setup.foundry_resource_group(client) == (configured or "rg-app")
+        assert setup.foundry_resource_group(client) == configured
 
 
 def test_foundry_configuration_does_not_fallback_after_permission_failure():
@@ -341,7 +341,7 @@ def test_foundry_configuration_does_not_fallback_after_permission_failure():
     client = Mock()
     client.get_configuration_setting.side_effect = HttpResponseError("denied")
     with pytest.raises(SystemExit):
-        setup.cfg(client, "AZURE_FOUNDRY_RESOURCE_GROUP", required=False)
+        setup.cfg(client, "AZURE_RESOURCE_GROUP", required=False)
 
 
 def test_powershell_discovery_honors_destination_and_exact_external_monitoring_ids():

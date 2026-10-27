@@ -54,7 +54,8 @@ class PrepareEnvironmentTests(unittest.TestCase):
         )):
             environment = hosted_environment(
                 AZURE_SUBSCRIPTION_ID=subscription,
-                AZURE_FOUNDRY_RESOURCE_GROUP="rg-foundry",
+                AZURE_RESOURCE_GROUP="rg-foundry",
+                AZURE_APP_RESOURCE_GROUP="rg-test",
                 AZURE_NETWORK_RESOURCE_GROUP="rg-network",
                 AZURE_CONTAINER_REGISTRY_RESOURCE_ID=declared,
             )

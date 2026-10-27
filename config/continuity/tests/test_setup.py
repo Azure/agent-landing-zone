@@ -35,12 +35,18 @@ class ContinuitySetupTests(TestCase):
 
         run_az.assert_called_once()
         self.assertFalse(run_az.call_args.kwargs["required"])
-        get_setting.assert_called_once()
+        self.assertEqual(
+            ["AZURE_APP_RESOURCE_GROUP", "HOSTED_CONVERSATION_CAPABILITY_KEY"],
+            [call.args[1] for call in get_setting.call_args_list],
+        )
 
     @patch.object(
         setup,
         "get_configuration_setting_or_none",
-        return_value=SimpleNamespace(value="reference"),
+        side_effect=lambda client, key: (
+            SimpleNamespace(value="reference")
+            if key == "HOSTED_CONVERSATION_CAPABILITY_KEY" else None
+        ),
     )
     @patch.object(setup, "_run_az", return_value="")
     def test_disabled_continuity_fails_closed_without_identity_when_capability_exists(
@@ -61,7 +67,23 @@ class ContinuitySetupTests(TestCase):
             )
 
         run_az.assert_called_once()
-        get_setting.assert_called_once()
+        self.assertEqual(
+            ["AZURE_APP_RESOURCE_GROUP", "HOSTED_CONVERSATION_CAPABILITY_KEY"],
+            [call.args[1] for call in get_setting.call_args_list],
+        )
+
+    def test_application_destination_prefers_explicit_environment_then_configuration(self):
+        client = Mock()
+        for configured, explicit, expected in (
+            (None, "", "rg-ai"),
+            (SimpleNamespace(value="rg-app"), "", "rg-app"),
+            (SimpleNamespace(value="rg-other"), "rg-explicit", "rg-explicit"),
+        ):
+            environment = {"AZURE_RESOURCE_GROUP": "rg-ai", "AZURE_APP_RESOURCE_GROUP": explicit}
+            with self.subTest(expected=expected), patch.object(
+                setup, "get_configuration_setting_or_none", return_value=configured,
+            ):
+                self.assertEqual(expected, setup._application_resource_group(client, environment))
 
     def test_safe_defaults_disable_continuity_and_prefer_delegation(self):
         values = dict(setup.DEFAULT_SETTINGS)
