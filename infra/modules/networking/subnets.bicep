@@ -26,7 +26,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (!u
 }
 
 module nsgsM 'network-security-group.bicep' = [
-  for subnet in subnets : if (deploySubnets && deployNsgs) {
+  for subnet in subnets : if (deploySubnets && deployNsgs && !contains(invalidNsgSubnets, subnet.name) && empty(subnet.?networkSecurityGroupResourceId ?? '')) {
     name: '${prefix}${vnetName}-${subnet.name}'
     scope: resourceGroup(subscriptionId, resourceGroupName)
     params : {
@@ -37,7 +37,7 @@ module nsgsM 'network-security-group.bicep' = [
 ]
 
 // Reserved subnets must not inherit a generic NSG; explicit service NSGs still win.
-var invalidNsgSubnets = ['AzureFirewallSubnet','AppGatewaySubnet','AzureBastionSubnet']
+var invalidNsgSubnets = ['AzureFirewallSubnet','AppGatewaySubnet','AzureBastionSubnet','GatewaySubnet']
 
 @batchSize(1)
 module subnetsM 'subnet.bicep' = [

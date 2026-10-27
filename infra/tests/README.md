@@ -29,6 +29,8 @@ tests/
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
 │   ├── Test-AcrTaskAgentPoolSubnetContract.ps1
 │   ├── Test-ResourceGroupScopesContract.ps1
+│   ├── Test-SubnetLayoutContract.ps1
+│   ├── Test-ScopedGraphNormalizationContract.ps1
 │   ├── Test-SolutionStorageAccessContract.ps1
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
 │   ├── Test-MaintenanceConfigurationWrapperContract.ps1
@@ -60,6 +62,9 @@ az bicep install --version v0.42.1
 Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
 pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
 
+# Focused umbrella bootstrap/bindings/composition regressions.
+python -m unittest tests.test_resource_groups
+
 # Separate parity/schema/provenance suite; requires Node.js and pinned packages.
 npm --prefix infra ci --no-audit --no-fund
 npm --prefix infra run test:parity
@@ -75,11 +80,12 @@ resolved by changing source pins or waiving a gate. The copied
 `infra/.github/workflows/` are not active umbrella workflows; active CI must
 invoke these commands explicitly.
 
-The scoped-resource-group integration run passed all **16** offline entrypoints
-in **703.4 seconds** on Windows with Azure CLI Bicep 0.42.1, including 139 scope
-assertions, 14 normalization mutation rejections, the original hosted/Storage
-fingerprints, and split/wrong-group operator authorization. No Azure deployment,
-what-if, live RBAC or DNS validation was performed.
+The subnet integration run passed all **17** offline entrypoints in **690.9
+seconds** on Windows with Azure CLI Bicep 0.42.1, including 500 subnet and 156
+scope assertions, 38 targeted graph and 39 subnet-delta mutation rejections,
+the original hosted/Storage fingerprints, and split/wrong-group operator
+authorization. No Azure deployment, what-if, live RBAC or DNS validation was
+performed.
 
 The smallest umbrella CI addition is the single offline-runner command above,
 replacing the standalone resource-group-contract invocation so it is not run
@@ -139,14 +145,22 @@ configuration gates.
 The resource-group scope contract compiles the actual orchestrator with Azure
 CLI Bicep, checks application/Foundry/network ownership, actual IDs and RBAC
 scopes, and projects one/two/three-RG mappings only after checking their exact
-compiled bindings. It checks independent legacy/separate PE subnet selection,
+compiled bindings. It checks dedicated application PE subnet selection,
 BYO and explicit PE/DNS precedence (including subscriptions), nested Foundry
 endpoint destinations and serialization, prerequisite project grants, private
 access with policy-managed DNS, collision-safe deployment names, the ARM
-64-output limit, and minified template size. CIDR/name validation gates new
-subnet writes; address-space checks are not applied to untouched platform-owned
-BYO subnets. It makes no Azure requests and creates its compiler artifact beside
+64-output limit, and minified template size. Subnet creation controls do not
+change resource-group ownership or private DNS/endpoint destination precedence.
+It makes no Azure requests and creates its compiler artifact beside
 the test, deleting it in `finally`.
+
+The subnet layout contract checks the twelve default definitions, independent
+creation switches, global/isolation precedence, configurable names and CIDRs,
+both VNet paths, dedicated PE routing, reserved GatewaySubnet attachments, and
+validation dependencies. Existing-VNet writes remain serialized subnet PUTs,
+not replacements of the VNet subnet collection. These compiled checks do not
+prove that a reused subnet exists or that Azure accepts its actual properties;
+the mocked preflight tests exercise those checks without live Azure access.
 
 The scoped refactor intentionally changes the historical symbolic resource
 graph: direct network resources now live in focused deployments, Foundry
@@ -169,6 +183,20 @@ resources, unrelated resource changes, and manifest spoofing. Behavioral checks
 still inspect the actual compiled template, not the historical projection.
 The ACR subnet and Search shared-link semantic tests follow the new compiled
 composition while retaining ordering, naming, and NSG checks.
+
+The ADR-0027 subnet delta is projected before the existing resource-group
+adapters. Its exact before/after fixture records intentional definitions,
+selection expressions, validation, dedicated PE routing and reserved-subnet NSG
+changes against `origin/develop` commit
+`9ab6ceb0028101f2c85d1fb484eaf89d7de6d5c9`, compiled with Bicep 0.42.1.
+It does not replace any historical fingerprint. Mutation tests must reject
+changes inside the reviewed delta as well as preserve unrelated graph drift
+for the original fingerprint gates; the actual deployment graph is never
+modified by normalization. The fixture reuses four exact pre-change values
+already recorded in the existing reviewed snapshots, and one identical
+subnet-input rule for both VNet paths. The complete projected template was
+compared with a fresh compile of that unchanged `origin/develop` commit, not
+with newly generated hashes.
 
 The Cosmos DB deployment-name contract proves that no top-level deployment
 embeds an environment-derived resource name and that SQL databases and

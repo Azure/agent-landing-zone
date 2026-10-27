@@ -192,18 +192,52 @@ param existingVnetResourceId string = ''
 param agentSubnetName string = 'agent-subnet'
 param peSubnetName string = 'pe-subnet'
 
-@description('Optional separate subnet for application private endpoints. Set with applicationPeSubnetPrefix; empty retains the legacy shared PE subnet, independently of resource-group count.')
-param applicationPeSubnetName string = ''
+@description('Dedicated application private endpoint subnet. Creation ownership is independent of its consumers; there is no shared Foundry subnet fallback.')
+param applicationPeSubnetName string = 'application-pe-subnet'
 
-@description('IPv4 CIDR for the optional application PE subnet. Set with applicationPeSubnetName; must be non-overlapping inside the workload VNet. No delegation is applied.')
-param applicationPeSubnetPrefix string = ''
-param gatewaySubnetName string = 'gateway-subnet'
+@description('IPv4 CIDR for the application PE subnet. Must be non-overlapping inside the workload VNet. No delegation is applied.')
+param applicationPeSubnetPrefix string = '192.168.3.128/26'
+param gatewaySubnetName string = 'GatewaySubnet'
 param azureBastionSubnetName string = 'AzureBastionSubnet'
 param azureFirewallSubnetName string = 'AzureFirewallSubnet'
 param azureAppGatewaySubnetName string = 'AppGatewaySubnet'
 param jumpboxSubnetName string = 'jumpbox-subnet'
 param acaEnvironmentSubnetName string = 'aca-environment-subnet'
 param devopsBuildAgentsSubnetName string = 'devops-build-agents-subnet'
+param powerPlatformSubnetName string = 'powerplatform-subnet'
+param aiGatewaySubnetName string = 'ai-gateway-subnet'
+
+@description('Power Platform capacity default, configurable for environment demand. Delegation does not associate an environment.')
+param powerPlatformSubnetPrefix string = '192.168.4.0/24'
+
+@description('APIM Standard v2/Premium v2 outbound integration subnet, /27 or larger. Does not deploy APIM or private endpoints.')
+param aiGatewaySubnetPrefix string = '192.168.5.0/24'
+
+// Creation ownership only: effective creation also requires networkIsolation and deploySubnets.
+@description('Create/manage the Agent Service subnet; does not control Foundry association.')
+param deployAgentSubnet bool = true
+@description('Create/manage the Foundry and grounding private endpoint subnet.')
+param deployPeSubnet bool = true
+@description('Create/manage the dedicated application private endpoint subnet.')
+param deployApplicationPeSubnet bool = true
+@description('Create/manage AzureBastionSubnet without deploying Bastion.')
+param deployAzureBastionSubnet bool = true
+@description('Create/manage AzureFirewallSubnet without deploying a firewall.')
+param deployAzureFirewallSubnet bool = true
+@description('Create/manage GatewaySubnet without deploying a VPN/ExpressRoute gateway.')
+param deployGatewaySubnet bool = true
+@description('Create/manage the Application Gateway subnet without deploying a gateway.')
+param deployAppGatewaySubnet bool = true
+@description('Create/manage the jumpbox subnet without deploying a VM.')
+param deployJumpboxSubnet bool = true
+@description('Create/manage the Container Apps environment subnet.')
+param deployAcaEnvironmentSubnet bool = true
+@description('Create/manage the build-agent subnet without deploying build agents.')
+param deployDevopsBuildAgentsSubnet bool = true
+@description('Create/manage the Power Platform delegated subnet only.')
+param deployPowerPlatformSubnet bool = true
+@description('Create/manage the AI Gateway delegated integration subnet only; requires deployNsgs.')
+param deployAiGatewaySubnet bool = true
 
 @description('Address prefixes for the virtual network.')
 param vnetAddressPrefixes array = [
@@ -258,7 +292,7 @@ param deployGroundingWithBing bool = true
 @description('Deploy Azure AI Foundry for building and managing AI models.')
 param deployAiFoundry bool = true
 
-@description('Deploy Azure AI Foundry agent subnet.')
+@description('Associate Azure AI Foundry Agent Service with agentSubnetName. Subnet creation is independently controlled by deployAgentSubnet.')
 param deployAiFoundrySubnet bool = true
 
 @description('Deploy Azure App Configuration for centralized feature-flag and configuration management.')
@@ -1049,7 +1083,7 @@ module componentFlagValidation 'modules/validation/component-flags.bicep' = {
   params: {
     containerAppsRequireEnvironment: !deployContainerApps || deployContainerEnv
     containerAppApiKeysHavePrerequisites: !useCAppAPIKey || (deployContainerApps && deployKeyVault && deployAppConfig && appRuntimeConfigurationMode == 'appConfig')
-    existingSubnetNsgAssociationsAreProtected: !(networkIsolation && useExistingVNet && deploySubnets && !deployNsgs)
+    existingSubnetNsgAssociationsAreProtected: !(networkIsolation && useExistingVNet && !empty(selectedSubnetDefinitions) && !deployNsgs)
   }
 }
 
@@ -1150,7 +1184,7 @@ var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacy
 
 // Effective NAT Gateway ID — when we deploy our own NAT GW, use that. When
 // the operator BYO'd one, use theirs. Otherwise empty (subnet leaves
-// natGateway unset). Wired into `baseSubnets[jumpbox].natGatewayResourceId`
+// natGateway unset). Wired into `subnets[jumpbox].natGatewayResourceId`
 // so both code paths (greenfield + useExistingVNet) attach the subnet
 // to the NAT GW.
 #disable-next-line BCP318
@@ -1290,8 +1324,7 @@ var _peSubscriptionId = !empty(privateEndpointResourceGroupName)
   ? subscription().subscriptionId
   : (useExistingVNet && !sideBySideDeploy ? varExistingVnetSubscriptionId : subscription().subscriptionId)
 var _peResourceGroupResourceId = '/subscriptions/${_peSubscriptionId}/resourceGroups/${_peResourceGroupName}'
-var _separateApplicationPeSubnet = !empty(applicationPeSubnetName)
-var _applicationPeSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${_separateApplicationPeSubnet ? applicationPeSubnetName : peSubnetName}' : ''
+var _applicationPeSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${applicationPeSubnetName}' : ''
 
 // ----------------------------------------------------------------------
 // VM vars
@@ -1388,6 +1421,15 @@ module appGwNsg 'modules/networking/appgw-nsg.bicep' = if (_publicIngressEnabled
   }
 }
 
+module aiGatewayNsg 'modules/networking/ai-gateway-nsg.bicep' = if (_networkIsolation && deploySubnets && deployAiGatewaySubnet && deployNsgs) {
+  scope: resourceGroup(useExistingVNet ? varExistingVnetSubscriptionId : subscription().subscriptionId, useExistingVNet ? varExistingVnetResourceGroupName : _networkResourceGroupName)
+  name: 'aiGatewayNsgDeployment'
+  params: {
+    name: 'nsg-${useExistingVNet ? varExistingVnetName : resourceNames.vnetName}-${aiGatewaySubnetName}'
+    location: location
+  }
+}
+
 var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && deployAcrTaskAgentPool
 
 // Public Ingress (#49) — only effective in network-isolated mode with Container
@@ -1410,9 +1452,13 @@ module routeTable 'modules/networking/route-table.bicep' = if (_createRouteTable
   }
 }
 
-// Base subnets that are always included
-var baseSubnets = [
+// One explicit ownership/consumer model for both VNet paths. Creation flags do
+// not disable consumers. Reused BYO subnet properties are verified by preflight.
+var subnetDefinitions = [
       {
+        purpose: 'agent'
+        create: deployAgentSubnet
+        required: deployAiFoundry && deployAiFoundrySubnet
         name: agentSubnetName
         addressPrefix: agentSubnetPrefix 
         // Issue #110: the serviceName must be the canonical 'Microsoft.App/environments'
@@ -1423,99 +1469,150 @@ var baseSubnets = [
         // fails ~47min into provision with "Invalid vnet resource ID provided, or the
         // virtual network could not be found." even though the VNet/subnet are healthy.
         delegation: 'Microsoft.App/environments'
-        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.CognitiveServices'
         ]
       }
       {
+        purpose: 'pe'
+        create: deployPeSubnet
+        // Cosmos retains service-endpoint ACL references to this subnet.
+        required: deployAiFoundry || deployStorageAccount || deploySearchService || deploySpeechService || _deployAiFoundryStorage || _deployAiFoundrySearch || deployCosmosDb
         name: peSubnetName
         addressPrefix: peSubnetPrefix 
-        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]        
         delegation: ''
       }
       {
+        purpose: 'gateway'
+        create: deployGatewaySubnet
+        required: false
         name: gatewaySubnetName
         addressPrefix: gatewaySubnetPrefix 
         delegation: ''
         serviceEndpoints : []
       }
       {
+        purpose: 'bastion'
+        create: deployAzureBastionSubnet
+        required: _deployBastion
         name: azureBastionSubnetName
         addressPrefix: azureBastionSubnetPrefix
-        #disable-next-line BCP318
-        networkSecurityGroupResourceId: (_deployBastion && deployNsgs) ? bastionNsg!.outputs.id : ''
         delegation: ''
         serviceEndpoints : []
       }
       {
+        purpose: 'firewall'
+        create: deployAzureFirewallSubnet
+        required: deployAzureFirewall
         name: azureFirewallSubnetName
         addressPrefix: azureFirewallSubnetPrefix 
         delegation: ''
         serviceEndpoints : []
       }
       {
+        purpose: 'appGateway'
+        create: deployAppGatewaySubnet
+        required: _publicIngressEnabled
         name: azureAppGatewaySubnetName
         addressPrefix: azureAppGatewaySubnetPrefix  
-        #disable-next-line BCP318
-        networkSecurityGroupResourceId: _publicIngressEnabled ? appGwNsg!.outputs.id : ''
         delegation: ''
         serviceEndpoints : []
       }
       {
+        purpose: 'jumpbox'
+        create: deployJumpboxSubnet
+        required: _deployJumpbox
         name: jumpboxSubnetName
         addressPrefix: jumpboxSubnetPrefix 
-        natGatewayResourceId: _effectiveNatGatewayId
-        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
       {
+        purpose: 'acaEnvironment'
+        create: deployAcaEnvironmentSubnet
+        // Cosmos retains this subnet ACL even when Container Apps is disabled.
+        required: deployContainerEnv || deployCosmosDb
         name: acaEnvironmentSubnetName
         addressPrefix: acaEnvironmentSubnetPrefix  
         // Match the agent-subnet delegation casing (see comment above). Canonical
         // 'Microsoft.App/environments' avoids any case-sensitive lookup downstream.
         delegation: 'Microsoft.App/environments'
-        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]
       }
       {
+        purpose: 'devopsBuildAgents'
+        create: deployDevopsBuildAgentsSubnet
+        required: _deployAcrTaskAgentPool
         name: devopsBuildAgentsSubnetName
         addressPrefix: devopsBuildAgentsSubnetPrefix 
-        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
+      {
+        purpose: 'applicationPe'
+        create: deployApplicationPeSubnet
+        required: deployCosmosDb || deployKeyVault || deployAppConfig || deployContainerEnv || deployContainerRegistry || _deployAmpls
+        name: applicationPeSubnetName
+        addressPrefix: applicationPeSubnetPrefix
+        serviceEndpoints: ['Microsoft.AzureCosmosDB']
+        delegation: ''
+      }
+      {
+        purpose: 'powerPlatform'
+        create: deployPowerPlatformSubnet
+        required: false
+        name: powerPlatformSubnetName
+        addressPrefix: powerPlatformSubnetPrefix
+        delegation: 'Microsoft.PowerPlatform/enterprisePolicies'
+        serviceEndpoints: []
+      }
+      {
+        purpose: 'aiGateway'
+        create: deployAiGatewaySubnet
+        required: false
+        name: aiGatewaySubnetName
+        addressPrefix: aiGatewaySubnetPrefix
+        delegation: 'Microsoft.Web/serverFarms'
+        serviceEndpoints: []
+      }
 ]
 
-var subnets = concat(baseSubnets, _separateApplicationPeSubnet ? [
-  {
-    name: applicationPeSubnetName
-    addressPrefix: applicationPeSubnetPrefix
-    routeTableResourceId: _effectiveRouteTableId
-    serviceEndpoints: ['Microsoft.AzureCosmosDB']
-    delegation: ''
-  }
-] : [])
+var selectedSubnetDefinitions = filter(subnetDefinitions, subnet => _networkIsolation && deploySubnets && subnet.create)
+// Only resource properties cross the AVM/child-deployment boundary.
+var subnets = map(selectedSubnetDefinitions, subnet => {
+  name: subnet.name
+  addressPrefix: subnet.addressPrefix
+  delegation: subnet.delegation
+  serviceEndpoints: subnet.serviceEndpoints
+  #disable-next-line BCP318
+  networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs ? bastionNsg!.outputs.id : (subnet.purpose == 'appGateway' && _publicIngressEnabled ? appGwNsg!.outputs.id : (subnet.purpose == 'aiGateway' && deployNsgs ? aiGatewayNsg!.outputs.id : ''))
+  // GatewaySubnet and both new delegated reservations have no forced-tunnel UDR.
+  routeTableResourceId: contains(['agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'], subnet.purpose) ? _effectiveRouteTableId : ''
+  natGatewayResourceId: subnet.purpose == 'jumpbox' ? _effectiveNatGatewayId : ''
+})
 
-module networkLayoutValidation 'modules/validation/private-endpoint-layout.bicep' = if (!empty(applicationPeSubnetName) || !empty(applicationPeSubnetPrefix)) {
-  name: 'privateEndpointLayoutValidation'
+module networkLayoutValidation 'modules/validation/subnet-layout.bicep' = if (_networkIsolation) {
+  name: 'subnetLayoutValidation'
   params: {
-    applicationSubnetName: applicationPeSubnetName
-    applicationSubnetPrefix: applicationPeSubnetPrefix
-    existingSubnetNames: map(baseSubnets, subnet => subnet.name)
-    existingSubnetPrefixes: map(baseSubnets, subnet => subnet.addressPrefix)
+    subnetDefinitions: map(subnetDefinitions, subnet => {
+      purpose: subnet.purpose
+      name: subnet.name
+      addressPrefix: subnet.addressPrefix
+      create: deploySubnets && subnet.create
+      required: subnet.required
+    })
     vnetAddressPrefixes: vnetAddressPrefixes
-    validateAddressSpace: !useExistingVNet || deploySubnets
+    useExistingVNet: useExistingVNet
+    deployNsgs: deployNsgs
   }
 }
 
-module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) {
+module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs && !empty(selectedSubnetDefinitions)) {
   name: 'virtualNetworkSubnetsDeployment'
   params: {
     vnetName: useExistingVNet ? varExistingVnetName : resourceNames.vnetName
@@ -1530,7 +1627,7 @@ module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIs
     useExistingVNet: useExistingVNet
     virtualNetworkResourceId: virtualNetworkResourceId
   }
-  dependsOn: [networkLayoutValidation]
+  dependsOn: [networkLayoutValidation, componentFlagValidation]
 }
 
 // VNet
@@ -1539,7 +1636,6 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
   scope: resourceGroup(_networkResourceGroupName)
   name: 'virtualNetworkDeployment'
   params: {
-    // VNet sized /16 to fit all subnets
     addressPrefixes: vnetAddressPrefixes
     name: resourceNames.vnetName
     location: location

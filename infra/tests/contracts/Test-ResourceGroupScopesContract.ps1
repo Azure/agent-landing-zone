@@ -119,7 +119,7 @@ try {
     Assert-Equal $pe.subscriptionId "[parameters('subscriptionId')]" 'PE deployment subscription.'
     Assert-Equal $pe.copy.mode 'serial' 'Aggregator serializes subnet/PE updates.'
     Assert-Equal $pe.copy.batchSize 1 'One PE update at a time.'
-    Assert-Equal $pe.properties.parameters.subnetResourceId.value "[coalesce(tryGet(parameters('endpoints')[copyIndex()], 'subnetResourceId'), parameters('subnetResourceId'))]" 'Endpoint-specific subnet with legacy fallback.'
+    Assert-Equal $pe.properties.parameters.subnetResourceId.value "[coalesce(tryGet(parameters('endpoints')[copyIndex()], 'subnetResourceId'), parameters('subnetResourceId'))]" 'Endpoint-specific application destination; grounding endpoints use the aggregator default.'
     $endpointInput = $t.resources.privateEndpoints.properties.parameters.endpoints.value
     foreach ($resourceName in @('dbAccountName', 'keyVaultName', 'appConfigName', 'containerEnvName', 'containerRegistryName')) {
         Assert-Contains $endpointInput "variables('resourceNames').$resourceName), 'subnetResourceId', if(variables('_networkIsolation')" "$resourceName uses application PE subnet override."
@@ -131,30 +131,40 @@ try {
         $checks++
     }
 
-    foreach ($name in @('applicationPeSubnetName', 'applicationPeSubnetPrefix')) {
-        Assert-Equal $t.parameters.$name.defaultValue '' "$name preserves legacy layout."
-    }
-    Assert-Equal $t.variables._separateApplicationPeSubnet "[not(empty(parameters('applicationPeSubnetName')))]" 'Second subnet does not depend on RG count.'
+    Assert-Equal $t.parameters.applicationPeSubnetName.defaultValue 'application-pe-subnet' 'Application PEs have a dedicated default subnet.'
+    Assert-Equal $t.parameters.applicationPeSubnetPrefix.defaultValue '192.168.3.128/26' 'Application PE allocation retains the approved default.'
+    Assert-Equal $t.variables.ContainsKey('_separateApplicationPeSubnet') $false 'No legacy empty-name subnet selector remains.'
+    Assert-Equal $t.variables.selectedSubnetDefinitions "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]" 'Selection depends on ownership/isolation, never resource-group count.'
     $subnetInput = $t.resources.virtualNetwork.properties.parameters.subnets.value
-    Assert-Contains $subnetInput "if(variables('_separateApplicationPeSubnet')" 'Only explicit second-subnet input adds a subnet.'
-    Assert-Contains $subnetInput "'name', parameters('applicationPeSubnetName'), 'addressPrefix', parameters('applicationPeSubnetPrefix')" 'Second-subnet identity and prefix.'
-    Assert-Contains $subnetInput "'delegation', ''" 'PE subnet remains undelegated.'
+    Assert-Equal $t.resources.virtualNetworkSubnets.properties.parameters.subnets.value $subnetInput 'New and BYO VNets receive the same selected subnet projection.'
+    $applicationDefinition = @($t.variables.subnetDefinitions | Where-Object purpose -CEQ 'applicationPe')
+    Assert-Equal $applicationDefinition.Count 1 'Exactly one application PE definition.'
+    Assert-Equal $applicationDefinition[0].name "[parameters('applicationPeSubnetName')]" 'Application subnet identity is independent of RG scope.'
+    Assert-Equal $applicationDefinition[0].addressPrefix "[parameters('applicationPeSubnetPrefix')]" 'Application subnet prefix remains configurable.'
+    Assert-Equal $applicationDefinition[0].create "[parameters('deployApplicationPeSubnet')]" 'Application creation flag does not change its consumer destination.'
+    Assert-Equal $applicationDefinition[0].delegation '' 'PE subnet remains undelegated.'
+    if ($endpointInput.Contains("variables('_separateApplicationPeSubnet')") -or
+        $endpointInput.Contains("parameters('deployApplicationPeSubnet')")) {
+        throw 'Application PE routing must not fall back when creation is disabled.'
+    }
+    $checks++
     Assert-Dependency $t.resources.virtualNetwork 'networkLayoutValidation' 'New VNet waits for subnet validation.'
     Assert-Dependency $t.resources.virtualNetworkSubnets 'networkLayoutValidation' 'BYO subnet writes wait for validation.'
-    Assert-Equal $t.resources.networkLayoutValidation.condition "[or(not(empty(parameters('applicationPeSubnetName'))), not(empty(parameters('applicationPeSubnetPrefix'))))]" 'Default layout creates no extra validation deployment.'
+    Assert-Equal $t.resources.networkLayoutValidation.condition "[variables('_networkIsolation')]" 'Every isolated topology validates ownership and required subnets.'
     $layout = $t.resources.networkLayoutValidation.properties.template
-    Assert-Equal $layout.variables.suppliedTogether "[equals(variables('enabled'), not(empty(parameters('applicationSubnetPrefix'))))]" 'Reject a half-configured second subnet.'
-    Assert-Contains $layout.variables.nonOverlapping "__bicep.cidrStart(parameters('applicationSubnetPrefix'))" 'Validate subnet range overlap.'
-    Assert-Contains $layout.variables.containedInVnet "__bicep.cidrEnd(parameters('applicationSubnetPrefix'))" 'Validate VNet containment.'
-    Assert-Contains $layout.outputs.validated.value "fail('The application PE subnet CIDR overlaps an existing workload subnet.')" 'Overlap fails closed.'
-    Assert-Contains $layout.outputs.validated.value "fail('The separate application PE subnet name must not replace an existing workload subnet.')" 'Subnet-name collision fails closed.'
+    Assert-Equal $t.resources.networkLayoutValidation.properties.parameters.useExistingVNet.value "[parameters('useExistingVNet')]" 'BYO validation does not assume new-VNet addressing.'
+    Assert-Contains $layout.outputs.validated.value "fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.')" 'Unmanaged required new-VNet subnets fail closed.'
+    Assert-Contains $layout.outputs.validated.value "fail('Managed subnet CIDRs must not overlap and must be contained in the new VNet address space.')" 'Invalid selected ranges fail closed.'
 
-    # Project only the exact independent subnet-selector and fallback bindings
-    # checked above, across all supported destination-count layouts.
+    # Direct parameter bindings above are independent of RG count and creation.
+    # Disabling ownership reuses the configured subnet, not the Foundry subnet.
     foreach ($rgCount in 1..3) {
-        foreach ($applicationSubnet in @('', 'app-pe-subnet')) {
-            $selected = if ($applicationSubnet) { $applicationSubnet } else { 'pe-subnet' }
-            Assert-Equal $selected $(if ($applicationSubnet) { 'app-pe-subnet' } else { 'pe-subnet' }) "$rgCount RG(s): explicit/legacy application subnet"
+        foreach ($applicationSubnet in @('application-pe-subnet', 'app-pe-subnet')) {
+            foreach ($create in @($true, $false)) {
+                $parameters = @{ applicationPeSubnetName = $applicationSubnet; deployApplicationPeSubnet = $create }
+                $selected = $parameters.applicationPeSubnetName
+                Assert-Equal $selected $applicationSubnet "$rgCount RG(s), create=$create`: application subnet remains dedicated"
+            }
         }
     }
     foreach ($case in @(

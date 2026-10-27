@@ -307,7 +307,7 @@ class ResolverTests(ScratchTest):
         self.assertEqual(("rg-app",), rg.resolve_resource_groups(self.environment).unique_groups)
         self.assertEqual(before, self.environment)
 
-    def test_optional_application_pe_local_errors_precede_all_azure_and_binding(self) -> None:
+    def test_configured_application_pe_local_errors_precede_all_azure_and_binding(self) -> None:
         for name, prefix in (
             ("app-pe", ""), ("", "192.168.3.0/27"),
             ("bad/name", "192.168.3.0/27"), ("app-pe", "192.168.3.1/27"),
@@ -332,6 +332,28 @@ class ResolverTests(ScratchTest):
                 "AZURE_APPLICATION_PE_SUBNET_NAME": name,
                 "AZURE_APPLICATION_PE_SUBNET_PREFIX": prefix,
             })
+
+    def test_isolated_application_pe_overrides_resolve_each_omitted_default(self) -> None:
+        for overrides in (
+            {},
+            {"AZURE_APPLICATION_PE_SUBNET_NAME": "tenant-app-pe"},
+            {"AZURE_APPLICATION_PE_SUBNET_PREFIX": "10.30.3.128/26"},
+        ):
+            with self.subTest(overrides=overrides):
+                rg.validate_application_pe_subnet({
+                    "NETWORK_ISOLATION": "true", **overrides,
+                })
+
+    def test_isolated_application_pe_explicit_empty_is_not_shared_subnet_reuse(self) -> None:
+        for create in ("true", "false"):
+            with self.subTest(create=create):
+                with self.assertRaisesRegex(rg.ResourceGroupError, "AZURE_APPLICATION_PE_SUBNET"):
+                    rg.validate_application_pe_subnet({
+                        "NETWORK_ISOLATION": "true",
+                        "DEPLOY_APPLICATION_PE_SUBNET": create,
+                        "AZURE_APPLICATION_PE_SUBNET_NAME": "",
+                        "AZURE_APPLICATION_PE_SUBNET_PREFIX": "",
+                    })
 
     def test_unselected_root_default_pending_but_explicit_extra_fails(self) -> None:
         self.environment.pop("AZURE_RESOURCE_GROUP")
@@ -965,13 +987,86 @@ class HookTests(ScratchTest):
             parameters["networkResourceGroupName"],
         )
         self.assertEqual(
-            {"value": "${AZURE_APPLICATION_PE_SUBNET_NAME=}"},
+            {"value": "${AZURE_APPLICATION_PE_SUBNET_NAME=application-pe-subnet}"},
             parameters["applicationPeSubnetName"],
         )
         self.assertEqual(
-            {"value": "${AZURE_APPLICATION_PE_SUBNET_PREFIX=}"},
+            {"value": "${AZURE_APPLICATION_PE_SUBNET_PREFIX=192.168.3.128/26}"},
             parameters["applicationPeSubnetPrefix"],
         )
+
+    def test_subnet_creation_and_address_bindings_are_independent(self) -> None:
+        parameters = json.loads((ROOT / "main.parameters.json").read_text())["parameters"]
+        contracts = (
+            ("Agent", "AGENT", "agent", "192.168.0.0/24"),
+            ("AcaEnvironment", "ACA_ENVIRONMENT", "acaEnvironment", "192.168.1.0/24"),
+            ("Pe", "PE", "pe", "192.168.2.0/26"),
+            ("AzureBastion", "BASTION", "azureBastion", "192.168.2.64/26"),
+            ("AzureFirewall", "FIREWALL", "azureFirewall", "192.168.2.128/26"),
+            ("Gateway", "GATEWAY", "gateway", "192.168.2.192/26"),
+            ("AppGateway", "APP_GATEWAY", "azureAppGateway", "192.168.3.0/27"),
+            ("Jumpbox", "JUMPBOX", "jumpbox", "192.168.3.64/27"),
+            ("DevopsBuildAgents", "DEVOPS_BUILD_AGENTS", "devopsBuildAgents", "192.168.3.96/27"),
+            ("ApplicationPe", "APPLICATION_PE", "applicationPe", "192.168.3.128/26"),
+            ("PowerPlatform", "POWER_PLATFORM", "powerPlatform", "192.168.4.0/24"),
+            ("AiGateway", "AI_GATEWAY", "aiGateway", "192.168.5.0/24"),
+        )
+        for flag, environment, prefix, cidr in contracts:
+            with self.subTest(subnet=prefix):
+                # Creation and address overrides are separate inputs, not service
+                # enablement flags or a topology object that drops explicit values.
+                flag_environment = {
+                    "AzureBastion": "AZURE_BASTION",
+                    "AzureFirewall": "AZURE_FIREWALL",
+                }.get(flag, environment)
+                self.assertEqual(
+                    {"value": f"${{DEPLOY_{flag_environment}_SUBNET=true}}"},
+                    parameters[f"deploy{flag}Subnet"],
+                )
+                self.assertEqual(
+                    {"value": f"${{AZURE_{environment}_SUBNET_PREFIX={cidr}}}"},
+                    parameters[f"{prefix}SubnetPrefix"],
+                )
+        self.assertIsInstance(parameters["vnetAddressPrefixes"]["value"], list)
+        self.assertTrue(parameters["vnetAddressPrefixes"]["value"])
+        self.assertEqual(
+            {"value": "${DEPLOY_SUBNETS=true}"},
+            parameters["deploySubnets"],
+        )
+
+    def test_composition_preserves_explicit_subnet_overrides_for_both_vnet_paths(self) -> None:
+        from config.deployment.composition import compose_parameters
+
+        source = json.loads((ROOT / "main.parameters.json").read_text())
+        prefix_names = sorted(
+            name for name in source["parameters"] if name.endswith("SubnetPrefix")
+        )
+        self.assertEqual(12, len(prefix_names))
+        custom = {
+            name: {"value": f"10.30.{index}.0/24"}
+            for index, name in enumerate(prefix_names)
+        }
+        custom.update({
+            "vnetAddressPrefixes": {"value": ["10.30.0.0/16"]},
+            "applicationPeSubnetName": {"value": "tenant-app-pe"},
+            "deployAgentSubnet": {"value": False},
+            "deployApplicationPeSubnet": {"value": False},
+        })
+        for byo in (False, True):
+            with self.subTest(use_existing_vnet=byo):
+                requested = json.loads(json.dumps(source))
+                requested["parameters"].update(custom)
+                requested["parameters"]["useExistingVNet"] = {"value": byo}
+                before = json.loads(json.dumps(requested))
+                composed = compose_parameters(requested, {
+                    "NETWORK_ISOLATION": "true",
+                    "DEPLOYMENT_TOPOLOGY": "classic",
+                })
+                self.assertEqual(before, requested, "Composition must not mutate operator input.")
+                for name, value in {
+                    **custom, "useExistingVNet": {"value": byo},
+                }.items():
+                    self.assertEqual(value, composed["parameters"][name], name)
 
     def exercise_hook(
         self, shell: str, app_code: int, rg_code: int, inspect_defaults: bool = False,
