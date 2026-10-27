@@ -23,6 +23,10 @@ from config.deployment.composition import (
 from util.azure_cli import resolve_az_command
 from config.deployment.context import context_settings
 from config.deployment.resource_groups import resource_group_for
+from config.retrieval.settings import (
+    public_settings as retrieval_public_settings,
+    source_public_settings,
+)
 
 
 def _resolve_az_command() -> str:
@@ -169,6 +173,8 @@ def build_settings(
             )
     runtime_mode = resolve_runtime_mode(mode, environment)
     runtime_hosted = runtime_mode is not DeploymentMode.CLASSIC
+    retrieval_settings = retrieval_public_settings(environment, hosted=runtime_hosted)
+    source_settings = source_public_settings(environment)
 
     frontend = _container_app(
         resource_group, app_names["frontend"], required=True, subscription=subscription
@@ -274,6 +280,8 @@ def build_settings(
             else {}
         ),
         **continuity_public_settings(environment),
+        **retrieval_settings,
+        **source_settings,
     }
 
 

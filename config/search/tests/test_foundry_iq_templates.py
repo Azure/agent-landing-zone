@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from config.search import setup
 from config.search import foundry_iq_mcp_setup as mcp_setup
+from config.search import sharepoint_indexed_setup as sharepoint_setup
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1]
@@ -37,6 +38,41 @@ def render_json_template(template_name, context):
 
 
 class FoundryIqTemplateTests(unittest.TestCase):
+    def test_application_index_enforces_native_document_permissions(self):
+        for backend in ("foundry_iq", "ai_search"):
+            with self.subTest(backend=backend):
+                settings = render_json_template(
+                    "search.settings.j2",
+                    {
+                        "RESOURCE_TOKEN": "abc123",
+                        "SEARCH_SERVICE_QUERY_ENDPOINT": "https://search.search.windows.net",
+                        "AI_FOUNDRY_ACCOUNT_NAME": "aif-abc123",
+                        "RETRIEVAL_BACKEND": backend,
+                    },
+                )
+                definitions = render_json_template(
+                    "search.j2",
+                    {
+                        **settings,
+                        "STORAGE_ACCOUNT_RESOURCE_ID": (
+                            "/subscriptions/s/resourceGroups/rg/providers/"
+                            "Microsoft.Storage/storageAccounts/st"
+                        ),
+                        "EMBEDDING_MODEL_INFO": {},
+                        "GPT_MODEL_INFO": {},
+                    },
+                )
+                index = definitions["indexes"][0]
+                self.assertEqual(index["permissionFilterOption"], "enabled")
+                fields = {field["name"]: field for field in index["fields"]}
+                for name, permission in (
+                    ("metadata_security_user_ids", "userIds"),
+                    ("metadata_security_group_ids", "groupIds"),
+                    ("metadata_security_rbac_scope", "rbacScope"),
+                ):
+                    self.assertEqual(fields[name]["permissionFilter"], permission)
+                    self.assertTrue(fields[name]["filterable"])
+
     def test_settings_template_derives_search_index_before_dependent_defaults(self):
         settings = render_json_template(
             "search.settings.j2",
@@ -419,6 +455,10 @@ class WorkIqTemplateTests(unittest.TestCase):
         _, context = self._foundry_iq_context(
             WORK_IQ_ENABLED="true",
             WORK_IQ_KNOWLEDGE_SOURCE_NAME="work-iq-ks",
+            WORK_IQ_APPLICATION_ID="11111111-1111-1111-1111-111111111111",
+            WORK_IQ_FEDERATED_CREDENTIAL_ID="22222222-2222-2222-2222-222222222222",
+            WORK_IQ_TENANT_ID="33333333-3333-3333-3333-333333333333",
+            FOUNDRY_IQ_API_VERSION="2026-08-01-preview",
         )
         search_definitions = render_json_template("search.j2", context)
 
@@ -435,11 +475,89 @@ class WorkIqTemplateTests(unittest.TestCase):
         self.assertNotIn("filterAddOn", work_iq)
         self.assertNotIn("azureBlobParameters", work_iq)
         self.assertNotIn("searchIndexParameters", work_iq)
+        self.assertEqual(
+            work_iq["workIQParameters"]["entraAppAuthentication"],
+            {
+                "applicationId": context["WORK_IQ_APPLICATION_ID"],
+                "federatedCredentialId": context["WORK_IQ_FEDERATED_CREDENTIAL_ID"],
+                "tenantId": context["WORK_IQ_TENANT_ID"],
+            },
+        )
+        setup.validate_requested_knowledge_sources(search_definitions, context)
 
         kb_source_names = [
             s["name"] for s in search_definitions["knowledgeBases"][0]["knowledgeSources"]
         ]
         self.assertIn("work-iq-ks", kb_source_names)
+
+    def test_native_sharepoint_source_uses_secretless_federation_and_native_acls(self):
+        for isolated in ("false", "true"):
+            with self.subTest(isolated=isolated):
+                _, context = self._foundry_iq_context(
+                    SHAREPOINT_INDEXED_ENABLED="true",
+                    SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME="sharepoint-ks",
+                    SHAREPOINT_INDEXED_SITE_URL="https://contoso.sharepoint.com/sites/eng",
+                    SHAREPOINT_INDEXED_TENANT_ID="11111111-1111-1111-1111-111111111111",
+                    SHAREPOINT_INDEXED_APPLICATION_ID="22222222-2222-2222-2222-222222222222",
+                    SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID="33333333-3333-3333-3333-333333333333",
+                    FOUNDRY_IQ_API_VERSION="2026-08-01-preview",
+                )
+                context["NETWORK_ISOLATION"] = isolated
+                definitions = render_json_template("search.j2", context)
+                source = next(
+                    source for source in definitions["knowledgeSources"]
+                    if source["kind"] == "indexedSharePoint"
+                )
+                parameters = source["indexedSharePointParameters"]
+                self.assertEqual(
+                    parameters["connectionString"],
+                    "SharePointOnlineEndpoint=https://contoso.sharepoint.com/sites/eng;"
+                    "ApplicationId=22222222-2222-2222-2222-222222222222;"
+                    "FederatedCredentialApplicationId=33333333-3333-3333-3333-333333333333;"
+                    "TenantId=11111111-1111-1111-1111-111111111111",
+                )
+                self.assertNotIn("indexName", parameters)
+                self.assertNotIn("ApplicationSecret", parameters["connectionString"])
+                ingestion = parameters["ingestionParameters"]
+                self.assertEqual(ingestion["ingestionPermissionOptions"], ["userIds", "groupIds"])
+                self.assertEqual(ingestion["networkAccessMode"], "private" if isolated == "true" else "public")
+                self.assertEqual(
+                    ingestion["embeddingModel"]["azureOpenAIParameters"]["deploymentId"],
+                    "text-embedding",
+                )
+                setup.validate_requested_knowledge_sources(definitions, context)
+                for bad_site in (
+                    "http://contoso.sharepoint.com/sites/eng",
+                    "https://contoso.sharepoint.com/sites/eng;ApplicationSecret=injected",
+                    "https://contoso.sharepoint.com.evil.test/sites/eng",
+                ):
+                    with self.assertRaisesRegex(ValueError, "HTTPS SharePoint"):
+                        setup.validate_requested_knowledge_sources(
+                            definitions, {**context, "SHAREPOINT_INDEXED_SITE_URL": bad_site}
+                        )
+
+    def test_work_iq_authentication_rejects_missing_invalid_or_incompatible_inputs(self):
+        _, context = self._foundry_iq_context(
+            WORK_IQ_ENABLED="true",
+            WORK_IQ_KNOWLEDGE_SOURCE_NAME="work-iq-ks",
+            WORK_IQ_APPLICATION_ID="11111111-1111-1111-1111-111111111111",
+            WORK_IQ_FEDERATED_CREDENTIAL_ID="22222222-2222-2222-2222-222222222222",
+            FOUNDRY_IQ_API_VERSION="2026-08-01-preview",
+        )
+        definitions = render_json_template("search.j2", context)
+        setup.validate_requested_knowledge_sources(definitions, context)
+        source = next(source for source in definitions["knowledgeSources"] if source["kind"] == "workIQ")
+        self.assertNotIn("tenantId", source["workIQParameters"]["entraAppAuthentication"])
+        for override in (
+            {"WORK_IQ_APPLICATION_ID": ""},
+            {"WORK_IQ_FEDERATED_CREDENTIAL_ID": ""},
+            {"WORK_IQ_APPLICATION_ID": "sensitive-invalid-value"},
+            {"WORK_IQ_TENANT_ID": "sensitive-invalid-value"},
+            {"FOUNDRY_IQ_API_VERSION": "2026-05-01-preview"},
+        ):
+            with self.subTest(override=override), self.assertRaises(ValueError) as error:
+                setup.validate_requested_knowledge_sources(definitions, {**context, **override})
+            self.assertNotIn("sensitive-invalid-value", str(error.exception))
 
     def test_work_iq_not_added_when_retrieval_backend_is_ai_search(self):
         settings = render_json_template(
@@ -484,6 +602,34 @@ class WorkIqTemplateTests(unittest.TestCase):
         self.assertEqual(settings["FABRIC_IQ_KNOWLEDGE_SOURCE_NAME"], "")
         self.assertEqual(settings["FABRIC_IQ_WORKSPACE_ID"], "")
         self.assertEqual(settings["FABRIC_IQ_ONTOLOGY_ID"], "")
+
+    def test_fabric_sources_enable_a_planning_model_and_supported_reasoning(self):
+        for binding in (
+            {
+                "FABRIC_IQ_ENABLED": "true",
+                "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME": "fabric-ks",
+                "FABRIC_IQ_WORKSPACE_ID": "workspace",
+                "FABRIC_IQ_ONTOLOGY_ID": "ontology",
+            },
+            {
+                "FABRIC_DATA_AGENT_ENABLED": "true",
+                "FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME": "data-agent-ks",
+                "FABRIC_DATA_AGENT_WORKSPACE_ID": "workspace",
+                "FABRIC_DATA_AGENT_DATA_AGENT_ID": "data-agent",
+            },
+        ):
+            with self.subTest(binding=binding):
+                _, context = self._foundry_iq_context(**binding)
+                kb = render_json_template("search.j2", context)["knowledgeBases"][0]
+                self.assertEqual(kb["retrievalReasoningEffort"], {"kind": "low"})
+                self.assertEqual(
+                    kb["models"][0]["azureOpenAIParameters"],
+                    {
+                        "resourceUri": context["FOUNDRY_IQ_AI_SERVICES_ENDPOINT"],
+                        "deploymentId": "chat",
+                        "modelName": "gpt-5-nano",
+                    },
+                )
 
     def test_fabric_iq_disabled_by_default_produces_no_fabric_entry(self):
         _, context = self._foundry_iq_context()
@@ -1873,6 +2019,94 @@ class PostProvisionMcpSourceGuardTests(unittest.TestCase):
 
 
 class WorkIqPreflightTests(unittest.TestCase):
+    def test_sharepoint_validation_never_drops_an_enabled_source(self):
+        definitions = {
+            "knowledgeSources": [{"name": "sharepoint-ks", "kind": "indexedSharePoint"}],
+            "knowledgeBases": [{"name": "kb", "knowledgeSources": [{"name": "sharepoint-ks"}]}],
+        }
+        original = json.loads(json.dumps(definitions))
+        with self.assertRaisesRegex(ValueError, "was not removed"):
+            sharepoint_setup.filter_sharepoint_indexed_sources(
+                definitions,
+                {
+                    "SHAREPOINT_INDEXED_ENABLED": "true",
+                    "SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME": "sharepoint-ks",
+                },
+            )
+        self.assertEqual(definitions, original)
+        sharepoint_setup.filter_sharepoint_indexed_sources(
+            definitions, {"SHAREPOINT_INDEXED_ENABLED": "false"}
+        )
+        self.assertEqual(definitions, original)
+
+    def test_consent_failure_precedes_search_mutation(self):
+        context = {
+            "RETRIEVAL_BACKEND": "foundry_iq",
+            "WORK_IQ_ENABLED": "true",
+            "WORK_IQ_KNOWLEDGE_SOURCE_NAME": "work-iq-ks",
+            "WORK_IQ_APPLICATION_ID": "11111111-1111-1111-1111-111111111111",
+            "WORK_IQ_FEDERATED_CREDENTIAL_ID": "22222222-2222-2222-2222-222222222222",
+            "FOUNDRY_IQ_API_VERSION": "2026-08-01-preview",
+            "SEARCH_SERVICE_QUERY_ENDPOINT": "https://search.search.windows.net",
+            "SEARCH_API_VERSION": "2025-05-01-preview",
+        }
+        with (
+            patch.object(setup, "check_work_iq_admin_consent", return_value=False),
+            patch.object(setup, "ChainedTokenCredential"),
+            patch.object(setup, "ensure_native_blob_private_links") as readiness,
+            patch.object(setup, "prepare_index_updates") as prepare,
+            patch.object(setup, "cleanup_knowledge_resources") as cleanup,
+            self.assertRaisesRegex(RuntimeError, "Work IQ.*consent"),
+        ):
+            setup.execute_setup(
+                {
+                    "knowledgeSources": [{"name": "work-iq-ks", "kind": "workIQ"}],
+                    "knowledgeBases": [{"name": "kb", "knowledgeSources": [{"name": "work-iq-ks"}]}],
+                },
+                context,
+            )
+        readiness.assert_not_called()
+        prepare.assert_not_called()
+        cleanup.assert_not_called()
+
+    def test_incomplete_enabled_sources_fail_before_any_resource_discovery(self):
+        for prefix in ("WORK_IQ", "FABRIC_IQ", "FABRIC_DATA_AGENT", "SHAREPOINT_INDEXED", "WEB_GROUNDING"):
+            with self.subTest(prefix=prefix):
+                with patch.object(setup, "ChainedTokenCredential") as credential:
+                    with self.assertRaisesRegex(ValueError, "missing required settings"):
+                        setup.execute_setup(
+                            {},
+                            {"RETRIEVAL_BACKEND": "foundry_iq", f"{prefix}_ENABLED": "true"},
+                        )
+                credential.assert_not_called()
+
+    def test_enabled_source_cannot_be_omitted_from_rendered_payload(self):
+        with self.assertRaisesRegex(ValueError, "absent from the rendered"):
+            setup.validate_requested_knowledge_sources(
+                {},
+                {
+                    "RETRIEVAL_BACKEND": "foundry_iq",
+                    "WEB_GROUNDING_ENABLED": "true",
+                    "WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME": "web-ks",
+                },
+            )
+
+    def test_enabled_source_must_be_bound_to_the_selected_knowledge_base(self):
+        definitions = {
+            "knowledgeSources": [{"name": "web-ks", "kind": "web"}],
+            "knowledgeBases": [{"name": "wrong-kb", "knowledgeSources": [{"name": "web-ks"}]}],
+        }
+        with self.assertRaisesRegex(ValueError, "not bound to the target"):
+            setup.validate_requested_knowledge_sources(
+                definitions,
+                {
+                    "RETRIEVAL_BACKEND": "foundry_iq",
+                    "WEB_GROUNDING_ENABLED": "true",
+                    "WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME": "web-ks",
+                    "KNOWLEDGE_BASE_NAME": "selected-kb",
+                },
+            )
+
     def test_filter_work_iq_sources_no_op_when_disabled(self):
         defs = {
             "knowledgeSources": [
@@ -1890,7 +2124,7 @@ class WorkIqPreflightTests(unittest.TestCase):
         self.assertEqual(defs["knowledgeSources"], [{"name": "blob-ks", "kind": "azureBlob"}])
         self.assertEqual(defs["knowledgeBases"][0]["knowledgeSources"], [{"name": "blob-ks"}])
 
-    def test_filter_work_iq_sources_removes_source_when_not_consented(self):
+    def test_filter_work_iq_sources_fails_without_removing_unconsented_source(self):
         defs = {
             "knowledgeSources": [
                 {"name": "blob-ks", "kind": "azureBlob"},
@@ -1904,7 +2138,9 @@ class WorkIqPreflightTests(unittest.TestCase):
             ],
         }
         credential = Mock()
-        with patch.object(setup, "check_work_iq_admin_consent", return_value=False):
+        with patch.object(setup, "check_work_iq_admin_consent", return_value=False), self.assertRaisesRegex(
+            RuntimeError, "Work IQ.*consent"
+        ):
             setup.filter_work_iq_sources(
                 defs,
                 {
@@ -1914,10 +2150,12 @@ class WorkIqPreflightTests(unittest.TestCase):
                 },
                 credential,
             )
-        self.assertEqual([ks["name"] for ks in defs["knowledgeSources"]], ["blob-ks"])
+        self.assertEqual(
+            [ks["name"] for ks in defs["knowledgeSources"]], ["blob-ks", "work-iq-ks"]
+        )
         self.assertEqual(
             [ref["name"] for ref in defs["knowledgeBases"][0]["knowledgeSources"]],
-            ["blob-ks"],
+            ["blob-ks", "work-iq-ks"],
         )
 
     def test_filter_work_iq_sources_keeps_source_when_consented(self):
@@ -1941,14 +2179,16 @@ class WorkIqPreflightTests(unittest.TestCase):
             )
         self.assertEqual([ks["name"] for ks in defs["knowledgeSources"]], ["work-iq-ks"])
 
-    def test_filter_work_iq_sources_removes_source_when_preflight_inconclusive(self):
+    def test_filter_work_iq_sources_fails_without_removing_inconclusive_source(self):
         defs = {
             "knowledgeSources": [{"name": "work-iq-ks", "kind": "workIQ"}],
             "knowledgeBases": [
                 {"name": "kb", "knowledgeSources": [{"name": "work-iq-ks"}]}
             ],
         }
-        with patch.object(setup, "check_work_iq_admin_consent", return_value=None):
+        with patch.object(setup, "check_work_iq_admin_consent", return_value=None), self.assertRaisesRegex(
+            RuntimeError, "Work IQ.*consent"
+        ):
             setup.filter_work_iq_sources(
                 defs,
                 {
@@ -1958,8 +2198,10 @@ class WorkIqPreflightTests(unittest.TestCase):
                 },
                 Mock(),
             )
-        self.assertEqual(defs["knowledgeSources"], [])
-        self.assertEqual(defs["knowledgeBases"][0]["knowledgeSources"], [])
+        self.assertEqual(defs["knowledgeSources"], [{"name": "work-iq-ks", "kind": "workIQ"}])
+        self.assertEqual(
+            defs["knowledgeBases"][0]["knowledgeSources"], [{"name": "work-iq-ks"}]
+        )
 
 
 class KnowledgeSourceNameUniquenessTests(unittest.TestCase):

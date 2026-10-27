@@ -33,6 +33,8 @@ import logging
 from pathlib import Path
 import requests
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlsplit
+from uuid import UUID
 
 from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from azure.appconfiguration import AzureAppConfigurationClient, ConfigurationSetting
@@ -353,6 +355,7 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
             try:
                 validate_foundry_iq_settings(context)
                 validate_foundry_iq_mcp_settings(context)
+                requested_knowledge_sources(context)
             except ValueError as ve:
                 logging.error(str(ve))
                 return None, context
@@ -468,6 +471,7 @@ _INDEX_FIELD_COMPATIBILITY_PROPERTIES = (
     "normalizer",
     "dimensions",
     "vectorSearchProfile",
+    "permissionFilter",
 )
 
 
@@ -475,7 +479,7 @@ def merge_additive_index_schema(
     existing_index: dict,
     desired_index: dict,
 ) -> Tuple[dict, list[str]]:
-    """Preserve the current index and append fields that are absent from it."""
+    """Preserve index data/customizations and reconcile required permissions."""
     merged = strip_odata_metadata(existing_index)
     existing_fields = {
         field["name"]: field for field in merged.get("fields", [])
@@ -513,6 +517,8 @@ def merge_additive_index_schema(
                 f"for properties: {properties}. The existing index was not modified."
             )
 
+    if desired_index.get("permissionFilterOption") == "enabled":
+        merged["permissionFilterOption"] = "enabled"
     return merged, added_fields
 
 
@@ -544,7 +550,7 @@ def prepare_index_updates(
                 existing,
                 desired_index,
             )
-            if not added_fields:
+            if not added_fields and body == strip_odata_metadata(existing):
                 body = None
             if_none_match = None
         updates.append((name, body, added_fields, etag, if_none_match))
@@ -765,7 +771,7 @@ def log_work_iq_prerequisites_warning() -> None:
     logging.warning(
         "⚠️ Work IQ is enabled in configuration but the Work IQ service principal "
         f"(appId {WORK_IQ_SERVICE_PRINCIPAL_APP_ID}) is not consented in this tenant. "
-        "Skipping Work IQ knowledge source provisioning."
+        "Work IQ knowledge source provisioning cannot proceed."
     )
     logging.warning(
         "   Prerequisites: enable the 'EnableFoundryIQWithWorkIQ' feature flag, submit "
@@ -775,11 +781,7 @@ def log_work_iq_prerequisites_warning() -> None:
 
 
 def filter_work_iq_sources(defs: dict, context: dict, cred: ChainedTokenCredential) -> None:
-    """When Work IQ is enabled but admin consent has not been granted, remove
-    the Work IQ knowledge source (and its knowledge base reference) so the rest
-    of the provisioning still succeeds. Default deployments (Work IQ disabled)
-    are untouched.
-    """
+    """Validate enabled Work IQ consent without dropping a configured source."""
 
     if not is_work_iq_enabled(context):
         return
@@ -795,19 +797,12 @@ def filter_work_iq_sources(defs: dict, context: dict, cred: ChainedTokenCredenti
 
     if consented is False:
         log_work_iq_prerequisites_warning()
-    else:
-        logging.warning(
-            "⚠️ Work IQ admin consent preflight was inconclusive; skipping Work IQ "
-            "knowledge source provisioning to avoid a hard failure. Verify consent "
-            f"at {WORK_IQ_ADMIN_CONSENT_URL} and re-run once granted."
-        )
-
-    knowledge_sources = defs.get("knowledgeSources") or []
-    defs["knowledgeSources"] = [ks for ks in knowledge_sources if ks.get("name") != work_iq_name]
-    for kb in defs.get("knowledgeBases") or []:
-        kb["knowledgeSources"] = [
-            ref for ref in kb.get("knowledgeSources") or [] if ref.get("name") != work_iq_name
-        ]
+    reason = "has not been granted" if consented is False else "could not be verified"
+    raise RuntimeError(
+        f"Work IQ admin consent {reason}; provisioning is blocked without removing "
+        f"the configured source '{work_iq_name}'. Verify consent at "
+        f"{WORK_IQ_ADMIN_CONSENT_URL} and re-run."
+    )
 
 
 def validate_unique_knowledge_source_names(defs: dict) -> None:
@@ -839,6 +834,85 @@ def validate_unique_knowledge_source_names(defs: dict) -> None:
                 "grounding, MCP Server); rename one of them before provisioning."
             )
         seen[key] = name
+
+
+def requested_knowledge_sources(context: dict) -> list[Tuple[str, str, str]]:
+    """Validate source inputs before configuration publication or Azure writes."""
+    for key in (
+        "WORK_IQ_APPLICATION_ID",
+        "WORK_IQ_FEDERATED_CREDENTIAL_ID",
+        "WORK_IQ_TENANT_ID",
+        "SHAREPOINT_INDEXED_APPLICATION_ID",
+        "SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID",
+        "SHAREPOINT_INDEXED_TENANT_ID",
+    ):
+        value = str(context.get(key) or "").strip()
+        if value:
+            try:
+                UUID(value)
+            except ValueError as exc:
+                raise ValueError(f"{key} must be a UUID.") from exc
+    bindings = {
+        "WORK_IQ": ("workIQ", ("KNOWLEDGE_SOURCE_NAME", "APPLICATION_ID", "FEDERATED_CREDENTIAL_ID")),
+        "FABRIC_IQ": ("fabricOntology", ("KNOWLEDGE_SOURCE_NAME", "WORKSPACE_ID", "ONTOLOGY_ID")),
+        "FABRIC_DATA_AGENT": ("fabricDataAgent", ("KNOWLEDGE_SOURCE_NAME", "WORKSPACE_ID", "DATA_AGENT_ID")),
+        "SHAREPOINT_INDEXED": (
+            "indexedSharePoint",
+            ("KNOWLEDGE_SOURCE_NAME", "SITE_URL", "TENANT_ID", "APPLICATION_ID", "FEDERATED_CREDENTIAL_APPLICATION_ID"),
+        ),
+        "WEB_GROUNDING": ("web", ("KNOWLEDGE_SOURCE_NAME",)),
+    }
+    requested = []
+    for prefix, (kind, suffixes) in bindings.items():
+        if not is_truthy_setting(context.get(f"{prefix}_ENABLED")):
+            continue
+        if str(context.get("RETRIEVAL_BACKEND") or "").lower() != "foundry_iq":
+            raise ValueError(f"{prefix}_ENABLED requires RETRIEVAL_BACKEND=foundry_iq.")
+        missing = [
+            f"{prefix}_{suffix}" for suffix in suffixes
+            if not str(context.get(f"{prefix}_{suffix}") or "").strip()
+        ]
+        if missing:
+            raise ValueError(f"{prefix} is enabled but missing required settings: {', '.join(missing)}.")
+        if prefix != "WEB_GROUNDING" and get_knowledge_api_version(context) != "2026-08-01-preview":
+            raise ValueError(
+                f"{prefix} requires FOUNDRY_IQ_API_VERSION=2026-08-01-preview "
+                "for the implemented protected source contract."
+            )
+        if prefix == "SHAREPOINT_INDEXED":
+            site = str(context["SHAREPOINT_INDEXED_SITE_URL"]).strip()
+            parsed = urlsplit(site)
+            if (
+                parsed.scheme != "https"
+                or not (parsed.hostname or "").endswith(".sharepoint.com")
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or ";" in site or any(ord(char) < 32 for char in site)
+            ):
+                raise ValueError("SHAREPOINT_INDEXED_SITE_URL must be an HTTPS SharePoint site URL.")
+        name = str(context[f"{prefix}_KNOWLEDGE_SOURCE_NAME"]).strip()
+        requested.append((prefix, name, kind))
+    return requested
+
+
+def validate_requested_knowledge_sources(defs: dict, context: dict) -> None:
+    """Reject enabled sources that template guards would otherwise omit."""
+    requested = requested_knowledge_sources(context)
+    rendered = {
+        (source.get("name"), source.get("kind"))
+        for source in defs.get("knowledgeSources", [])
+    }
+    target_name = context.get("KNOWLEDGE_BASE_NAME")
+    bound = {
+        reference.get("name")
+        for base in defs.get("knowledgeBases", [])
+        if not target_name or base.get("name") == target_name
+        for reference in base.get("knowledgeSources", [])
+    }
+    for prefix, name, kind in requested:
+        if (name, kind) not in rendered:
+            raise ValueError(f"{prefix} is enabled but its configured source is absent from the rendered definition.")
+        if name not in bound:
+            raise ValueError(f"{prefix} is enabled but its configured source is not bound to the target knowledge base.")
 
 
 def provision_knowledge_sources(defs: dict, context: dict, cred: ChainedTokenCredential, search_endpoint: str):
@@ -914,7 +988,8 @@ def enforce_private_execution_for_generated_indexers(defs: dict, context: dict, 
 def provision_knowledge_bases(defs: dict, context: dict, cred: ChainedTokenCredential, search_endpoint: str):
     """Create or update Foundry IQ knowledge bases.
 
-    This repo uses outputMode=extractiveData and retrievalReasoningEffort=minimal so it doesn't depend on an LLM.
+    Blob-only retrieval uses minimal reasoning; Fabric and MCP sources use the
+    configured planning model and their supported reasoning effort.
     """
 
     knowledge_bases = defs.get("knowledgeBases", [])
@@ -942,6 +1017,7 @@ def execute_setup(defs: Optional[dict], context: dict):
     if defs is None:
         raise RuntimeError("No search definitions were rendered; aborting Azure Search setup")
     validate_unique_knowledge_source_names(defs)
+    validate_requested_knowledge_sources(defs, context)
     cred = ChainedTokenCredential(AzureCliCredential(),ManagedIdentityCredential())
     indexers = defs.get("indexers", [])
     ds_to_indexers = {}
@@ -956,6 +1032,8 @@ def execute_setup(defs: Optional[dict], context: dict):
     if not api_version:
         logging.error("❗️ SEARCH_API_VERSION not found in search.env; skipping Azure Search setup.")
         return
+
+    filter_work_iq_sources(defs, context, cred)
 
     # Prove outbound readiness before any dependent cleanup or data-plane
     # mutation. Direct knowledge-source callers also run this idempotent gate.
@@ -991,7 +1069,6 @@ def execute_setup(defs: Optional[dict], context: dict):
     provision_indexers(defs, context, cred, search_endpoint, api_version)
     
     # Step 3: Provision knowledge base resources (KS -> KB)
-    filter_work_iq_sources(defs, context, cred)
     knowledge_sources_ok = provision_knowledge_sources(defs, context, cred, search_endpoint)
     enforce_private_execution_for_generated_indexers(defs, context, cred, search_endpoint, api_version)
     knowledge_bases_ok = provision_knowledge_bases(defs, context, cred, search_endpoint)

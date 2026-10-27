@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Platform configuration for integrated delegated hosted retrieval:
+  `RETRIEVAL_AUTH_MODE=native_search` is published automatically under
+  `agent-lz`, retaining user-delegated Foundry invocation. The discovered
+  hosted runtime receives Search Index Data Reader on the exact Search
+  service for transport, independently of end-user source permissions.
+- Native Work IQ app authentication and secretless indexed SharePoint source
+  registration, with typed nonsecret identity inputs. Advanced source
+  configuration requires its compatible August preview API; the default Blob
+  API remains unchanged. Fabric sources receive a planning model and supported
+  reasoning effort.
+- ADR-0028 defines the coordinated UI/runtime credential forwarding,
+  request isolation, failure and adoption contract.
+
+### Fixed
+- Enable native document permissions on new application indexes and reconcile
+  existing compatible indexes with conditional updates, without deleting
+  documents or operator customizations. Incompatible permission annotations
+  block the update rather than retaining unprotected access.
+- Reject incomplete enabled sources and fail Work IQ consent checks before
+  Search resource changes. Configured sources are never silently removed to
+  make provisioning succeed.
+
+### Validation
+- Local validation only; live Azure two-user and private-network acceptance
+  is explicitly deferred. Matching UI/runtime changes are coordinated
+  separately; this feature does not update release pins or claim a newly
+  validated published combination.
+
 ## [v5.3.0] - 2026-10-27
 
 ### Added

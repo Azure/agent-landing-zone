@@ -1,7 +1,10 @@
 """Plan (default) or apply the hosted instance's minimum runtime RBAC.
 
 Only configuration metadata, Foundry agent metadata and ARM are read. No secret
-values, inference requests, continuity activation or document grants are used.
+values, inference requests or continuity activation are used. Configured Search
+retrieval adds an exact-service Search Index Data Reader data-plane query grant
+for transport. It is not a Blob grant or permission to omit delegated source
+authorization; no end-user Search RBAC or impersonation grant is added here.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 from config.continuity.settings import FOUNDRY_TOKEN_AUDIENCE
 from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, DeploymentMode, resolve_mode
 from config.deployment.resource_groups import resource_group_for
+from config.retrieval.settings import SEARCH_BACKENDS, validate_auth_mode
 from util.azure_cli import resolve_az_command
 
 
@@ -69,6 +73,7 @@ class Role(str, Enum):
     CONFIG = "516239f1-63e1-4d78-a4de-a74fb236a071"
     SECRET = "4633458b-17de-408a-b874-0445c86b69e6"
     MODEL = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+    SEARCH = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
 
 
 GUID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
@@ -78,6 +83,7 @@ RESOURCE_PATHS = {
     Role.CONFIG: rf"Microsoft\.AppConfiguration/configurationStores/{NAME}",
     Role.MODEL: rf"Microsoft\.CognitiveServices/accounts/{NAME}",
     Role.SECRET: r"Microsoft\.KeyVault/vaults/[A-Za-z0-9-]+/secrets/[A-Za-z0-9-]{1,127}",
+    Role.SEARCH: rf"Microsoft\.Search/searchServices/{NAME}",
 }
 PROJECT_PATH = rf"Microsoft\.CognitiveServices/accounts/({NAME})/projects/({NAME})"
 KV_REFERENCE = "application/vnd.microsoft.appconfig.keyvaultref+json"
@@ -187,16 +193,21 @@ class AccessPlan:
     audit: str = "not-configured"
     classic: bool = False
     foundry_resource_group: str = ""
+    search_transport: bool = False
 
     def validate(self) -> None:
         if self.classic:
-            if self.grants or self.principal_id:
+            if self.grants or self.principal_id or self.search_transport:
                 raise AccessError("Classic bootstrap cannot contain grants.")
             return
         _guid(self.subscription)
         _guid(self.principal_id)
         roles = [grant.role for grant in self.grants]
         expected = {Role.CONFIG, Role.MODEL}
+        if type(self.search_transport) is not bool:
+            raise AccessError("Invalid Search transport configuration status.")
+        if self.search_transport:
+            expected.add(Role.SEARCH)
         if self.audit == "configured":
             expected.add(Role.SECRET)
         elif self.audit != "not-configured":
@@ -206,7 +217,7 @@ class AccessPlan:
         for grant in self.grants:
             group = (
                 self.foundry_resource_group or self.resource_group
-                if grant.role is Role.MODEL else self.resource_group
+                if grant.role in {Role.MODEL, Role.SEARCH} else self.resource_group
             )
             _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, group)
 
@@ -378,6 +389,10 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     """Discover and validate the entire closed plan before any write."""
     if resolve_mode(environment) is DeploymentMode.CLASSIC:
         return AccessPlan(classic=True)
+    try:
+        validate_auth_mode(environment)
+    except ValueError as error:
+        raise AccessError(str(error)) from None
     instance = discover_instance(environment, run=run)
     sub, foundry_group, principal, name, version = (
         instance.subscription, instance.resource_group, instance.principal_id,
@@ -408,6 +423,12 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     if not _same(model.get("id"), model_id) or model.get("kind") not in {"AIServices", "OpenAI"}:
         raise AccessError("Configured model account identity/type mismatch.")
     grants = [Grant(Role.CONFIG, store_id), Grant(Role.MODEL, model_id)]
+    search = _search_transport_grant(
+        environment, run=run, config_endpoint=config_endpoint,
+        subscription=sub, foundry_group=foundry_group,
+    )
+    if search is not None:
+        grants.append(search)
     audit = _setting(run, config_endpoint, "AUDIT_HMAC_KEY")
     if audit is not None:
         content_type = audit.get("contentType")
@@ -431,9 +452,57 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         sub, group, principal, name, version, tuple(grants),
         "configured" if audit else "not-configured",
         foundry_resource_group=foundry_group,
+        search_transport=search is not None,
     )
     plan.validate()
     return plan
+
+
+def _search_transport_grant(
+    environment: Mapping[str, str], *, run: RunAzure, config_endpoint: str,
+    subscription: str, foundry_group: str,
+) -> Grant | None:
+    """Bind the hosted principal to the provisioned Search service, not the project MI.
+
+    The foundation always publishes RETRIEVAL_BACKEND for bundled retrieval.
+    A metadata/model-only deployment without that setting needs no Search grant.
+    No inferred subscription/RG scope or arbitrary endpoint can authorize a grant.
+    """
+    backend_row = _setting(run, config_endpoint, "RETRIEVAL_BACKEND")
+    if backend_row is None:
+        if (environment.get("RETRIEVAL_BACKEND") or "").strip():
+            raise AccessError("Required App Configuration key RETRIEVAL_BACKEND (agent-lz) is missing.")
+        return None
+    backend = _consistent(environment, ("RETRIEVAL_BACKEND",), backend_row.get("value"))
+    if backend not in SEARCH_BACKENDS:
+        raise AccessError("Configured retrieval backend has no supported Search transport contract.")
+    mode_row = _setting(run, config_endpoint, "RETRIEVAL_AUTH_MODE")
+    if mode_row is not None:
+        try:
+            validate_auth_mode({"RETRIEVAL_AUTH_MODE": mode_row.get("value")})
+        except ValueError:
+            raise AccessError("Configured RETRIEVAL_AUTH_MODE has no implemented native Search route.") from None
+    scope = _consistent(
+        environment, ("SEARCH_SERVICE_RESOURCE_ID",),
+        _config_value(run, config_endpoint, "SEARCH_SERVICE_RESOURCE_ID"),
+    )
+    _bound_scope(scope, RESOURCE_PATHS[Role.SEARCH], subscription, foundry_group)
+    name = scope.rsplit("/", 1)[1]
+    configured_name = _config_value(run, config_endpoint, "SEARCH_SERVICE_NAME")
+    endpoint = _endpoint(_consistent(
+        environment, ("SEARCH_SERVICE_QUERY_ENDPOINT", "SEARCH_SERVICE_ENDPOINT"),
+        _config_value(run, config_endpoint, "SEARCH_SERVICE_QUERY_ENDPOINT"),
+    ), ".search.windows.net")
+    if not _same(configured_name, name) or endpoint != f"https://{name.lower()}.search.windows.net":
+        raise AccessError("Search endpoint/name does not map to the exact provisioned Search resource.")
+    resource = _object(run(["resource", "show", "--ids", scope]))
+    if (
+        not _same(resource.get("id"), scope)
+        or not _same(resource.get("name"), name)
+        or not _same(resource.get("type"), "Microsoft.Search/searchServices")
+    ):
+        raise AccessError("Search ARM resource identity/type mismatch.")
+    return Grant(Role.SEARCH, scope)
 
 
 def _has_exact(run: RunAzure, plan: AccessPlan, grant: Grant) -> bool:
