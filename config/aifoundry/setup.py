@@ -102,7 +102,7 @@ def foundry_resource_group(client: AzureAppConfigurationClient) -> str:
         "AZURE_FOUNDRY_RESOURCE_GROUP": cfg(client, "AZURE_FOUNDRY_RESOURCE_GROUP", required=False),
     }
     group = resource_group_for(context, "foundry")
-    declared = (os.environ.get("AZURE_FOUNDRY_RESOURCE_GROUP") or "").strip()
+    declared = (os.environ.get("AZURE_RESOURCE_GROUP") or "").strip()
     if declared and group.lower() != declared.lower():
         raise ValueError("App Configuration Foundry destination conflicts with the deployment environment.")
     return group

@@ -35,6 +35,7 @@ from config.continuity.settings import (
     FOUNDRY_TOKEN_AUDIENCE,
     RESPONSES_PROTOCOL_VERSION,
 )
+from config.deployment.resource_groups import resource_group_for
 from util.azure_cli import resolve_az_command
 
 
@@ -1206,6 +1207,16 @@ def _app_config_value(app_config_client: Any, key: str) -> str:
     return "" if setting is None else str(setting.value or "").strip()
 
 
+def _application_resource_group(
+    app_config_client: Any, environ: Mapping[str, str],
+) -> str:
+    context = {
+        key: environ.get(key) or _app_config_value(app_config_client, key)
+        for key in ("AZURE_RESOURCE_GROUP", "AZURE_APP_RESOURCE_GROUP")
+    }
+    return resource_group_for(context, "application")
+
+
 @dataclass(frozen=True)
 class ContinuityAccess:
     frontend_principal_id: str
@@ -1223,10 +1234,7 @@ def configure_frontend_roles(
         environ.get("AI_FOUNDRY_PROJECT_RESOURCE_ID")
         or _app_config_value(app_config_client, "AI_FOUNDRY_PROJECT_RESOURCE_ID")
     ).strip()
-    resource_group = (
-        environ.get("AZURE_RESOURCE_GROUP")
-        or _app_config_value(app_config_client, "AZURE_RESOURCE_GROUP")
-    ).strip()
+    resource_group = _application_resource_group(app_config_client, environ)
     resource_token = (
         environ.get("RESOURCE_TOKEN")
         or _app_config_value(app_config_client, "RESOURCE_TOKEN")
@@ -1249,7 +1257,8 @@ def configure_frontend_roles(
     ):
         raise RuntimeError(
             "AI_FOUNDRY_PROJECT_RESOURCE_ID, AI_FOUNDRY_PROJECT_ENDPOINT, "
-            "AZURE_RESOURCE_GROUP, and FRONTEND_APP_NAME are required for "
+            "AZURE_RESOURCE_GROUP (with optional AZURE_APP_RESOURCE_GROUP), "
+            "and FRONTEND_APP_NAME are required for "
             "hosted continuity RBAC."
         )
 
@@ -1292,10 +1301,7 @@ def reconcile_disabled_continuity(
     environ: Mapping[str, str] = os.environ,
 ) -> None:
     """Remove continuity-specific access and indirection while retaining key history."""
-    resource_group = (
-        environ.get("AZURE_RESOURCE_GROUP")
-        or _app_config_value(app_config_client, "AZURE_RESOURCE_GROUP")
-    ).strip()
+    resource_group = _application_resource_group(app_config_client, environ)
     frontend_name = (
         environ.get("FRONTEND_APP_NAME")
         or _app_config_value(app_config_client, "FRONTEND_APP_NAME")
@@ -1306,7 +1312,7 @@ def reconcile_disabled_continuity(
     )
     if not resource_group or not frontend_name:
         raise RuntimeError(
-            "AZURE_RESOURCE_GROUP and FRONTEND_APP_NAME are required to "
+            "An application resource group and FRONTEND_APP_NAME are required to "
             "reconcile disabled hosted continuity."
         )
     frontend_principal_id = _run_az(

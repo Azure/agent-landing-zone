@@ -102,6 +102,7 @@ red() { printf '%s\n' "$*"; }
                 "    sys.exit(custom_application.main(sys.argv[1:]))\n", encoding="utf-8")
             env = dict(os.environ, FAKE_ROOT=str(root), FAKE_APP=str(app),
                        FAKE_COMMIT=("2" if mismatch else "1") * 40, REAL_PYTHON=sys.executable,
+                       AZURE_RESOURCE_GROUP="rg-ai", AZURE_APP_RESOURCE_GROUP="rg-app",
                        AGENTLZ_REPO_ROOT=str(ROOT), REAL_REPO=str(ROOT), PYTHONPATH=str(ROOT))
             if shell == "pwsh":
                 start = source.index("foreach ($dc in $definitionComponents)", source.index("# Components"))

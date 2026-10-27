@@ -37,11 +37,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
     $t = Get-Content $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
     Assert-Equal $t.'$schema' 'https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#' 'Root remains resource-group scoped.'
-    foreach ($area in @('foundry', 'network')) {
+    foreach ($area in @('application', 'network')) {
         Assert-Equal $t.parameters."${area}ResourceGroupName".type 'string' "$area parameter type"
         Assert-Equal $t.parameters."${area}ResourceGroupName".defaultValue '' "$area default"
         Assert-Equal $t.variables."_$( $area )ResourceGroupName" "[if(empty(parameters('${area}ResourceGroupName')), resourceGroup().name, parameters('${area}ResourceGroupName'))]" "$area fallback"
     }
+    Assert-Equal $t.variables._foundryResourceGroupName '[resourceGroup().name]' 'Foundry is the native root.'
+    Assert-Equal $t.parameters.ContainsKey('foundryResourceGroupName') $false 'Retired Foundry override is not accepted.'
     $foundrySymbols = @(
         'aiFoundryUAI', 'aiFoundryStorageAccount', 'aiFoundry', 'bingSearchConnection',
         'aiFoundryBingConnection', 'aiFoundryConnectionSearch', 'aiFoundryKnowledgeBaseSearchConnection',
@@ -59,10 +61,10 @@ try {
         Assert-Equal $t.resources.$symbol.resourceGroup "[variables('_networkResourceGroupName')]" "$symbol network scope"
     }
     foreach ($symbol in @('containerRegistry', 'acrTaskAgentPool', 'appConfig', 'keyVault', 'containerEnv', 'logAnalytics', 'appInsights', 'cosmosDBAccount', 'cosmosSqlDatabase', 'publicIngressM')) {
-        Assert-Equal $t.resources.$symbol.ContainsKey('resourceGroup') $false "$symbol stays app/root"
+        Assert-Equal $t.resources.$symbol.resourceGroup "[variables('_applicationResourceGroupName')]" "$symbol application scope"
     }
-    Assert-Equal $t.outputs.AZURE_RESOURCE_GROUP.value '[resourceGroup().name]' 'App output retains root semantics.'
-    Assert-Equal $t.outputs.AZURE_FOUNDRY_RESOURCE_GROUP.value "[variables('_foundryResourceGroupName')]" 'Foundry output'
+    Assert-Equal $t.outputs.AZURE_RESOURCE_GROUP.value '[resourceGroup().name]' 'Root output selects Foundry.'
+    Assert-Equal $t.outputs.AZURE_APP_RESOURCE_GROUP.value "[variables('_applicationResourceGroupName')]" 'Application output'
     Assert-Equal $t.outputs.AZURE_NETWORK_RESOURCE_GROUP.value "[variables('_networkResourceGroupName')]" 'Network output'
     Assert-Equal $t.resources.searchFoundrySharedPrivateLinks.properties.parameters.foundryAccountResourceId.value "[reference('aiFoundry').outputs.accountResourceId.value]" 'Use actual account ID.'
     Assert-Equal $t.outputs.AZURE_AI_PROJECT_RESOURCE_ID.value "[if(or(parameters('deployAiFoundry'), variables('_hostedAgentPrerequisitesEnabled')), reference('aiFoundry').outputs.projectResourceId.value, '')]" 'Use actual project ID.'
@@ -70,15 +72,15 @@ try {
 
     # All values in this projection have exact bindings checked above.
     foreach ($case in @(
-        @{ Foundry = ''; Network = ''; Expected = @('rg-app', 'rg-app') }
-        @{ Foundry = 'rg-app'; Network = 'rg-app'; Expected = @('rg-app', 'rg-app') }
-        @{ Foundry = 'rg-ai'; Network = ''; Expected = @('rg-ai', 'rg-app') }
-        @{ Foundry = 'rg-ai'; Network = 'rg-ai'; Expected = @('rg-ai', 'rg-ai') }
-        @{ Foundry = 'rg-ai'; Network = 'rg-net'; Expected = @('rg-ai', 'rg-net') }
+        @{ Application = ''; Network = ''; Expected = @('rg-ai', 'rg-ai') }
+        @{ Application = 'rg-ai'; Network = 'rg-ai'; Expected = @('rg-ai', 'rg-ai') }
+        @{ Application = 'rg-app'; Network = ''; Expected = @('rg-app', 'rg-ai') }
+        @{ Application = 'rg-app'; Network = 'rg-app'; Expected = @('rg-app', 'rg-app') }
+        @{ Application = 'rg-app'; Network = 'rg-net'; Expected = @('rg-app', 'rg-net') }
     )) {
         $resolved = @(
-            $(if ($case.Foundry) { $case.Foundry } else { 'rg-app' })
-            $(if ($case.Network) { $case.Network } else { 'rg-app' })
+            $(if ($case.Application) { $case.Application } else { 'rg-ai' })
+            $(if ($case.Network) { $case.Network } else { 'rg-ai' })
         )
         Assert-Equal $resolved $case.Expected 'One/two/three destination projection'
     }
@@ -205,7 +207,7 @@ try {
         $checks++
     }
     Assert-Equal @($t.outputs.Keys).Count 64 'ARM output limit is respected without removing legacy outputs.'
-    Assert-Contains $t.resources.appConfigPopulate.properties.parameters.keyValues.value "'name', 'AZURE_FOUNDRY_RESOURCE_GROUP', 'value', variables('_foundryResourceGroupName'), 'label', 'agent-lz'" 'Foundry key uses runtime label.'
+    Assert-Contains $t.resources.appConfigPopulate.properties.parameters.keyValues.value "'name', 'AZURE_APP_RESOURCE_GROUP', 'value', variables('_applicationResourceGroupName'), 'label', 'agent-lz'" 'Application key uses runtime label.'
     Assert-Contains $t.resources.appConfigPopulate.properties.parameters.keyValues.value "'name', 'AZURE_NETWORK_RESOURCE_GROUP', 'value', variables('_networkResourceGroupName'), 'label', 'agent-lz'" 'Network key uses runtime label.'
     $minifiedSize = [Text.Encoding]::UTF8.GetByteCount(($t | ConvertTo-Json -Compress -Depth 100))
     if ($minifiedSize -ge 4MB) { throw "Compiled template exceeds 4 MiB: $minifiedSize." }

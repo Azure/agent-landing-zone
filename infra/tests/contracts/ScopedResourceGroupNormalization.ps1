@@ -75,9 +75,17 @@ function Invoke-ScopedProjection {
     }
 }
 
-function ConvertTo-LegacyResourceGroupGraph {
+function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    $foundryRoot = Get-Content (Join-Path $PSScriptRoot 'fixtures\foundry-root-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    return Invoke-ScopedProjection $copy $foundryRoot.projection
+}
+
+function ConvertTo-LegacyResourceGroupGraph {
+    param([Parameter(Mandatory)] $Template)
+    $copy = ConvertTo-ApplicationRootResourceGroupGraph $Template
     $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\scoped-resource-groups-normalization.json') -Raw |
         ConvertFrom-Json -AsHashtable -Depth 100
     return Invoke-ScopedProjection $copy $fixture.projection

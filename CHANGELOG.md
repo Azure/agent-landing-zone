@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Foundry-first deployment root.** Use `AZURE_RESOURCE_GROUP` for Foundry,
+  grounding and the native azd root; select application resources with
+  `AZURE_APP_RESOURCE_GROUP`.
+- **Three resource groups by default for new environments.** Initialize
+  Foundry/root as `rg-<environment>` when unset, application as `<root>-app`
+  and networking as `<root>-network`. Create missing additional groups by
+  default unless `CREATE_RESOURCE_GROUPS=false`. Existing environments keep
+  their mapping; equal destination names explicitly select one or two groups.
+- **Application-scoped deployment and configuration.** Align foundation
+  resources, runtime deployment scripts, custom Container App targeting,
+  registry builds, identities, configuration and operator documentation with
+  the resolved application destination.
+- **Immutable native-root binding.** Record the Foundry-root contract in
+  binding version 2 and reject implicit conversion of existing version 1
+  split environments. The closed platform-outputs v1 schema is unchanged.
+
 ## [v4.4.0] - 2026-10-26
 
 ### Added

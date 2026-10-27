@@ -67,10 +67,186 @@ class ScratchTest(unittest.TestCase):
         )
 
 
+class InitializationTests(ScratchTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.stored = dict(self.environment)
+        self.saved = {}
+
+    def azd(self, directory, arguments):
+        self.assertEqual(self.azure_dir, directory)
+        if arguments[:2] == ["env", "get-values"]:
+            return json.dumps(self.stored)
+        self.assertEqual(["env", "set"], arguments[:2])
+        self.saved[arguments[2]] = arguments[3]
+        self.stored[arguments[2]] = arguments[3]
+        return ""
+
+    def test_native_cli_initializes_three_groups_and_creates_only_additional_groups(self) -> None:
+        self.environment.pop("AZURE_RESOURCE_GROUP")
+        self.stored.pop("AZURE_RESOURCE_GROUP")
+        existing = set()
+        created = []
+
+        def azure(arguments):
+            self.assertEqual("group", arguments[0])
+            name = arguments[arguments.index("--name") + 1]
+            if arguments[1] == "exists":
+                return 0, str(name in existing).lower(), ""
+            self.assertEqual(4, len(self.saved))
+            self.assertEqual("create", arguments[1])
+            existing.add(name)
+            created.append(name)
+            return 0, json.dumps({
+                "name": name, "id": f"/subscriptions/{SUBSCRIPTION}/resourceGroups/{name}",
+                "location": "eastus2",
+            }), ""
+
+        with patch.dict(os.environ, self.environment, clear=True), \
+                patch.object(rg, "_run_azd", side_effect=self.azd), \
+                patch.object(rg, "_run_az", side_effect=azure), \
+                patch("sys.stdout", io.StringIO()) as output:
+            self.assertEqual(0, rg.main(["--azure-dir", str(self.azure_dir), "--env-name", "offline"]))
+            self.assertEqual("rg-offline", json.loads(output.getvalue())["foundry"])
+        self.assertEqual(["rg-offline-app", "rg-offline-network"], created)
+        self.assertEqual("true", self.saved["CREATE_RESOURCE_GROUPS"])
+        selection = rg.read_binding(self.azure_dir, "offline")
+        self.assertEqual(
+            ("rg-offline", "rg-offline-app", "rg-offline-network"), selection.unique_groups,
+        )
+
+    def test_explicit_equal_names_choose_one_or_two_groups(self) -> None:
+        for application, network, count in (
+            ("rg-app", "rg-app", 1), ("rg-services", "rg-app", 2),
+        ):
+            context = {
+                **self.environment, "AZURE_APP_RESOURCE_GROUP": application,
+                "AZURE_NETWORK_RESOURCE_GROUP": network, "CREATE_RESOURCE_GROUPS": "false",
+            }
+            with self.subTest(count=count), patch.object(rg, "_run_azd", side_effect=self.azd), \
+                    patch.object(rg, "_run_az", return_value=(0, "false", "")):
+                initialized = rg.initialize_defaults(context, self.azure_dir, "offline")
+                self.assertEqual(count, len(rg.resolve_resource_groups(initialized).unique_groups))
+                self.assertEqual("false", initialized["CREATE_RESOURCE_GROUPS"])
+
+    def test_bound_single_group_does_not_acquire_new_destinations(self) -> None:
+        self.prepare(bind_only=True)
+        with patch.object(rg, "_run_azd", side_effect=self.azd):
+            initialized = rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+        self.assertFalse(self.saved)
+        self.assertEqual(("rg-app",), rg.resolve_resource_groups(initialized).unique_groups)
+
+    def test_existing_unbound_deployment_does_not_acquire_defaults(self) -> None:
+        self.stored["APP_CONFIG_ENDPOINT"] = "https://example.azconfig.io"
+        with patch.object(rg, "_run_azd", side_effect=self.azd):
+            initialized = rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+        self.assertFalse(self.saved)
+        self.assertEqual(("rg-app",), rg.resolve_resource_groups(initialized).unique_groups)
+
+    def test_invalid_or_denied_local_environment_never_writes_azure(self) -> None:
+        for raw in ("[]", '{"AZURE_RESOURCE_GROUP": 42}', "{"):
+            with self.subTest(raw=raw), patch.object(rg, "_run_azd", return_value=raw), \
+                    patch.object(rg, "_run_az") as azure:
+                with self.assertRaisesRegex(rg.ResourceGroupError, "invalid local"):
+                    rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+                azure.assert_not_called()
+        with patch.object(rg.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)), \
+                patch.object(rg, "_run_az") as azure:
+            with self.assertRaisesRegex(rg.ResourceGroupError, "local resource-group defaults"):
+                rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+            azure.assert_not_called()
+
+    def test_long_root_names_produce_distinct_valid_stable_destinations(self) -> None:
+        first = rg._default_destination("a" * 90, "network")
+        second = rg._default_destination("a" * 89 + "b", "network")
+        self.assertEqual(90, len(first))
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.casefold(), rg._default_destination("A" * 90, "network").casefold())
+
+    def test_inventory_preserves_unbound_existing_environment_before_local_writes(self) -> None:
+        with patch.object(rg, "_run_azd", side_effect=self.azd), \
+                patch.object(rg, "_run_az", side_effect=[
+                    (0, "true", ""),
+                    (0, '[{"tags": {"azd-env-name": "offline"}}]', ""),
+                ]):
+            initialized = rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+        self.assertFalse(self.saved)
+        self.assertEqual(("rg-app",), rg.resolve_resource_groups(initialized).unique_groups)
+
+    def test_local_save_failure_aborts_before_group_creation(self) -> None:
+        self.stored.pop("AZURE_RESOURCE_GROUP")
+        def azd(directory, arguments):
+            if arguments[:2] == ["env", "set"] and arguments[2] == "AZURE_APP_RESOURCE_GROUP":
+                raise rg.ResourceGroupError("Cannot save local defaults")
+            return self.azd(directory, arguments)
+
+        with patch.dict(os.environ, self.environment, clear=True), \
+                patch.object(rg, "_run_azd", side_effect=azd), \
+                patch.object(rg, "_run_az", return_value=(0, "false", "")) as azure, \
+                self.assertLogs(rg.LOGGER, level="ERROR"):
+            self.assertEqual(1, rg.main(["--azure-dir", str(self.azure_dir), "--env-name", "offline"]))
+        self.assertEqual(["AZURE_RESOURCE_GROUP"], list(self.saved))
+        self.assertTrue(all(call.args[0][:2] == ["group", "exists"] for call in azure.call_args_list))
+        self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
+
+    def test_persisted_environment_mismatch_cannot_be_hidden_by_process_environment(self) -> None:
+        self.stored["AZURE_ENV_NAME"] = "another"
+        with patch.object(rg, "_run_azd", side_effect=self.azd), \
+                patch.object(rg, "_run_az") as azure:
+            with self.assertRaisesRegex(rg.ResourceGroupError, "different environment"):
+                rg.initialize_defaults(self.environment, self.azure_dir, "offline")
+        self.assertFalse(self.saved)
+        azure.assert_not_called()
+
+
 class ResolverTests(ScratchTest):
+    def test_foundry_is_native_root_and_application_is_an_override(self) -> None:
+        self.environment.update(
+            AZURE_RESOURCE_GROUP="rg-ai",
+            AZURE_APP_RESOURCE_GROUP="rg-app",
+            AZURE_NETWORK_RESOURCE_GROUP="rg-net",
+        )
+        selected = rg.resolve_resource_groups(self.environment)
+        self.assertEqual(("rg-ai", "rg-app", "rg-net"), selected.unique_groups)
+        self.assertEqual("rg-ai", selected.foundry)
+        self.assertEqual("rg-app", selected.application)
+        self.assertEqual("rg-net", selected.network)
+
+    def test_legacy_foundry_output_cannot_retarget_an_existing_split(self) -> None:
+        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+        with patch.object(rg, "_run_az") as run:
+            with self.assertRaisesRegex(rg.ResourceGroupError, "original release"):
+                self.prepare()
+            run.assert_not_called()
+        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "RG-APP"
+        self.assertEqual("rg-app", rg.resource_group_for(self.environment, "foundry"))
+
+    def test_v1_split_cannot_change_native_root_by_rewriting_variable_names(self) -> None:
+        self.environment.update(
+            AZURE_RESOURCE_GROUP="rg-ai", AZURE_APP_RESOURCE_GROUP="rg-app",
+            AZURE_NETWORK_RESOURCE_GROUP="rg-net",
+        )
+        path = rg.binding_path(self.azure_dir, "offline")
+        original = json.dumps({
+            "version": 1, "environment": "offline", "subscription": SUBSCRIPTION,
+            "application": "rg-app", "foundry": "rg-ai", "network": "rg-net",
+        })
+        path.write_text(original, encoding="utf-8")
+        with patch.object(rg, "_run_az") as run:
+            with self.assertRaisesRegex(rg.ResourceGroupError, "original release"):
+                self.prepare(bind_only=True)
+            run.assert_not_called()
+        self.assertEqual(original, path.read_text(encoding="utf-8"))
+
+    def test_new_binding_records_foundry_root_contract_version(self) -> None:
+        self.prepare(bind_only=True)
+        self.assertEqual(
+            2, json.loads(rg.binding_path(self.azure_dir, "offline").read_text())["version"],
+        )
+
     def test_default_blank_overrides_and_pure_helper(self) -> None:
         self.environment.update(
-            AZURE_FOUNDRY_RESOURCE_GROUP="  ", AZURE_NETWORK_RESOURCE_GROUP=""
+            AZURE_APP_RESOURCE_GROUP="  ", AZURE_NETWORK_RESOURCE_GROUP=""
         )
         before = dict(self.environment)
         with patch.object(rg, "_run_az", return_value=(0, "false", "")) as run:
@@ -88,7 +264,7 @@ class ResolverTests(ScratchTest):
         ):
             with self.subTest(foundry=foundry, network=network):
                 self.environment.update(
-                    AZURE_FOUNDRY_RESOURCE_GROUP=foundry,
+                    AZURE_APP_RESOURCE_GROUP=foundry,
                     AZURE_NETWORK_RESOURCE_GROUP=network,
                 )
                 self.assertEqual(expected, rg.resolve_resource_groups(self.environment).unique_groups)
@@ -96,10 +272,10 @@ class ResolverTests(ScratchTest):
     def test_invalid_names_area_and_subscription(self) -> None:
         for name in ("bad/name", "rg.", "rg with spaces", "a" * 91, "--bad;whoami"):
             with self.subTest(name=name):
-                self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = name
+                self.environment["AZURE_APP_RESOURCE_GROUP"] = name
                 with self.assertRaisesRegex(rg.ResourceGroupError, "resource-group name"):
                     rg.resolve_resource_groups(self.environment)
-        self.environment.pop("AZURE_FOUNDRY_RESOURCE_GROUP")
+        self.environment.pop("AZURE_APP_RESOURCE_GROUP")
         for subscription in ("", "subscription-name", "/subscriptions/" + SUBSCRIPTION):
             self.environment["AZURE_SUBSCRIPTION_ID"] = subscription
             with self.assertRaisesRegex(rg.ResourceGroupError, "SUBSCRIPTION_ID"):
@@ -142,7 +318,7 @@ class ResolverTests(ScratchTest):
                 self.environment.update(
                     AZURE_APPLICATION_PE_SUBNET_NAME=name,
                     AZURE_APPLICATION_PE_SUBNET_PREFIX=prefix,
-                    AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai",
+                    AZURE_APP_RESOURCE_GROUP="rg-ai",
                     CREATE_RESOURCE_GROUPS="true",
                 )
                 with patch.object(rg, "_run_az") as run:
@@ -164,7 +340,7 @@ class ResolverTests(ScratchTest):
             self.assertIsNone(self.prepare().application)
             run.assert_not_called()
         self.assertIsNone(rg.read_binding(self.azure_dir, "offline").application)
-        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+        self.environment["AZURE_APP_RESOURCE_GROUP"] = "rg-ai"
         with patch.object(rg, "_run_az") as run:
             with self.assertRaisesRegex(rg.ResourceGroupError, "No root name is inferred"):
                 self.prepare()
@@ -176,7 +352,7 @@ class ResolverTests(ScratchTest):
 class BootstrapTests(ScratchTest):
     def test_existing_groups_reused_without_metadata_writes_and_idempotent_binding(self) -> None:
         self.environment.update(
-            AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="RG-AI",
+            AZURE_APP_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="RG-AI",
             CREATE_RESOURCE_GROUPS="true",
         )
         before_env = self.env_file.read_bytes()
@@ -256,7 +432,7 @@ class BootstrapTests(ScratchTest):
                 self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
 
     def test_tagged_legacy_resources_still_reject_split_adoption_before_writes(self) -> None:
-        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+        self.environment["AZURE_APP_RESOURCE_GROUP"] = "rg-ai"
 
         def azure(arguments: list[str]) -> tuple[int, str, str]:
             if arguments[:2] == ["resource", "list"]:
@@ -273,7 +449,7 @@ class BootstrapTests(ScratchTest):
 
     def test_missing_false_checks_all_destinations_without_any_writes(self) -> None:
         self.environment.update(
-            AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net"
+            AZURE_APP_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net"
         )
         with patch.object(rg, "_run_az", return_value=(0, "false", "")) as run:
             with self.assertRaisesRegex(rg.ResourceGroupError, "rg-ai, rg-net"):
@@ -283,7 +459,7 @@ class BootstrapTests(ScratchTest):
         self.assertTrue(all(call.args[0][:2] == ["group", "exists"] for call in run.call_args_list))
 
     def test_no_authorization_transient_or_invalid_results_are_absence(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         for response in (
             (1, "", "(AuthorizationFailed) secret-token"),
             (1, "", "(TooManyRequests) details"),
@@ -300,7 +476,7 @@ class BootstrapTests(ScratchTest):
 
     def test_create_missing_additional_only_after_all_reads_binding_and_race_check(self) -> None:
         self.environment.update(
-            AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net",
+            AZURE_APP_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net",
             CREATE_RESOURCE_GROUPS="true",
         )
         calls: list[tuple[str, str]] = []
@@ -324,7 +500,7 @@ class BootstrapTests(ScratchTest):
 
     def test_partial_failure_retains_binding_and_retry_converges_without_rollback(self) -> None:
         self.environment.update(
-            AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net",
+            AZURE_APP_RESOURCE_GROUP="rg-ai", AZURE_NETWORK_RESOURCE_GROUP="rg-net",
             CREATE_RESOURCE_GROUPS="true",
         )
         created: set[str] = set()
@@ -348,7 +524,7 @@ class BootstrapTests(ScratchTest):
         self.assertEqual({"rg-ai", "rg-net"}, created)
 
     def test_creation_race_reuses_existing_without_put(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         with patch.object(rg, "_run_az", side_effect=[
             (0, "false", ""), (0, "false", ""), (0, "true", ""),
         ]) as run:
@@ -357,7 +533,7 @@ class BootstrapTests(ScratchTest):
         self.assertTrue(all(c.args[0][1] == "exists" for c in run.call_args_list))
 
     def test_known_create_conflict_rereads_and_reuses_exact_destination(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         existing = {
             "id": f"/subscriptions/{SUBSCRIPTION}/resourceGroups/RG-AI",
             "location": "westus",
@@ -383,7 +559,7 @@ class BootstrapTests(ScratchTest):
                 self.assertEqual({"external-owner": "unchanged"}, existing["tags"])
 
     def test_conflict_reread_failure_or_wrong_identity_fails_closed(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         for response in (
             (1, "", "(AuthorizationFailed) secret-details"),
             (1, "", "(ResourceGroupNotFound) secret-details"),
@@ -406,7 +582,7 @@ class BootstrapTests(ScratchTest):
                 self.assertTrue(rg.binding_path(self.azure_dir, "offline").is_file())
 
     def test_create_authorization_and_unknown_errors_never_trigger_conflict_recovery(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         for error in ("AuthorizationFailed", "RequestDisallowedByPolicy", "TooManyRequests", "Conflict"):
             with self.subTest(error=error):
                 with patch.object(rg, "_run_az", side_effect=[
@@ -418,7 +594,7 @@ class BootstrapTests(ScratchTest):
                 self.assertEqual(4, run.call_count)
 
     def test_wrong_created_subscription_or_malformed_result_fails_retaining_binding(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         for result in ("garbage", "[]", json.dumps({
             "id": f"/subscriptions/{OTHER_SUBSCRIPTION}/resourceGroups/rg-ai"
         })):
@@ -431,7 +607,7 @@ class BootstrapTests(ScratchTest):
                 self.assertTrue(rg.binding_path(self.azure_dir, "offline").is_file())
 
     def test_missing_create_location_fails_before_binding_or_write(self) -> None:
-        self.environment.update(AZURE_FOUNDRY_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
+        self.environment.update(AZURE_APP_RESOURCE_GROUP="rg-ai", CREATE_RESOURCE_GROUPS="true")
         self.environment.pop("AZURE_LOCATION")
         with patch.object(rg, "_run_az", return_value=(0, "false", "")):
             with self.assertRaisesRegex(rg.ResourceGroupError, "AZURE_LOCATION"):
@@ -439,7 +615,7 @@ class BootstrapTests(ScratchTest):
         self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
 
     def test_existing_old_environment_cannot_adopt_overrides(self) -> None:
-        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+        self.environment["AZURE_APP_RESOURCE_GROUP"] = "rg-ai"
         self.environment["APP_CONFIG_ENDPOINT"] = "https://existing.example.test"
         with patch.object(rg, "_run_az") as run:
             with self.assertRaisesRegex(rg.ResourceGroupError, "no implicit migration"):
@@ -456,7 +632,7 @@ class BootstrapTests(ScratchTest):
 
     def test_local_legacy_state_blocks_unbound_split_even_when_new_root_is_absent(self) -> None:
         self.environment.update(
-            AZURE_RESOURCE_GROUP="new-root", AZURE_FOUNDRY_RESOURCE_GROUP="new-foundry",
+            AZURE_RESOURCE_GROUP="new-root", AZURE_APP_RESOURCE_GROUP="new-foundry",
             CREATE_RESOURCE_GROUPS="true",
         )
         for state in (
@@ -487,7 +663,7 @@ class PersistenceTests(ScratchTest):
                     environment = dict(self.environment, KEY_VAULT_RESOURCE_ID=application_vault)
                     environment[changed_key] = changed_value
                     if explicit_same_group:
-                        environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = environment["AZURE_RESOURCE_GROUP"]
+                        environment["AZURE_APP_RESOURCE_GROUP"] = environment["AZURE_RESOURCE_GROUP"]
                         environment["AZURE_NETWORK_RESOURCE_GROUP"] = environment["AZURE_RESOURCE_GROUP"]
                     with patch.object(rg, "_run_az") as run:
                         with self.assertRaisesRegex(rg.ResourceGroupError, "persisted deployment scope"):
@@ -617,7 +793,7 @@ class PersistenceTests(ScratchTest):
         self.assertEqual("rg-app", rg.read_binding(self.azure_dir, "offline").application)
 
     def test_retarget_subscription_root_or_removed_overrides_fails_before_azure(self) -> None:
-        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+        self.environment["AZURE_APP_RESOURCE_GROUP"] = "rg-ai"
         with patch.object(rg, "_run_az", side_effect=[
             (0, "true", ""), (0, "true", ""), (0, "[]", ""),
         ]):
@@ -626,7 +802,7 @@ class PersistenceTests(ScratchTest):
         for key, value in (
             ("AZURE_SUBSCRIPTION_ID", OTHER_SUBSCRIPTION),
             ("AZURE_RESOURCE_GROUP", "new-root"),
-            ("AZURE_FOUNDRY_RESOURCE_GROUP", ""),
+            ("AZURE_APP_RESOURCE_GROUP", ""),
             ("AZURE_NETWORK_RESOURCE_GROUP", "rg-net"),
         ):
             with self.subTest(key=key):
@@ -679,11 +855,13 @@ class PersistenceTests(ScratchTest):
                 output = io.StringIO()
                 with patch.dict(os.environ, self.environment, clear=True), \
                         patch.object(rg, "_run_az") as run, \
+                        patch.object(rg, "_run_azd") as native, \
                         patch("sys.stdout", output):
                     self.assertEqual(0, rg.main([
                         "--azure-dir", str(self.azure_dir), "--env-name", "offline", flag
                     ]))
                     run.assert_not_called()
+                    native.assert_not_called()
                 self.assertEqual("rg-app", json.loads(output.getvalue())["application"])
                 self.assertNotIn("not-logged", output.getvalue())
         self.assertNotIn("DEPLOYMENT_TOPOLOGY", rg.binding_path(self.azure_dir, "offline").read_text())
@@ -692,7 +870,7 @@ class PersistenceTests(ScratchTest):
 class HookTests(ScratchTest):
     @unittest.skipUnless(os.name == "nt" and shutil.which("azd") and shutil.which("pwsh"),
                          "Instrumented azd test requires Windows azd and PowerShell")
-    def test_actual_azd_first_hook_root_is_unselected_and_env_refreshes(self) -> None:
+    def test_actual_azd_initializes_and_reloads_three_destinations_before_provider(self) -> None:
         (self.azure_dir / "config.json").write_text(
             json.dumps({"version": 1, "defaultEnvironment": "offline"}), encoding="utf-8"
         )
@@ -710,16 +888,46 @@ class HookTests(ScratchTest):
         (self.scratch / "select.ps1").write_text(
             "Set-Content -LiteralPath (Join-Path $PSScriptRoot 'root-present') "
             "-Value ([bool]$env:AZURE_RESOURCE_GROUP)\n"
-            "& azd env set AZURE_FOUNDRY_RESOURCE_GROUP rg-hook-extra --no-prompt\n"
+            "& $env:RG_TEST_PYTHON (Join-Path $PSScriptRoot 'defaults.py')\n"
             "exit $LASTEXITCODE\n", encoding="utf-8",
         )
+        (self.scratch / "defaults.py").write_text(
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "from unittest.mock import patch\n"
+            "sys.path.insert(0, os.environ['RG_TEST_SOURCE'])\n"
+            "from config.deployment import resource_groups as rg\n"
+            "created = []\n"
+            "def azure(args):\n"
+            "    assert args[0] == 'group'\n"
+            "    if args[1] == 'exists':\n"
+            "        return 0, 'false', ''\n"
+            "    assert args[1] == 'create'\n"
+            "    name = args[args.index('--name') + 1]\n"
+            "    assert name in ('rg-offline-app', 'rg-offline-network')\n"
+            "    created.append(name)\n"
+            "    subscription = args[args.index('--subscription') + 1]\n"
+            "    return 0, json.dumps({'id': '/subscriptions/' + subscription "
+            "+ '/resourceGroups/' + name}), ''\n"
+            "with patch.object(rg, '_run_az', side_effect=azure):\n"
+            "    code = rg.main(['--env-name', 'offline'])\n"
+            "Path('created-groups.json').write_text(json.dumps(created))\n"
+            "raise SystemExit(code)\n", encoding="utf-8",
+        )
         (self.scratch / "abort.ps1").write_text(
-            "Write-Host ('EXTRA_RELOADED=' + ($env:AZURE_FOUNDRY_RESOURCE_GROUP -eq 'rg-hook-extra'))\n"
+            "Write-Host ('DEFAULTS_RELOADED=' + ("
+            "$env:AZURE_RESOURCE_GROUP -eq 'rg-offline' -and "
+            "$env:AZURE_APP_RESOURCE_GROUP -eq 'rg-offline-app' -and "
+            "$env:AZURE_NETWORK_RESOURCE_GROUP -eq 'rg-offline-network' -and "
+            "$env:CREATE_RESOURCE_GROUPS -eq 'true'))\n"
             "exit 47\n", encoding="utf-8",
         )
-        environment = dict(os.environ, AZURE_DEV_COLLECT_TELEMETRY="no")
+        environment = dict(
+            os.environ, AZURE_DEV_COLLECT_TELEMETRY="no",
+            RG_TEST_PYTHON=sys.executable, RG_TEST_SOURCE=str(ROOT),
+        )
         for key in ("AZURE_RESOURCE_GROUP", "AZURE_ENV_NAME", "AZURE_SUBSCRIPTION_ID",
-                    "AZURE_FOUNDRY_RESOURCE_GROUP", "AZURE_NETWORK_RESOURCE_GROUP"):
+                    "AZURE_APP_RESOURCE_GROUP", "AZURE_NETWORK_RESOURCE_GROUP"):
             environment.pop(key, None)
         result = subprocess.run(
             [shutil.which("azd"), "provision", "--no-prompt"],
@@ -728,7 +936,11 @@ class HookTests(ScratchTest):
         output = result.stdout + result.stderr
         self.assertNotEqual(0, result.returncode, output)
         self.assertEqual("False", (self.scratch / "root-present").read_text().strip())
-        self.assertIn("EXTRA_RELOADED=True", output)
+        self.assertIn("DEFAULTS_RELOADED=True", output)
+        self.assertEqual(
+            ["rg-offline-app", "rg-offline-network"],
+            json.loads((self.scratch / "created-groups.json").read_text()),
+        )
         self.assertIn("exit code: '47'", output)
         self.assertNotIn("Initialize bicep provider", output)
 
@@ -745,8 +957,8 @@ class HookTests(ScratchTest):
             self.assertIn("RESOURCE_GROUP_EXIT" if suffix == "sh" else "$resourceGroupExitCode", script)
         parameters = json.loads((ROOT / "main.parameters.json").read_text())["parameters"]
         self.assertEqual(
-            {"value": "${AZURE_FOUNDRY_RESOURCE_GROUP=}"},
-            parameters["foundryResourceGroupName"],
+            {"value": "${AZURE_APP_RESOURCE_GROUP=}"},
+            parameters["applicationResourceGroupName"],
         )
         self.assertEqual(
             {"value": "${AZURE_NETWORK_RESOURCE_GROUP=}"},
@@ -761,7 +973,9 @@ class HookTests(ScratchTest):
             parameters["applicationPeSubnetPrefix"],
         )
 
-    def exercise_hook(self, shell: str, app_code: int, rg_code: int) -> None:
+    def exercise_hook(
+        self, shell: str, app_code: int, rg_code: int, inspect_defaults: bool = False,
+    ) -> None:
         suffix = "ps1" if shell == "pwsh" else "sh"
         scripts = self.scratch / "scripts"
         scripts.mkdir(exist_ok=True)
@@ -770,7 +984,17 @@ class HookTests(ScratchTest):
         for name in ("manifest.json", "azure.yaml", "app-definition.json"):
             shutil.copyfile(ROOT / name, self.scratch / name)
         trace = self.scratch / "trace"
-        environment = dict(os.environ, TRACE=str(trace), APP_CODE=str(app_code), RG_CODE=str(rg_code))
+        environment = dict(
+            os.environ, TRACE=str(trace), APP_CODE=str(app_code), RG_CODE=str(rg_code),
+            REAL_PYTHON=sys.executable,
+        )
+        if inspect_defaults:
+            (self.scratch / "infra").mkdir(exist_ok=True)
+            (self.scratch / "infra" / "main.bicep").write_text("", encoding="utf-8")
+        selection = json.dumps({
+            "foundry": "rg-ai", "application": "rg-app", "network": "rg-net",
+            "create_resource_groups": True,
+        })
         if shell == "pwsh":
             wrapper = self.scratch / "wrapper.ps1"
             wrapper.write_text(
@@ -782,6 +1006,14 @@ class HookTests(ScratchTest):
                 " } elseif ($args[1] -like '*config.deployment.resource_groups*') {\n"
                 "  Add-Content -LiteralPath $env:TRACE -Value resource_groups\n"
                 "  $global:LASTEXITCODE = [int]$env:RG_CODE\n"
+                f"  '{selection}'\n"
+                " } elseif ($args[1] -like '*config.deployment.topology*') {\n"
+                "  if ($env:AZURE_RESOURCE_GROUP -ne 'rg-ai' -or "
+                "$env:AZURE_APP_RESOURCE_GROUP -ne 'rg-app' -or "
+                "$env:AZURE_NETWORK_RESOURCE_GROUP -ne 'rg-net' -or "
+                "$env:CREATE_RESOURCE_GROUPS -ne 'true') { throw 'Incorrect destinations' }\n"
+                "  Add-Content -LiteralPath $env:TRACE -Value defaults_exported\n"
+                "  $global:LASTEXITCODE = 5\n"
                 " } else { throw 'Unexpected Python module' }\n"
                 "}\n"
                 "& (Join-Path $PSScriptRoot 'scripts\\preProvision.ps1')\n"
@@ -796,7 +1028,15 @@ class HookTests(ScratchTest):
             (bin_dir / "python3").write_text(
                 '#!/bin/sh\ncase "$2" in\n'
                 'config.appdefinition) echo appdefinition >> "$TRACE"; exit "$APP_CODE";;\n'
-                'config.deployment.resource_groups) echo resource_groups >> "$TRACE"; exit "$RG_CODE";;\n'
+                'config.deployment.resource_groups) echo resource_groups >> "$TRACE"; '
+                f"printf '%s\\n' '{selection}'; " + 'exit "$RG_CODE";;\n'
+                'config.deployment.topology) '
+                '[ "$AZURE_RESOURCE_GROUP" = rg-ai ] && '
+                '[ "$AZURE_APP_RESOURCE_GROUP" = rg-app ] && '
+                '[ "$AZURE_NETWORK_RESOURCE_GROUP" = rg-net ] && '
+                '[ "$CREATE_RESOURCE_GROUPS" = true ] || exit 97; '
+                'echo defaults_exported >> "$TRACE"; exit 5;;\n'
+                '*"import json, shlex"*) exec "$REAL_PYTHON" "$@";;\n'
                 '*) exit 99;;\nesac\n',
                 encoding="utf-8",
             )
@@ -808,9 +1048,12 @@ class HookTests(ScratchTest):
         result = subprocess.run(command, cwd=self.scratch, env=environment,
                                 capture_output=True, text=True, timeout=30)
         expected = ["appdefinition"] + (["resource_groups"] if not app_code else [])
+        if inspect_defaults:
+            expected.append("defaults_exported")
         self.assertEqual(expected, trace.read_text(encoding="utf-8-sig").splitlines(), result.stdout + result.stderr)
-        self.assertEqual(app_code or rg_code or 1, result.returncode, result.stdout + result.stderr)
-        if not app_code and not rg_code:
+        expected_code = 5 if inspect_defaults else app_code or rg_code or 1
+        self.assertEqual(expected_code, result.returncode, result.stdout + result.stderr)
+        if not app_code and not rg_code and not inspect_defaults:
             self.assertIn("infra/main.bicep", result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which("pwsh"), "PowerShell unavailable")
@@ -826,6 +1069,13 @@ class HookTests(ScratchTest):
             with self.subTest(app_code=app_code, rg_code=rg_code):
                 (self.scratch / "trace").unlink(missing_ok=True)
                 self.exercise_hook("bash", app_code, rg_code)
+
+    def test_resolved_destinations_reach_later_modules_in_both_hooks(self) -> None:
+        for shell in ("pwsh", "bash"):
+            if shutil.which(shell):
+                with self.subTest(shell=shell):
+                    (self.scratch / "trace").unlink(missing_ok=True)
+                    self.exercise_hook(shell, 0, 0, inspect_defaults=True)
 
 
 if __name__ == "__main__":

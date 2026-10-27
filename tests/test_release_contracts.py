@@ -372,7 +372,7 @@ class LifecycleParityTests(unittest.TestCase):
 
         foundation = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
         self.assertIn(
-            "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.properties.vaultUri : ''",
+            "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.outputs.properties.vaultUri : ''",
             foundation,
         )
         project = yaml.safe_load(

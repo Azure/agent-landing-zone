@@ -1,13 +1,14 @@
-"""Resolve and bind workload RG destinations; bootstrap only explicit extra RGs.
+"""Initialize, resolve and bind the workload resource-group destinations.
 
-The preprovision command hook precedes azd's Bicep provider initialization.
-An unselected native root is therefore recorded as pending, never guessed or
-created here. Postprovision finalizes that binding with ``--bind-only``.
+New azd environments default to Foundry, application and network groups.
+The CLI records their names before Bicep provider initialization; native azd
+still creates the Foundry/root group. Existing bindings are never retargeted.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 from ipaddress import IPv4Network
 import json
 import logging
@@ -28,8 +29,8 @@ from util.azure_cli import resolve_az_command
 LOGGER = logging.getLogger(__name__)
 BINDING_FILENAME = "resource-groups.json"
 _AREA_KEYS = {
-    "application": "AZURE_RESOURCE_GROUP",
-    "foundry": "AZURE_FOUNDRY_RESOURCE_GROUP",
+    "application": "AZURE_APP_RESOURCE_GROUP",
+    "foundry": "AZURE_RESOURCE_GROUP",
     "network": "AZURE_NETWORK_RESOURCE_GROUP",
 }
 _DEPLOYED_MARKERS = (
@@ -41,6 +42,7 @@ _DEPLOYED_MARKERS = (
     "AZURE_CONTAINER_REGISTRY_NAME",
     "ORCHESTRATOR_APP",
     "FRONTEND_APP",
+    "KEY_VAULT_RESOURCE_ID",
 )
 # Only this shipped output is conditional on creating the application Key Vault.
 # Foundry IDs prove another area; ACR, VNet and monitoring IDs can also be BYO.
@@ -86,12 +88,21 @@ def resource_group_for(environment: Mapping[str, str], area: str) -> str:
     root = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
     if not root:
         raise ResourceGroupError(
-            "AZURE_RESOURCE_GROUP is not available. Let azd select its application "
+            "AZURE_RESOURCE_GROUP is not available. Let azd select its Foundry "
             "root, or select the intended root with `azd env set "
             "AZURE_RESOURCE_GROUP <name>` before using additional destinations. "
             "No root name is inferred and no additional group has been created."
         )
     root = _name(root, "AZURE_RESOURCE_GROUP")
+    legacy_foundry = (environment.get("AZURE_FOUNDRY_RESOURCE_GROUP") or "").strip()
+    if legacy_foundry and legacy_foundry.casefold() != root.casefold():
+        raise ResourceGroupError(
+            "AZURE_FOUNDRY_RESOURCE_GROUP is no longer an override. "
+            "AZURE_RESOURCE_GROUP now selects Foundry/root and "
+            "AZURE_APP_RESOURCE_GROUP selects the application. Keep an existing "
+            "split environment on its original release, or create a new azd "
+            "environment with the new settings; no implicit migration is performed."
+        )
     key = _AREA_KEYS[area]
     override = (environment.get(key) or "").strip()
     return _name(override, key) if override else root
@@ -103,7 +114,7 @@ def _create_flag(environment: Mapping[str, str]) -> bool:
     value = environment["CREATE_RESOURCE_GROUPS"].strip().lower()
     if value not in {"true", "false"}:
         raise ResourceGroupError(
-            "CREATE_RESOURCE_GROUPS must be 'true' or 'false'; omit it for false. "
+            "CREATE_RESOURCE_GROUPS must be 'true' or 'false'. "
             "Empty values and numeric/truthy aliases are not accepted."
         )
     return value == "true"
@@ -149,7 +160,7 @@ class ResourceGroupSelection:
     @property
     def unique_groups(self) -> tuple[str, ...]:
         groups: dict[str, str] = {}
-        for name in (self.application, self.foundry, self.network):
+        for name in (self.foundry, self.application, self.network):
             if name:
                 groups.setdefault(name.casefold(), name)
         return tuple(groups.values())
@@ -167,7 +178,8 @@ def resolve_resource_groups(
     root = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
     additional = any(
         (environment.get(key) or "").strip()
-        for key in ("AZURE_FOUNDRY_RESOURCE_GROUP", "AZURE_NETWORK_RESOURCE_GROUP")
+        for key in ("AZURE_APP_RESOURCE_GROUP", "AZURE_NETWORK_RESOURCE_GROUP",
+                    "AZURE_FOUNDRY_RESOURCE_GROUP")
     )
     subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or "").strip()
     if subscription:
@@ -185,7 +197,7 @@ def resolve_resource_groups(
     application = resource_group_for(environment, "application")
     if not subscription:
         raise ResourceGroupError(
-            "AZURE_SUBSCRIPTION_ID is required once an application root is selected. "
+            "AZURE_SUBSCRIPTION_ID is required once a Foundry root is selected. "
             "Select the workload subscription in the azd environment; the current "
             "Azure CLI default is not used implicitly."
         )
@@ -207,7 +219,7 @@ def binding_path(azure_dir: Path, env_name: str) -> Path:
 
 
 def read_binding(azure_dir: Path, env_name: str) -> ResourceGroupSelection | None:
-    """Read validated v1 binding, including a native-root-pending selection."""
+    """Read a v2 binding or a compatible single-group/pending v1 binding."""
     path = binding_path(azure_dir, env_name)
     if not path.exists():
         return None
@@ -215,7 +227,8 @@ def read_binding(azure_dir: Path, env_name: str) -> ResourceGroupSelection | Non
         document = json.loads(path.read_text(encoding="utf-8"))
         if (
             not isinstance(document, dict)
-            or document.get("version") != 1
+            or type(document.get("version")) is not int
+            or document["version"] not in (1, 2)
             or document.get("environment") != env_name
             or set(document) != {
                 "version", "environment", "subscription", "application", "foundry", "network"
@@ -235,12 +248,20 @@ def read_binding(azure_dir: Path, env_name: str) -> ResourceGroupSelection | Non
                 "AZURE_SUBSCRIPTION_ID": document["subscription"],
                 **{key: document[area] for area, key in _AREA_KEYS.items()},
             }
-        return resolve_resource_groups(environment, allow_pending_root=pending)
+        selection = resolve_resource_groups(environment, allow_pending_root=pending)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise ResourceGroupError(
             "The environment resource-group binding is invalid or unreadable. "
             "Restore its recorded state; do not delete it to retarget deployed resources."
         ) from exc
+    if document["version"] == 1 and selection.split:
+        raise ResourceGroupError(
+            "This recorded v1 split binding uses the application-root contract. "
+            "Keep the environment on its original release or create a new azd "
+            "environment for the Foundry-root contract. Changing variables cannot "
+            "migrate its native deployment root."
+        )
+    return selection
 
 
 def _same(left: str | None, right: str | None) -> bool:
@@ -292,7 +313,7 @@ def _save_binding(
         return
     document = asdict(selection)
     del document["create_resource_groups"]
-    document.update(version=1, environment=env_name)
+    document.update(version=2, environment=env_name)
     rendered = json.dumps(document, indent=2) + "\n"
     if path.is_file() and path.read_text(encoding="utf-8") == rendered:
         return
@@ -372,10 +393,10 @@ def _legacy_deployed(
             raise ResourceGroupError("Invalid azd environment config.json.")
         if config.get("infra") or config.get("provisioning"):
             return True
-    if not check_inventory or not selection.application:
+    if not check_inventory or not selection.foundry:
         return False
     code, output, error = _run_az([
-        "resource", "list", "--resource-group", selection.application,
+        "resource", "list", "--resource-group", selection.foundry,
         "--subscription", selection.subscription,
         "--output", "json", "--only-show-errors",
     ])
@@ -439,7 +460,7 @@ def _check_legacy_root_scope(
             continue
         if not _same(subscription, selection.subscription) or not _same(group, selection.application):
             raise ResourceGroupError(
-                f"The application root conflicts with verifiable persisted deployment scope "
+                f"The application destination conflicts with verifiable persisted deployment scope "
                 f"({key}). Restore its original subscription/resource group, or create a "
                 "new azd environment; no implicit migration is performed."
             )
@@ -500,7 +521,7 @@ def prepare_resource_groups(
     if bound is None and selection.split:
         if _legacy_deployed(
             environment, env_file, selection, env_name,
-            check_inventory=existence[selection.application],
+            check_inventory=existence[selection.foundry],
         ):
             raise ResourceGroupError(
                 "This environment has an existing deployment without a resource-group "
@@ -509,7 +530,7 @@ def prepare_resource_groups(
             )
     missing = [
         name for name, exists in existence.items()
-        if not exists and not _same(name, selection.application)
+        if not exists and not _same(name, selection.foundry)
     ]
     if missing and not selection.create_resource_groups:
         raise ResourceGroupError(
@@ -571,6 +592,98 @@ def prepare_resource_groups(
     return selection
 
 
+def _run_azd(azure_dir: Path, arguments: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            ["azd", *arguments], cwd=azure_dir.resolve().parent,
+            capture_output=True, text=True, check=False, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ResourceGroupError(
+            "Cannot access local azd environment settings. Restore Azure Developer "
+            "CLI availability and retry; no Azure group creation was attempted."
+        ) from exc
+    if result.returncode:
+        raise ResourceGroupError(
+            "Cannot read or save local resource-group defaults in azd. Select the "
+            "intended environment and retry; no Azure group creation was attempted."
+        )
+    return result.stdout
+
+
+def _default_destination(root: str, suffix: str) -> str:
+    candidate = f"{root}-{suffix}"
+    if len(candidate) > 90:
+        digest = hashlib.sha256(root.casefold().encode("utf-8")).hexdigest()[:16]
+        candidate = f"{root[:90 - len(suffix) - 18]}-{digest}-{suffix}"
+    return _name(candidate, f"generated {suffix} destination")
+
+
+def initialize_defaults(
+    environment: Mapping[str, str], azure_dir: Path, env_name: str,
+) -> dict[str, str]:
+    """Persist a new environment's three destinations before any Azure write."""
+    selected = (environment.get("AZURE_ENV_NAME") or "").strip()
+    if selected and selected != env_name:
+        raise ResourceGroupError("AZURE_ENV_NAME does not match the selected azd environment.")
+    bound = read_binding(azure_dir, env_name)
+    raw = _run_azd(azure_dir, [
+        "env", "get-values", "--output", "json", "--environment", env_name,
+    ])
+    try:
+        stored = json.loads(raw)
+        if not isinstance(stored, dict):
+            raise ValueError
+        for key in (*_AREA_KEYS.values(), "AZURE_FOUNDRY_RESOURCE_GROUP",
+                    "CREATE_RESOURCE_GROUPS", "AZURE_SUBSCRIPTION_ID",
+                    "AZURE_LOCATION", "AZURE_ENV_NAME"):
+            if key in stored and not isinstance(stored[key], str):
+                raise ValueError
+    except (ValueError, TypeError) as exc:
+        raise ResourceGroupError("azd returned invalid local resource-group settings.") from exc
+    if stored.get("AZURE_ENV_NAME", "").strip() not in ("", env_name):
+        raise ResourceGroupError("azd returned a different environment; no defaults were saved.")
+    context = {key: value for key, value in stored.items() if isinstance(value, str)}
+    context.update(environment)
+    if not (context.get("AZURE_RESOURCE_GROUP") or "").strip():
+        context["AZURE_RESOURCE_GROUP"] = stored.get("AZURE_RESOURCE_GROUP", "")
+    if (context.get("AZURE_ENV_NAME") or env_name).strip() != env_name:
+        raise ResourceGroupError("azd returned a different environment; no defaults were saved.")
+    if bound is not None:
+        return context
+    candidate = dict(context)
+    root = (context.get("AZURE_RESOURCE_GROUP") or "").strip() or f"rg-{env_name}"
+    candidate["AZURE_RESOURCE_GROUP"] = _name(root, "AZURE_RESOURCE_GROUP")
+    candidate["AZURE_APP_RESOURCE_GROUP"] = (
+        (context.get("AZURE_APP_RESOURCE_GROUP") or "").strip()
+        or _default_destination(root, "app")
+    )
+    candidate["AZURE_NETWORK_RESOURCE_GROUP"] = (
+        (context.get("AZURE_NETWORK_RESOURCE_GROUP") or "").strip()
+        or _default_destination(root, "network")
+    )
+    candidate.setdefault("CREATE_RESOURCE_GROUPS", "true")
+    selection = resolve_resource_groups(candidate)
+    env_file = env_file_path(azure_dir, env_name)
+    if not env_file.is_file():
+        raise ResourceGroupError("Selected azd environment has no .env file. Run `azd env select` first.")
+    if _legacy_deployed(context, env_file, selection, env_name):
+        return context
+    validate_application_pe_subnet(candidate)
+    if _exists(root, selection.subscription) and _legacy_deployed(
+        context, env_file, selection, env_name, check_inventory=True,
+    ):
+        return context
+    _check_legacy_root_scope(selection, context, env_file)
+    for key in ("AZURE_RESOURCE_GROUP", "AZURE_APP_RESOURCE_GROUP",
+                "AZURE_NETWORK_RESOURCE_GROUP", "CREATE_RESOURCE_GROUPS"):
+        if stored.get(key) != candidate[key]:
+            _run_azd(azure_dir, [
+                "env", "set", key, candidate[key], "--environment", env_name, "--no-prompt",
+            ])
+    return candidate
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--azure-dir", type=Path, default=Path(".azure"))
@@ -587,8 +700,11 @@ def main(argv: list[str] | None = None) -> int:
             if selection is None:
                 selection = resolve_resource_groups(os.environ, allow_pending_root=True)
         else:
+            environment: Mapping[str, str] = os.environ
+            if not (args.bind_only or args.check):
+                environment = initialize_defaults(environment, args.azure_dir, env_name)
             selection = prepare_resource_groups(
-                os.environ, args.azure_dir, env_name,
+                environment, args.azure_dir, env_name,
                 bind_only=args.bind_only, check_only=args.check,
             )
         # Machine-readable stdout only; no environment dump or Azure diagnostics.
