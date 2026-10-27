@@ -5,6 +5,9 @@
 **Owners:** Agent Landing Zone maintainers<br>
 **Approver:** Paulo (maintainer)
 
+**Root configuration amended by [ADR-0024](ADR-0024-foundry-resource-group-root.md).**
+The original application-root contract below records the v4.4.0 decision.
+
 ## Context
 
 Operators need separate ownership boundaries for Foundry and grounding, local

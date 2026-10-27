@@ -58,6 +58,7 @@ from dataclasses import dataclass
 
 from util.azure_cli import resolve_az_command
 from config.deployment.composition import resolve_ingestion_selection
+from config.deployment.resource_groups import ResourceGroupError, resource_group_for
 
 
 LABEL = "agent-lz"
@@ -351,6 +352,10 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
                 f"DEPLOY_ADMINISTRATIVE_PANEL is true but {name} is not set; "
                 "cannot assign panel Cosmos RBAC."
             )
+    try:
+        resource_group = resource_group_for(environment, "application")
+    except ResourceGroupError as error:
+        raise PanelRbacError(str(error)) from error
     database_name = (environment.get("DATABASE_NAME") or "").strip()
     if not account_name and (environment.get("APP_CONFIG_ENDPOINT") or "").strip():
         endpoint = environment["APP_CONFIG_ENDPOINT"].strip()

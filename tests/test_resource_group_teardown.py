@@ -20,6 +20,7 @@ from config.deployment import teardown
     [
         {},
         {"AZURE_RESOURCE_GROUP": "rg-app"},
+        {"AZURE_RESOURCE_GROUP": "rg-ai", "AZURE_APP_RESOURCE_GROUP": "RG-AI"},
         {
             "AZURE_RESOURCE_GROUP": "rg-app",
             "AZURE_FOUNDRY_RESOURCE_GROUP": "RG-APP",
@@ -35,6 +36,8 @@ def test_legacy_and_same_group_teardown_retains_native_behavior(environment):
     "environment",
     [
         {"AZURE_RESOURCE_GROUP": "rg-app", "AZURE_FOUNDRY_RESOURCE_GROUP": "rg-ai"},
+        {"AZURE_RESOURCE_GROUP": "rg-ai", "AZURE_APP_RESOURCE_GROUP": "rg-app"},
+        {"AZURE_APP_RESOURCE_GROUP": "rg-app"},
         {"AZURE_RESOURCE_GROUP": "rg-app", "AZURE_NETWORK_RESOURCE_GROUP": "rg-net"},
         {"AZURE_FOUNDRY_RESOURCE_GROUP": "rg-ai"},
         {

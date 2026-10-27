@@ -391,14 +391,15 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     store = _object(run(["appconfig", "show", "--name", store_name, "--resource-group", group, "--subscription", sub]))
     if not _same(store.get("id"), store_id) or _endpoint(store.get("endpoint"), ".azconfig.io") != config_endpoint:
         raise AccessError("App Configuration endpoint/ARM scope mismatch.")
-    if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(_config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP"), group):
+    configured_foundry = _config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP")
+    if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(configured_foundry, foundry_group):
         raise AccessError("Configuration store belongs to a different deployment scope.")
-    configured_foundry = _setting(run, config_endpoint, "AZURE_FOUNDRY_RESOURCE_GROUP")
+    configured_app = _setting(run, config_endpoint, "AZURE_APP_RESOURCE_GROUP")
     configured_group = (
-        _string(configured_foundry.get("value")) if configured_foundry else group
+        _string(configured_app.get("value")) if configured_app else configured_foundry
     )
-    if not _same(configured_group, foundry_group):
-        raise AccessError("Configuration store belongs to a different Foundry destination.")
+    if not _same(configured_group, group):
+        raise AccessError("Configuration store belongs to a different application destination.")
     model_name = _config_value(run, config_endpoint, "AI_FOUNDRY_ACCOUNT_NAME")
     if not re.fullmatch(NAME, model_name):
         raise AccessError("Invalid configured model account name.")

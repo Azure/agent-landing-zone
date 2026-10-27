@@ -16,3 +16,6 @@ output resourceId string = identity.id
 
 @description('Principal ID of the identity.')
 output principalId string = identity.properties.principalId
+
+@description('Client ID of the identity.')
+output clientId string = identity.properties.clientId

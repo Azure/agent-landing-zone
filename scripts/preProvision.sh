@@ -90,15 +90,32 @@ fi
 # Validate and bind destinations before bootstrap; azd still owns root creation.
 echo "${CYAN}Preparing workload resource-group destinations...${NC}"
 if [ -n "${AZURE_ENV_NAME:-}" ]; then
-    (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --env-name "$AZURE_ENV_NAME") >/dev/null
+    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --env-name "$AZURE_ENV_NAME")"
 else
-    (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure") >/dev/null
+    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure")"
 fi
 RESOURCE_GROUP_EXIT=$?
 if [ $RESOURCE_GROUP_EXIT -ne 0 ]; then
     echo "${YELLOW}Error: Resource-group destination preparation failed. Review the reported configuration or access error; no automatic cleanup is performed.${NC}"
     exit $RESOURCE_GROUP_EXIT
 fi
+RESOURCE_GROUP_EXPORTS="$(printf '%s' "$RESOURCE_GROUP_OUTPUT" | "$PYTHON_CMD" -c '
+import json, shlex, sys
+groups = json.load(sys.stdin)
+for key, field in (
+    ("AZURE_RESOURCE_GROUP", "foundry"),
+    ("AZURE_APP_RESOURCE_GROUP", "application"),
+    ("AZURE_NETWORK_RESOURCE_GROUP", "network"),
+):
+    if groups[field] is not None:
+        print("export " + key + "=" + shlex.quote(groups[field]))
+print("export CREATE_RESOURCE_GROUPS=" + str(groups["create_resource_groups"]).lower())
+')"
+if [ $? -ne 0 ]; then
+    echo "${YELLOW}Error: Cannot load the resolved resource-group destinations.${NC}"
+    exit 1
+fi
+eval "$RESOURCE_GROUP_EXPORTS"
 
 ###############################################################################
 # Infrastructure is repository-owned source under infra/ (no submodule).

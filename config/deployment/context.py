@@ -68,8 +68,8 @@ def context_settings(environment: Mapping[str, str]) -> dict[str, str]:
     ID; publishing it avoids its legacy application-RG scope fallback.
     """
     settings = {
-        "AZURE_RESOURCE_GROUP": resource_group_for(environment, "application"),
-        "AZURE_FOUNDRY_RESOURCE_GROUP": resource_group_for(environment, "foundry"),
+        "AZURE_RESOURCE_GROUP": resource_group_for(environment, "foundry"),
+        "AZURE_APP_RESOURCE_GROUP": resource_group_for(environment, "application"),
         "AZURE_NETWORK_RESOURCE_GROUP": resource_group_for(environment, "network"),
     }
     account_id = (environment.get("STORAGE_ACCOUNT_RESOURCE_ID") or "").strip()
@@ -103,7 +103,7 @@ def context_settings(environment: Mapping[str, str]) -> dict[str, str]:
     ).strip()
     if not account_id and name and subscription:
         account_id = (
-            f"/subscriptions/{subscription}/resourceGroups/{settings['AZURE_FOUNDRY_RESOURCE_GROUP']}"
+            f"/subscriptions/{subscription}/resourceGroups/{settings['AZURE_RESOURCE_GROUP']}"
             f"/providers/Microsoft.Storage/storageAccounts/{name}"
         )
     if account_id:

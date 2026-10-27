@@ -174,15 +174,17 @@ class HostedAccessTests(unittest.TestCase):
             with self.subTest(group=group):
                 self.azure = AzureFixture()
                 environment = {
-                    **ENV, "AZURE_FOUNDRY_RESOURCE_GROUP": group,
+                    **ENV, "AZURE_RESOURCE_GROUP": group,
+                    "AZURE_APP_RESOURCE_GROUP": "test-group",
                     "AZURE_NETWORK_RESOURCE_GROUP": "network-group",
                     "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT.replace("test-group", group),
                 }
                 for old_id in (PROJECT, ACCOUNT, MODEL):
                     new_id = old_id.replace("test-group", group)
                     self.azure.resources[new_id] = {**self.azure.resources.pop(old_id), "id": new_id}
-                self.azure.settings["AZURE_FOUNDRY_RESOURCE_GROUP"] = {
-                    "key": "AZURE_FOUNDRY_RESOURCE_GROUP", "label": "agent-lz", "value": group,
+                self.azure.settings["AZURE_RESOURCE_GROUP"]["value"] = group
+                self.azure.settings["AZURE_APP_RESOURCE_GROUP"] = {
+                    "key": "AZURE_APP_RESOURCE_GROUP", "label": "agent-lz", "value": "test-group",
                 }
                 plan = self.discover(environment)
                 plan.validate()
@@ -195,7 +197,7 @@ class HostedAccessTests(unittest.TestCase):
                         for g in plan.grants
                     )).validate()
                 self.fails_discovery({**environment, "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT})
-                self.azure.settings["AZURE_FOUNDRY_RESOURCE_GROUP"]["value"] = "wrong-group"
+                self.azure.settings["AZURE_APP_RESOURCE_GROUP"]["value"] = "wrong-group"
                 self.fails_discovery(environment)
 
     def test_custom_instance_discovery_is_read_only_and_validates_actual_name(self):

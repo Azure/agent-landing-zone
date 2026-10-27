@@ -263,9 +263,12 @@ def discover_component_identities(
     ]
     if not components:
         return {}
-    resource_group = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
-    if not resource_group:
+    if not (environment.get("AZURE_RESOURCE_GROUP") or "").strip():
         raise RoleAssignmentError("AZURE_RESOURCE_GROUP is required to discover component identities.")
+    try:
+        resource_group = resource_group_for(environment, "application")
+    except ValueError as error:
+        raise RoleAssignmentError(str(error)) from error
     if run_az is None:
         from config.deployment.appconfig import _run_az as run_az
     identities: dict[str, str] = {}
@@ -369,9 +372,12 @@ def _assign_planned(
 ) -> list[PlannedAssignment]:
     if not planned:
         return []
-    resource_group = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
-    if not resource_group:
+    if not (environment.get("AZURE_RESOURCE_GROUP") or "").strip():
         raise RoleAssignmentError("AZURE_RESOURCE_GROUP is required to assign capability-profile roles.")
+    try:
+        resource_group = resource_group_for(environment, "application")
+    except ValueError as error:
+        raise RoleAssignmentError(str(error)) from error
     if run_az is None:
         from config.deployment.appconfig import _run_az as run_az
     guids = dict(role_guids) if role_guids is not None else load_role_guids()

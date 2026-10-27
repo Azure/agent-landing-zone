@@ -178,7 +178,7 @@ def definition_placeholder_plan(
     Components come from :func:`config.appdefinition.effective_components` for
     the materialized deployment mode, so a hosted orchestrator is never given a
     Container App. ``images`` maps azd service names to running images; when
-    omitted they are discovered from ``AZURE_RESOURCE_GROUP``.
+    omitted they are discovered from the resolved application resource group.
     """
     # Imported lazily: composition imports this module.
     from config.appdefinition import (

@@ -243,9 +243,9 @@ function Set-AgentLzAppConfiguration {
     Write-Host "⚙️ Populating Agent Landing Zone App Configuration settings (label=$Label)..."
     Invoke-NativeCommand { az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null }
 
-    $resourceGroup = Get-RequiredEnvValue 'AZURE_RESOURCE_GROUP'
-    $foundryResourceGroup = Get-OptionalEnvValue 'AZURE_FOUNDRY_RESOURCE_GROUP' $resourceGroup
-    $networkResourceGroup = Get-OptionalEnvValue 'AZURE_NETWORK_RESOURCE_GROUP' $resourceGroup
+    $foundryResourceGroup = Get-RequiredEnvValue 'AZURE_RESOURCE_GROUP'
+    $resourceGroup = Get-OptionalEnvValue 'AZURE_APP_RESOURCE_GROUP' $foundryResourceGroup
+    $networkResourceGroup = Get-OptionalEnvValue 'AZURE_NETWORK_RESOURCE_GROUP' $foundryResourceGroup
     $subscriptionId = Get-OptionalEnvValue 'AZURE_SUBSCRIPTION_ID'
     if (-not $subscriptionId) {
         $subscriptionId = Invoke-AzTsv -Arguments @('account', 'show', '--query', 'id') -Description 'current subscription id' -Required
@@ -599,8 +599,8 @@ function Set-AgentLzAppConfiguration {
     $settings = [ordered]@{
         AZURE_TENANT_ID = $tenantId
         SUBSCRIPTION_ID = $subscriptionId
-        AZURE_RESOURCE_GROUP = $resourceGroup
-        AZURE_FOUNDRY_RESOURCE_GROUP = $foundryResourceGroup
+        AZURE_RESOURCE_GROUP = $foundryResourceGroup
+        AZURE_APP_RESOURCE_GROUP = $resourceGroup
         AZURE_NETWORK_RESOURCE_GROUP = $networkResourceGroup
         LOCATION = $location
         ENVIRONMENT_NAME = $environmentName

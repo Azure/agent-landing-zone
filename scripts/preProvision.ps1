@@ -84,7 +84,7 @@ $resourceGroupArguments = @('--azure-dir', (Join-Path $projectRoot '.azure'))
 if ($env:AZURE_ENV_NAME) { $resourceGroupArguments += @('--env-name', $env:AZURE_ENV_NAME) }
 Push-Location $projectRoot
 try {
-    Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments $resourceGroupArguments | Out-Null
+    $resourceGroupOutput = Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments $resourceGroupArguments
     $resourceGroupExitCode = $LASTEXITCODE
 } finally {
     Pop-Location
@@ -93,6 +93,17 @@ if ($resourceGroupExitCode -ne 0) {
     Write-Host "Error: Resource-group destination preparation failed. Review the reported configuration or access error; no automatic cleanup is performed." -ForegroundColor Red
     exit $resourceGroupExitCode
 }
+$resourceGroups = ($resourceGroupOutput -join "`n") | ConvertFrom-Json
+foreach ($entry in @{
+    AZURE_RESOURCE_GROUP = $resourceGroups.foundry
+    AZURE_APP_RESOURCE_GROUP = $resourceGroups.application
+    AZURE_NETWORK_RESOURCE_GROUP = $resourceGroups.network
+}.GetEnumerator()) {
+    if ($null -ne $entry.Value) {
+        Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+    }
+}
+$env:CREATE_RESOURCE_GROUPS = "$($resourceGroups.create_resource_groups)".ToLowerInvariant()
 
 #-------------------------------------------------------------------------------
 # Infrastructure is repository-owned source under infra/ (no submodule).

@@ -12,20 +12,20 @@
     {
       "name": "agent-app-ui",
       "repo": "https://github.com/Azure/agent-app-ui.git",
-      "tag": "v3.3.0",
-      "commit": "858ed4205d866b7bfbff43ca9ed20ab812baa24e"
+      "tag": "v3.3.1",
+      "commit": "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554"
     },
     {
       "name": "agent-app-orchestrator",
       "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-      "tag": "v5.2.1",
-      "commit": "27f952fcf8d48a2ba6267c237ea6bea8361fedd2"
+      "tag": "v5.2.2",
+      "commit": "243e61191a7fdc5f1cf92f2ac47b779d58be3fa3"
     },
     {
       "name": "agent-app-ingestion",
       "repo": "https://github.com/Azure/agent-app-ingestion.git",
-      "tag": "v3.1.1",
-      "commit": "72efd8d7d51e10d38bf8b89f03b7eb42e1ed8ff2"
+      "tag": "v3.1.2",
+      "commit": "833aa54f2b12db342b84f96e8873b111ad980754"
     }
   ]
 }
