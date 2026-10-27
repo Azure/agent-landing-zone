@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v5.0.0] - 2026-10-27
 
 ### Changed
 - **Foundry-first deployment root.** Use `AZURE_RESOURCE_GROUP` for Foundry,
@@ -18,6 +18,24 @@
 - **Immutable native-root binding.** Record the Foundry-root contract in
   binding version 2 and reject implicit conversion of existing version 1
   split environments. The closed platform-outputs v1 schema is unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.2 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Deployment, destination binding, application-definition and lifecycle
+  contract regressions pass, including native first-run azd initialization
+  and matching PowerShell/shell destination propagation.
+- Bicep build/lint and offline foundation contracts pass with the original
+  protected graph fingerprints, reviewed scoping projections and unchanged
+  platform-output schema.
+- Published runtime tag/commit bindings and incorporated infrastructure
+  provenance are verified. The central documentation build passes.
 
 ## [v4.4.0] - 2026-10-26
 
