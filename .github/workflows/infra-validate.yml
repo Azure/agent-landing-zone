@@ -95,7 +95,7 @@ jobs:
 
       - name: Upload build and lint output
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: infra-build-${{ github.run_id }}
           path: |
@@ -165,7 +165,7 @@ jobs:
           echo "Baseline ${{ steps.source.outputs.tag }} @ $(git -C "$RUNNER_TEMP/baseline" rev-parse HEAD)"
 
       - name: Azure login (OIDC)
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -222,7 +222,7 @@ jobs:
 
       - name: Upload what-if results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: infra-whatif-${{ github.run_id }}
           path: ${{ runner.temp }}/*.whatif.json
