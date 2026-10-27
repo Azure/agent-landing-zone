@@ -1,5 +1,76 @@
 # Changelog
 
+## [v4.4.0] - 2026-10-26
+
+### Added
+- Add configurable application, Foundry/grounding and local-network
+  resource-group destinations through one `azd provision`, retaining the
+  single-resource-group default and supporting one, two or three distinct
+  destinations in the workload subscription.
+- Add `AZURE_FOUNDRY_RESOURCE_GROUP` and `AZURE_NETWORK_RESOURCE_GROUP`,
+  falling back to application/root `AZURE_RESOURCE_GROUP`, and strict
+  `CREATE_RESOURCE_GROUPS` opt-in, defaulting to `false`, for missing
+  additional destinations only.
+- Add paired `AZURE_APPLICATION_PE_SUBNET_NAME` and
+  `AZURE_APPLICATION_PE_SUBNET_PREFIX` settings independently of RG count;
+  omitted values preserve the shared private-endpoint subnet.
+
+### Changed
+- Scope foundation resources, exact resource-ID RBAC and dependent bindings
+  to their owners without changing default names, feature gates, public-access
+  settings or existing BYO network/DNS precedence.
+- Align PowerShell and shell hooks, Foundry configuration, quota preflight,
+  application/storage consumers and nonsecret `agent-lz` handoff context.
+  The closed platform-outputs v1 JSON and runtime pins remain unchanged.
+- Persist destination bindings, reject implicit migration/retargeting and
+  converge partial bootstrap retries without changing reused RG metadata.
+  Split-layout `azd down` fails closed; cleanup requires an explicit
+  resource-owner inventory, not automatic rollback or shared-RG deletion.
+- Coordinate the existing central documentation pages for configuration,
+  permissions, ownership, private networking, lifecycle and recovery.
+  Configurable RGs are supported by the Agent Bicep/azd entrypoint only;
+  Terraform and Portal support are not claimed.
+
+### Fixed
+- Use supported Azure CLI resource inventory filters during destination
+  preparation, retaining strict environment-tag matching and access failures.
+- Apply jumpbox Reader grants at the resolved resource-group deployment scope
+  rather than treating a resource-group ID as a service resource. Preserve
+  assignment GUIDs, per-resource grants and the single-group behavior.
+- Load application schema/YAML validation dependencies only when validation
+  runs, so destination binding can bootstrap on a fresh jumpbox before
+  post-provision installs the declared Python requirements.
+- Resolve the declared registry owner with an explicit repository import path
+  on isolated jumpbox Python, preserving default and custom-registry routing.
+- Load post-provision environment values through validated azd JSON on both
+  platforms, preserving structured identity metadata, quotes and multiline
+  values without interpreting them as shell expressions.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Full local Python/configurator regressions: 883 passed, 4 skipped and
+  970 subtests passed. Clean Linux deployment/hook CI: 654 passed, 6 skipped
+  and 741 subtests passed.
+- All 16 offline foundation entrypoints pass with Bicep 0.42.1, including
+  145 scope assertions, 17 rejected normalization mutations and the original
+  protected graph fingerprints. Both hook variants pass syntax/behavior checks.
+- Strict central documentation build and rubber-duck documentation review
+  pass. Runtime tag/commit bindings and incorporated infrastructure
+  provenance are verified without changing component or source pins.
+- Authorized private Azure validation completed native three-destination
+  provisioning, verified five private DNS/TLS endpoints with anonymous
+  access denied, and exercised the unchanged default chat and 3072-dimensional
+  embedding models with managed identity. Actual subscription deployment
+  writes and unauthorized private vault data access were denied. A targeted
+  recovery resolved an Azure private-endpoint internal error.
+
 ## [v4.3.5] - 2026-10-26
 
 ### Changed

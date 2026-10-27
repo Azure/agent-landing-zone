@@ -536,7 +536,12 @@ try {
         Assert-Contract ($template.parameters[$name].Contains('defaultValue')) "$name must have an omitted-input default."
         Assert-Contract (-not [string]::IsNullOrWhiteSpace($template.parameters[$name].metadata.description)) "$name must be described."
         Assert-Equal "$name Bicep default must retain native type and value." $template.parameters[$name].defaultValue $defaults[$name]
-        Assert-Equal "$name parameter-file default must be native, without an environment alias." $parameterFile.parameters[$name].value $defaults[$name]
+        if ($parameterFile.parameters.Contains($name)) {
+            Assert-Equal "$name explicit parameter-file default must be native, without an environment alias." $parameterFile.parameters[$name].value $defaults[$name]
+        }
+        else {
+            Assert-Equal "$name omitted from incorporated parameter file must use its proven native Bicep default." $template.parameters[$name].defaultValue $defaults[$name]
+        }
     }
     Write-Host '  [PASS] S1/S2/S6/S9 public types, defaults, exact union and native parameter surface.' -ForegroundColor Green
 
@@ -570,11 +575,13 @@ try {
 
     # Equivalent defaults, not byte-identical JSON: normalize ONLY new bindings
     # after proving them above. Everything else in the entire module stays pinned.
-    $oldSolution = $solution | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    . (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
+    $graphTemplate = ConvertTo-HistoricalFoundationGraph (ConvertTo-LegacyResourceGroupGraph $template) $MainFile
+    $oldSolution = $graphTemplate.resources.storageAccount | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
     $null = $oldSolution.properties.parameters.Remove('allowSharedKeyAccess')
     $null = $oldSolution.properties.parameters.networkAcls.value.Remove('resourceAccessRules')
     $oldSolution.properties.parameters.networkAcls.value.bypass = 'AzureServices'
-    Test-UnchangedGraph $template $oldSolution $manifest $changelog
+    Test-UnchangedGraph $graphTemplate $oldSolution $manifest $changelog
     $graphMutations = @(
         @{ Name = 'unrelated subnet exclusion'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $t.resources.virtualNetworkSubnets.properties.template.variables.invalidNsgSubnets += 'workload' } },
         @{ Name = 'subnet explicit NSG priority drift'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $child = @($t.resources.virtualNetworkSubnets.properties.template.resources | Where-Object { $_.Contains('copy') -and $_.copy.name -ceq 'subnetsM' })[0]; $child.properties.parameters.networkSecurityGroupId = @{ value = '' } } },
@@ -592,7 +599,7 @@ try {
         @{ Name = 'unrelated output'; Expected = 'root.outputs'; Change = { param($t, $m) $t.outputs.extra = @{ type = 'string'; value = 'drift' } } }
     )
     foreach ($mutation in $graphMutations) {
-        $changedTemplate = $template | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+        $changedTemplate = $graphTemplate | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
         $changedManifest = $manifest | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
         & $mutation.Change $changedTemplate $changedManifest
         $caught = $false
@@ -695,7 +702,9 @@ try {
         storageAccountResourceAccessRules = $null
     })
     $nativeDefaults = [ordered]@{}
-    foreach ($name in $inputNames) { $nativeDefaults[$name] = $parameterFile.parameters[$name].value }
+    foreach ($name in $inputNames) {
+        $nativeDefaults[$name] = if ($parameterFile.parameters.Contains($name)) { $parameterFile.parameters[$name].value } else { $defaults[$name] }
+    }
     Invoke-TypedFixture 'native-parameter-file' $nativeDefaults
     Invoke-TypedFixture 'keyless-multiple-disabled' ([ordered]@{
         storageAccountNetworkAclsBypass = 'None'

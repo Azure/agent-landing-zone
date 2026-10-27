@@ -23,6 +23,7 @@ from config.deployment.composition import (
 )
 from config.deployment.hosted_image import prepare_hosted_image
 from config.deployment.private_network import check_stage
+from config.deployment.context import registry_resource_group
 from util.azure_cli import resolve_az_command
 
 
@@ -179,7 +180,7 @@ def prepare_environment(
         source_commit=source_commit,
         startup_command=hosted_startup_command(environment),
         agent_pool=agent_pool or None,
-        resource_group=_required(environment, "AZURE_RESOURCE_GROUP"),
+        resource_group=registry_resource_group(environment),
         azure_cli=resolve_az_command(),
     )
     return digest, source_commit

@@ -29,7 +29,7 @@ class OptionalIngestionTests(unittest.TestCase):
         definition = load_definition(ROOT / "app-definition.json", repo_root=ROOT)
         for hosted in (False, True):
             env = {
-                FLAG: "false", "AZURE_RESOURCE_GROUP": RG,
+                FLAG: "false", "AZURE_RESOURCE_GROUP": RG, "AZURE_SUBSCRIPTION_ID": "0000",
                 "DEPLOYMENT_TOPOLOGY": "hosted-no-panel" if hosted else "classic",
             }
             with self.subTest(hosted=hosted):
@@ -230,7 +230,7 @@ class OptionalIngestionTests(unittest.TestCase):
             self.assertNotIn("dataingest", [a["service_name"] for a in document["parameters"]["containerAppsList"]["value"]])
 
     def test_disabled_endpoint_reconciliation_never_looks_up_ingestion(self):
-        def lookup(group, name, *, required):
+        def lookup(group, name, *, required, subscription=""):
             self.assertNotIn("dataingest", name)
             return {"fqdn": name + ".example.test", "principalId": name}
 

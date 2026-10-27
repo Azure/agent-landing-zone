@@ -61,6 +61,12 @@ import * as storageTypes from 'constants/storage-types.bicep'
 @description('Name of the Azure Developer CLI environment')
 param environmentName string
 
+@description('Foundry and grounding destination in the workload subscription. Empty uses the application/root resource group. Intended for new environments only.')
+param foundryResourceGroupName string = ''
+
+@description('Locally owned networking destination in the workload subscription. Empty uses the application/root resource group. Explicit BYO resource IDs retain precedence.')
+param networkResourceGroupName string = ''
+
 @description('The Azure region where your resources will be created.')
 param location string = resourceGroup().location
 
@@ -174,7 +180,7 @@ param existingPrivateDnsZoneAppInsightsResourceId string?
 @description('The Azure region where private endpoints will be created. Defaults to the main deployment location. Use this when your VNet is in a different region than the resources.')
 param privateEndpointLocation string = ''
 
-@description('The name of the resource group where private endpoints will be created. When empty, private endpoints are placed in the VNet resource group (for existing VNets with sideBySideDeploy disabled) or the deployment resource group.')
+@description('Private endpoint RG override in the workload subscription. When empty, use the existing VNet subscription/RG if sideBySideDeploy is disabled, otherwise the resolved network RG.')
 param privateEndpointResourceGroupName string = ''
 
 @description('Use an existing Virtual Network. When false, a new VNet will be created.')
@@ -185,6 +191,12 @@ param existingVnetResourceId string = ''
 
 param agentSubnetName string = 'agent-subnet'
 param peSubnetName string = 'pe-subnet'
+
+@description('Optional separate subnet for application private endpoints. Set with applicationPeSubnetPrefix; empty retains the legacy shared PE subnet, independently of resource-group count.')
+param applicationPeSubnetName string = ''
+
+@description('IPv4 CIDR for the optional application PE subnet. Set with applicationPeSubnetName; must be non-overlapping inside the workload VNet. No delegation is applied.')
+param applicationPeSubnetPrefix string = ''
 param gatewaySubnetName string = 'gateway-subnet'
 param azureBastionSubnetName string = 'AzureBastionSubnet'
 param azureFirewallSubnetName string = 'AzureFirewallSubnet'
@@ -1057,6 +1069,9 @@ var _azdTags = { 'azd-env-name': environmentName }
 var _modeTags = { deploymentMode: deploymentMode, 'ai-lz-version': 'v2.0.0' }
 var _tags = union(_azdTags, _modeTags, deploymentTags)
 
+var _foundryResourceGroupName = empty(foundryResourceGroupName) ? resourceGroup().name : foundryResourceGroupName
+var _networkResourceGroupName = empty(networkResourceGroupName) ? resourceGroup().name : networkResourceGroupName
+
 // Derive the list of additional Git repositories to clone onto the jumpbox
 // directly from `manifest.json#components`. Consumers that use this landing
 // zone as a Bicep module / git submodule overlay their own `manifest.json`
@@ -1138,7 +1153,7 @@ var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacy
 // so both code paths (greenfield + useExistingVNet) attach the subnet
 // to the NAT GW.
 #disable-next-line BCP318
-var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.id : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
+var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.outputs.resourceId : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
 
 // ---------------------------------------------------------------------------
 // Observability reuse derivations (Gap 5, issue #58)
@@ -1194,7 +1209,7 @@ var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
 #disable-next-line BCP318
 var _effectiveRouteTableId = _hasExistingRouteTable
   ? hubIntegrationExistingRouteTableResourceId!
-  : (_createRouteTable ? routeTable.id : '')
+  : (_createRouteTable ? routeTable!.outputs.resourceId : '')
 var _createDefaultRoute    = _createRouteTable && (deployAzureFirewall || _hasExternalEgress)
 var _defaultRouteNextHopIp = deployAzureFirewall
   ? firewall.outputs.privateIp
@@ -1266,8 +1281,16 @@ var _jumpbxSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/$
 var _agentSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${agentSubnetName}' : ''
 
 var _peLocation = !empty(privateEndpointLocation) ? privateEndpointLocation : location
-var _defaultPeResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+var _defaultPeResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : _networkResourceGroupName
 var _peResourceGroupName = !empty(privateEndpointResourceGroupName) ? privateEndpointResourceGroupName : _defaultPeResourceGroupName
+// The explicit RG override historically names a group in the workload subscription.
+// Only the implicit BYO fallback follows the VNet's subscription.
+var _peSubscriptionId = !empty(privateEndpointResourceGroupName)
+  ? subscription().subscriptionId
+  : (useExistingVNet && !sideBySideDeploy ? varExistingVnetSubscriptionId : subscription().subscriptionId)
+var _peResourceGroupResourceId = '/subscriptions/${_peSubscriptionId}/resourceGroups/${_peResourceGroupName}'
+var _separateApplicationPeSubnet = !empty(applicationPeSubnetName)
+var _applicationPeSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${_separateApplicationPeSubnet ? applicationPeSubnetName : peSubnetName}' : ''
 
 // ----------------------------------------------------------------------
 // VM vars
@@ -1340,6 +1363,7 @@ var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
 
 // Bastion NSG — restricts inbound 443 to trusted IPs only
 module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion && deployNsgs) {
+  scope: resourceGroup(_networkResourceGroupName)
   name: 'bastionNsgDeployment'
   params: {
     name: 'nsg-${resourceNames.vnetName}-${azureBastionSubnetName}'
@@ -1354,6 +1378,7 @@ module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion &&
 // the public-ingress module avoids a circular dependency between the subnet
 // and the gateway.
 module appGwNsg 'modules/networking/appgw-nsg.bicep' = if (_publicIngressEnabled) {
+  scope: resourceGroup(_networkResourceGroupName)
   name: 'appGwNsgDeployment'
   params: {
     name: 'nsg-${resourceNames.vnetName}-${azureAppGatewaySubnetName}'
@@ -1374,12 +1399,13 @@ var _publicIngressAllowedSources = publicIngress.?allowedSourceAddressPrefixes ?
 // Route Table for egress traffic control through Azure Firewall (or external NVA, Gap 6).
 // Created only when network isolation is on AND no existing RT is provided via
 // `hubIntegrationExistingRouteTableResourceId`.
-resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_createRouteTable) {
-  name: '${const.abbrs.networking.routeTable}${resourceToken}'
-  location: location
-  tags: _tags
-  properties: {
-    disableBgpRoutePropagation: true
+module routeTable 'modules/networking/route-table.bicep' = if (_createRouteTable) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'routeTableDeployment'
+  params: {
+    name: '${const.abbrs.networking.routeTable}${resourceToken}'
+    location: location
+    tags: _tags
   }
 }
 
@@ -1466,14 +1492,34 @@ var baseSubnets = [
       }
 ]
 
-var subnets = baseSubnets
+var subnets = concat(baseSubnets, _separateApplicationPeSubnet ? [
+  {
+    name: applicationPeSubnetName
+    addressPrefix: applicationPeSubnetPrefix
+    routeTableResourceId: _effectiveRouteTableId
+    serviceEndpoints: ['Microsoft.AzureCosmosDB']
+    delegation: ''
+  }
+] : [])
+
+module networkLayoutValidation 'modules/validation/private-endpoint-layout.bicep' = if (!empty(applicationPeSubnetName) || !empty(applicationPeSubnetPrefix)) {
+  name: 'privateEndpointLayoutValidation'
+  params: {
+    applicationSubnetName: applicationPeSubnetName
+    applicationSubnetPrefix: applicationPeSubnetPrefix
+    existingSubnetNames: map(baseSubnets, subnet => subnet.name)
+    existingSubnetPrefixes: map(baseSubnets, subnet => subnet.addressPrefix)
+    vnetAddressPrefixes: vnetAddressPrefixes
+    validateAddressSpace: !useExistingVNet || deploySubnets
+  }
+}
 
 module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) {
   name: 'virtualNetworkSubnetsDeployment'
   params: {
     vnetName: useExistingVNet ? varExistingVnetName : resourceNames.vnetName
     location: location
-    resourceGroupName: useExistingVNet ? varExistingVnetResourceGroupName : resourceGroup().name
+    resourceGroupName: useExistingVNet ? varExistingVnetResourceGroupName : _networkResourceGroupName
     subscriptionId: useExistingVNet ? varExistingVnetSubscriptionId : subscription().subscriptionId
     tags: _tags
     addressPrefixes: vnetAddressPrefixes
@@ -1483,11 +1529,13 @@ module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIs
     useExistingVNet: useExistingVNet
     virtualNetworkResourceId: virtualNetworkResourceId
   }
+  dependsOn: [networkLayoutValidation]
 }
 
 // VNet
 // Note on IP address sizing: https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks#known-limitations
 module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_networkIsolation && !useExistingVNet) {
+  scope: resourceGroup(_networkResourceGroupName)
   name: 'virtualNetworkDeployment'
   params: {
     // VNet sized /16 to fit all subnets
@@ -1498,31 +1546,22 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
     tags: _tags
     subnets: subnets
   }
+  dependsOn: [networkLayoutValidation]
 }
 
 // Gap 7 — Spoke→hub VNet peering.
 // Lives under the locally-created spoke VNet; the existing resource
 // reference below ensures Bicep can attach the peering as a child without
 // the AVM module having to expose a peerings property.
-resource spokeVnetForPeering 'Microsoft.Network/virtualNetworks@2024-07-01' existing = if (_createSpokeToHubPeering) {
-  name: resourceNames.vnetName
-}
-
-resource spokeToHubPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2024-07-01' = if (_createSpokeToHubPeering) {
-  parent: spokeVnetForPeering
-  name: 'to-hub-${_hubVnetName}'
-  properties: {
-    allowVirtualNetworkAccess: true
-    // Required so the hub Azure Firewall (or any hub NVA) can forward spoke
-    // traffic on behalf of the spoke. Without this, asymmetric routing
-    // through the hub firewall breaks.
-    allowForwardedTraffic: true
+module spokeToHubPeering 'modules/networking/spoke-peering.bicep' = if (_createSpokeToHubPeering) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'spokeToHubPeeringDeployment'
+  params: {
+    vnetName: resourceNames.vnetName
+    name: 'to-hub-${_hubVnetName}'
     allowGatewayTransit: hubIntegrationPeeringAllowGatewayTransit
     useRemoteGateways: hubIntegrationPeeringUseRemoteGateways
-    remoteVirtualNetwork: {
-      #disable-next-line BCP318
-      id: hubIntegrationHubVnetResourceId!
-    }
+    hubVnetResourceId: hubIntegrationHubVnetResourceId!
   }
   dependsOn: [
     virtualNetwork
@@ -1536,48 +1575,18 @@ resource spokeToHubPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeer
 // audio/clipboard/device redirection, and SSH agent forwarding from inside the
 // spoke. Behavior-equivalent to the previous module call: same subnet
 // (AzureBastionSubnet), Standard static PIP, optional zone redundancy, tags.
-resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployBastion) {
-  name: '${const.abbrs.networking.publicIPAddress}bastion-${resourceToken}'
-  location: location
-  tags: _tags
-  sku: {
-    name: 'Standard'
-    tier: 'Regional'
-  }
-  zones: useZoneRedundancy ? ['1', '2', '3'] : []
-  properties: {
-    publicIPAllocationMethod: 'Static'
-    publicIPAddressVersion: 'IPv4'
-  }
-}
-
-resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (_deployBastion) {
-  name: '${const.abbrs.security.bastion}testvm-${resourceToken}'
-  location: location
-  tags: _tags
-  sku: {
-    name: bastionSkuName
-  }
-  zones: useZoneRedundancy ? ['1', '2', '3'] : []
-  properties: {
-    // enableTunneling is silently coerced to false on Basic SKU because the
-    // Basic SKU does not support native client tunneling. Standard and Premium
-    // accept the value.
-    enableTunneling: bastionEnableTunneling && bastionSkuName != 'Basic'
-    ipConfigurations: [
-      {
-        name: 'IpConfAzureBastionSubnet'
-        properties: {
-          subnet: {
-            #disable-next-line BCP318
-            id: '${virtualNetworkResourceId}/subnets/AzureBastionSubnet'
-          }
-          publicIPAddress: {
-            id: bastionPublicIp.id
-          }
-        }
-      }
-    ]
+module testVmBastionHost 'modules/networking/bastion.bicep' = if (_deployBastion) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'bastionDeployment'
+  params: {
+    name: '${const.abbrs.security.bastion}testvm-${resourceToken}'
+    publicIpName: '${const.abbrs.networking.publicIPAddress}bastion-${resourceToken}'
+    location: location
+    tags: _tags
+    skuName: bastionSkuName
+    useZoneRedundancy: useZoneRedundancy
+    enableTunneling: bastionEnableTunneling
+    subnetResourceId: '${virtualNetworkResourceId}/subnets/${azureBastionSubnetName}'
   }
   dependsOn: [
     #disable-next-line BCP321
@@ -1591,6 +1600,7 @@ resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (_de
 ///////////////////////////////////////////////////////////////////////////
 
 module firewall 'modules/networking/azure-firewall.bicep' = {
+  scope: resourceGroup(_networkResourceGroupName)
   name: 'firewall'
   params: {
     deployAzureFirewall: deployAzureFirewall
@@ -1625,24 +1635,30 @@ module firewall 'modules/networking/azure-firewall.bicep' = {
 // Default route through Azure Firewall (local) or external NVA/hub firewall (Gap 6).
 // Skipped entirely when the operator brings their own Route Table via
 // `hubIntegrationExistingRouteTableResourceId` (we don't write into a foreign RT).
-resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_createDefaultRoute) {
-  parent: routeTable
-  name: 'default-to-firewall'
-  properties: {
-    addressPrefix: '0.0.0.0/0'
-    nextHopType: 'VirtualAppliance'
+module defaultRoute 'modules/networking/default-route.bicep' = if (_createDefaultRoute) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'defaultRouteDeployment'
+  params: {
+    routeTableName: '${const.abbrs.networking.routeTable}${resourceToken}'
     nextHopIpAddress: _defaultRouteNextHopIp
   }
+  #disable-next-line no-unnecessary-dependson
+  dependsOn: [routeTable]
 }
 
 //Test VM User Managed Identity
-resource testVmUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
-  name: '${const.abbrs.security.managedIdentity}${_vmName}'
-  location: location
+module testVmUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'testVmIdentityDeployment'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${_vmName}'
+    location: location
+  }
 }
 
 // Test VM
 module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (_deployJumpbox) {
+  scope: resourceGroup(_networkResourceGroupName)
   name: 'testVmDeployment'
   params: {
     name: _vmName
@@ -1652,7 +1668,7 @@ module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (_deployJu
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
       #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [testVmUAI.id] : []
+      userAssignedResourceIds: _useUAI ? [testVmUAI.outputs.resourceId] : []
     }
     imageReference: {
       publisher: vmImagePublisher
@@ -1694,37 +1710,14 @@ module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (_deployJu
   ]
 }
 
-resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployNatGateway) {
-  name: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.natGateway}${resourceToken}'
-  location: location
-  sku: {
-    name: 'Standard'
-    tier: 'Regional'
-  }
-  properties: {
-    publicIPAllocationMethod: 'Static'
-    publicIPAddressVersion: 'IPv4'
-    idleTimeoutInMinutes: 30
-    dnsSettings: {
-      domainNameLabel: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.natGateway}${resourceToken}'
-    }
-  }
-  tags: _tags
-}
-
-#disable-next-line BCP081
-resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (_deployNatGateway) {
-  name: '${const.abbrs.networking.natGateway}${resourceToken}'
-  location: location
-  sku: {
-    name: 'Standard'
-  }
-  properties: {
-    publicIpAddresses: [
-      {
-        id: natPublicIp.id
-      }
-    ]
+module natGateway 'modules/networking/nat-gateway.bicep' = if (_deployNatGateway) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'natGatewayDeployment'
+  params: {
+    name: '${const.abbrs.networking.natGateway}${resourceToken}'
+    publicIpName: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.natGateway}${resourceToken}'
+    location: location
+    tags: _tags
   }
 }
 
@@ -1734,8 +1727,18 @@ resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (_deployNatG
 // ---------------------------------------------------------------------------
 var _testVmPrincipalId = _deployJumpbox
   #disable-next-line BCP318
-  ? (_useUAI ? testVmUAI.properties.principalId : testVm.outputs.systemAssignedMIPrincipalId!)
+  ? (_useUAI ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!)
   : ''
+
+var _testVmDestinationReaderRoles = map(union(
+  toLower(_foundryResourceGroupName) == toLower(resourceGroup().name) ? [] : [toLower(_foundryResourceGroupName)],
+  toLower(_networkResourceGroupName) == toLower(resourceGroup().name) ? [] : [toLower(_networkResourceGroupName)]
+), destination => {
+  roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.Reader.guid)
+  principalId: _testVmPrincipalId
+  resourceId: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${destination}'
+  principalType: 'ServicePrincipal'
+})
 
 var _testVmRoles = _deployJumpbox ? concat(
   [
@@ -1755,6 +1758,7 @@ var _testVmRoles = _deployJumpbox ? concat(
       principalType: 'ServicePrincipal'
     }
   ],
+  _testVmDestinationReaderRoles,
   (deployAppConfig && deployContainerRegistry) ? [
     {
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerAppsContributor.guid)
@@ -1925,22 +1929,15 @@ var _fileUris = [
 // `manifest.json#infra.source.tag` (and passed as `-release`), so a fix to
 // install.ps1 only takes effect once a new tag containing it is published AND
 // `infra.source.tag` is bumped to that tag.
-resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_deployJumpbox && deploySoftware) {
-  name: '${_vmName}/cse'
-  location: location
-  properties: {
-    publisher: 'Microsoft.Compute'
-    type: 'CustomScriptExtension'
-    typeHandlerVersion: '1.10'
-    autoUpgradeMinorVersion: true
+module cse 'modules/networking/jumpbox-extension.bicep' = if (_deployJumpbox && deploySoftware) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'jumpboxExtensionDeployment'
+  params: {
+    vmName: _vmName
+    location: location
     forceUpdateTag: deployment().name
-    settings: {
-      fileUris: _fileUris
-      commandToExecute: 'powershell.exe -ExecutionPolicy Unrestricted -File install.ps1 -release ${_infraSourceTag} -UseUAI ${_useUAI} -ResourceToken ${resourceToken} -AzureTenantId ${subscription().tenantId} -AzureLocation ${location} -AzureSubscriptionId ${subscription().subscriptionId} -AzureResourceGroupName ${resourceGroup().name} -AzdEnvName ${environmentName} -ExtraRepoUrls "${join(_extraRepoUrls, ',')}" -ExtraRepoTags "${join(_extraRepoTags, ',')}" -ExtraRepoNames "${join(_extraRepoNames, ',')}"'
-    }
-    protectedSettings: {
-      
-    }
+    fileUris: _fileUris
+    commandToExecute: 'powershell.exe -ExecutionPolicy Unrestricted -File install.ps1 -release ${_infraSourceTag} -UseUAI ${_useUAI} -ResourceToken ${resourceToken} -AzureTenantId ${subscription().tenantId} -AzureLocation ${location} -AzureSubscriptionId ${subscription().subscriptionId} -AzureResourceGroupName ${resourceGroup().name} -AzdEnvName ${environmentName} -ExtraRepoUrls "${join(_extraRepoUrls, ',')}" -ExtraRepoTags "${join(_extraRepoTags, ',')}" -ExtraRepoNames "${join(_extraRepoNames, ',')}"'
   }
   dependsOn: [
     testVm
@@ -1954,7 +1951,7 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_de
 // Private DNS Zones (consolidated into a single for-loop module to keep compiled ARM template under 4 MB).
 ///////////////////////////////////////////////////////////////////////////
 
-var _dnsZonesTargetRg = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+var _dnsZonesTargetRg = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : _networkResourceGroupName
 var _dnsZonesLinkSuffix = '${useExistingVNet ? '-byon' : ''}${empty(dnsZoneLinkSuffix) ? '' : '-${dnsZoneLinkSuffix}'}'
 
 // Gap 2 — Per-zone BYO flags (true ⇒ skip local creation for that zone).
@@ -2004,6 +2001,7 @@ module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deplo
     zones: _dnsZonesList
     tags: _tags
     resourceGroupName: _dnsZonesTargetRg
+    subscriptionId: _dnsZonesSubscriptionId
     virtualNetworkResourceId: virtualNetworkResourceId
   }
   dependsOn: [
@@ -2083,6 +2081,7 @@ var _peList = concat(
   (_networkIsolation && deployCosmosDb) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.dbAccountName}'
+      subnetResourceId: _applicationPeSubnetId
       privateLinkServiceConnections: [
         {
           name: 'cosmosConnection${useExistingVNet?'-byon':''}'
@@ -2122,6 +2121,7 @@ var _peList = concat(
   (_networkIsolation && deployKeyVault) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.keyVaultName}'
+      subnetResourceId: _applicationPeSubnetId
       privateLinkServiceConnections: [
         {
           name: 'kvConnection${useExistingVNet?'-byon':''}'
@@ -2135,6 +2135,7 @@ var _peList = concat(
   (_networkIsolation && deployAppConfig) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.appConfigName}'
+      subnetResourceId: _applicationPeSubnetId
       privateLinkServiceConnections: [
         {
           name: 'appConfigConnection${useExistingVNet?'-byon':''}'
@@ -2148,6 +2149,7 @@ var _peList = concat(
   (_networkIsolation && deployContainerEnv) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.containerEnvName}'
+      subnetResourceId: _applicationPeSubnetId
       privateLinkServiceConnections: [
         {
           name: 'ccaConnection'
@@ -2161,6 +2163,7 @@ var _peList = concat(
   (_networkIsolation && deployContainerRegistry) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.containerRegistryName}'
+      subnetResourceId: _applicationPeSubnetId
       privateLinkServiceConnections: [
         {
           name: '${resourceNames.containerRegistryName}-registry-connection'
@@ -2192,6 +2195,7 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     endpoints: _peList
     location: _peLocation
     resourceGroupName: _peResourceGroupName
+    subscriptionId: _peSubscriptionId
     tags: _tags
     subnetResourceId: _peSubnetId
   }
@@ -2224,7 +2228,7 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
 
 
 var _dnsZonesSubscriptionId = useExistingVNet && !sideBySideDeploy ? varExistingVnetSubscriptionId : subscription().subscriptionId
-var _dnsZonesResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+var _dnsZonesResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : _networkResourceGroupName
 var _dnsZoneCogSvcsId         = !empty(existingPrivateDnsZoneCogSvcsResourceId ?? '')         ? existingPrivateDnsZoneCogSvcsResourceId!         : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')
 var _dnsZoneOpenAiId          = !empty(existingPrivateDnsZoneOpenAiResourceId ?? '')          ? existingPrivateDnsZoneOpenAiResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')
 var _dnsZoneAiServicesId      = !empty(existingPrivateDnsZoneAiServicesResourceId ?? '')      ? existingPrivateDnsZoneAiServicesResourceId!      : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')
@@ -2241,9 +2245,13 @@ var _dnsZoneOdsOpsInsightsId  = !empty(existingPrivateDnsZoneOdsOpsInsightsResou
 var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
 
 //AI Foundry Account User Managed Identity
-resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
-  name: '${const.abbrs.security.managedIdentity}${resourceNames.aiFoundryAccountName}'
-  location: location
+module aiFoundryUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
+  scope: resourceGroup(_foundryResourceGroupName)
+  name: 'foundryIdentityDeployment'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${resourceNames.aiFoundryAccountName}'
+    location: location
+  }
 }
 
 // 16.0 AI Foundry account creation is delegated entirely to the customized
@@ -2261,6 +2269,7 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 // Creating it ourselves and passing the resource ID as `existingResourceId`
 // lets us honor an explicit SKU (default `Standard_LRS`).
 module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (_deployAiFoundryStorage) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'aiFoundryStorage-${resourceToken}-deployment'
   params: {
     name: resourceNames.aiFoundryStorageAccountName
@@ -2270,6 +2279,8 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     disablePublicNetworkAccess: _networkIsolation
     allowedIpRanges: allowedIpRanges
     privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
+    privateEndpointResourceGroupResourceId: _peResourceGroupResourceId
+    privateEndpointLocation: _peLocation
     blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : ''
   }
   dependsOn: [
@@ -2293,10 +2304,12 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
 
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'aiFoundryDeployment'
   params: {
     // Required
     baseName: substring(resourceToken, 0, 10)
+    baseUniqueName: substring(uniqueString(subscription().id, resourceGroup().name, substring(resourceToken, 0, 10)), 0, 5)
 
     includeAssociatedResources: _deployAiFoundryAgentService
     location: location
@@ -2312,7 +2325,9 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     // with `databaseAccount_privateEndpoints[0]` / `keyVault_privateEndpoints[0]` ...
     // `'reference' is not valid: all function arguments should be string literals.`.
     // See issue #63 for the full diagnosis.
-    privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''
+    privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
+    privateEndpointResourceGroupResourceId: _peResourceGroupResourceId
+    privateEndpointLocation: _peLocation
 
     aiFoundryConfiguration: {
       accountName: resourceNames.aiFoundryAccountName
@@ -2391,10 +2406,6 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
 }
 
 
-var varPeSubnetId = empty(existingVnetResourceId!)
-  ? '${virtualNetworkResourceId}/subnets/pe-subnet'
-  : '${existingVnetResourceId!}/subnets/pe-subnet'
-
 var varAfNetworkingOverride = _networkIsolation
   ? (policyManagedPrivateDns
     ? {
@@ -2443,13 +2454,9 @@ var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
   roleAssignments: []
 } : {}
 
-var aiFoundryAccountResourceId = resourceId('Microsoft.CognitiveServices/accounts', aiFoundry!.outputs.aiServicesName)
+var aiFoundryAccountResourceId = aiFoundry!.outputs.accountResourceId
 
-var aiFoundryProjectResourceId = resourceId(
-  'Microsoft.CognitiveServices/accounts/projects', 
-  aiFoundry!.outputs.aiServicesName, 
-  aiFoundry!.outputs.aiProjectName 
-)
+var aiFoundryProjectResourceId = aiFoundry!.outputs.projectResourceId
 
 var aiFoundryAccountEndpoint = 'https://${aiFoundry!.outputs.aiServicesName}.cognitiveservices.azure.com/'
 
@@ -2457,6 +2464,7 @@ var aiFoundryProjectEndpoint = 'https://${aiFoundry!.outputs.aiServicesName}.ser
 
 // Bing Search Connection (optional)
 module bingSearchConnection 'modules/bing-search/main.bicep' = if (deployAiFoundry && deployGroundingWithBing) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'bingSearchConnection-${resourceToken}'
   params: {
     accountName: aiFoundry!.outputs.aiServicesName
@@ -2473,6 +2481,7 @@ module bingSearchConnection 'modules/bing-search/main.bicep' = if (deployAiFound
 
 // Bing Search Connection
 module aiFoundryBingConnection 'modules/ai-foundry/connection-bing-search-tool.bicep' = if (deployAiFoundry && deployGroundingWithBing) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'aiFoundryBingConnection'
   params: {
     account_name: aiFoundry!.outputs.aiServicesName
@@ -2486,6 +2495,7 @@ module aiFoundryBingConnection 'modules/ai-foundry/connection-bing-search-tool.b
 
 // AI Search Connection
 module aiFoundryConnectionSearch 'modules/ai-foundry/connection-ai-search.bicep' = if (deployAiFoundry && deploySearchService) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'connection-ai-search-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
@@ -2502,6 +2512,7 @@ module aiFoundryConnectionSearch 'modules/ai-foundry/connection-ai-search.bicep'
 // separate from SEARCH_CONNECTION_ID so application search and knowledge-base
 // lifecycle can evolve independently.
 module aiFoundryKnowledgeBaseSearchConnection 'modules/ai-foundry/connection-ai-search.bicep' = if (deployAiFoundry && deploySearchService && retrievalBackend == 'foundry_iq') {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'connection-foundry-iq-search-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
@@ -2517,6 +2528,7 @@ module aiFoundryKnowledgeBaseSearchConnection 'modules/ai-foundry/connection-ai-
 
 // Application Insights Connection
 module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-insights.bicep' = if (deployAiFoundry && _hasEffectiveAI) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'connection-appinsights-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
@@ -2531,6 +2543,7 @@ module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-in
 
 // Storage Account Connection
 module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account.bicep' = if (deployAiFoundry && deployStorageAccount) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'connection-storage-account-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
@@ -2581,8 +2594,9 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
     name: '${const.abbrs.networking.privateEndpoint}${const.abbrs.networking.privateLinkScope}${resourceToken}'
     location: _peLocation
     resourceGroupName: _peResourceGroupName
+    subscriptionId: _peSubscriptionId
     tags: _tags
-    subnetResourceId: _peSubnetId
+    subnetResourceId: _applicationPeSubnetId
     privateLinkServiceConnections: [
       {
         name: 'privateLinkScopeConnection'
@@ -2606,6 +2620,8 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
     privateLinkScope!
     privateDnsZones
     privateEndpoints // Serialize PE operations to avoid conflicts
+    aiFoundry // Also serialize against Foundry's nested endpoints on the legacy shared subnet.
+    aiFoundryStorageAccount
   ]
 }
 
@@ -2748,6 +2764,8 @@ resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023
 var _containerRuntimeEnv = [
   { name: 'SUBSCRIPTION_ID',           value: subscription().subscriptionId }
   { name: 'AZURE_RESOURCE_GROUP',      value: resourceGroup().name }
+  { name: 'AZURE_FOUNDRY_RESOURCE_GROUP', value: _foundryResourceGroupName }
+  { name: 'AZURE_NETWORK_RESOURCE_GROUP', value: _networkResourceGroupName }
   { name: 'LOCATION',                  value: location }
   { name: 'ENVIRONMENT_NAME',          value: environmentName }
   { name: 'RESOURCE_TOKEN',            value: resourceToken }
@@ -2758,7 +2776,7 @@ var _containerRuntimeEnv = [
   { name: 'RETRIEVAL_BACKEND',         value: retrievalBackend }
   { name: 'KNOWLEDGE_BASE_NAME',       value: retrievalBackend == 'foundry_iq' ? knowledgeBaseName : '' }
   { name: 'KNOWLEDGE_BASE_ENDPOINT',   value: retrievalBackend == 'foundry_iq' ? 'https://${resourceNames.searchServiceName}.search.windows.net' : '' }
-  { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.CognitiveServices/accounts/${resourceNames.aiFoundryAccountName}/projects/${resourceNames.aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
+  { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_foundryResourceGroupName}/providers/Microsoft.CognitiveServices/accounts/${resourceNames.aiFoundryAccountName}/projects/${resourceNames.aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
   { name: 'FOUNDRY_IQ_API_VERSION',    value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : '' }
@@ -2952,7 +2970,7 @@ module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCo
     enableFreeTier: false
     publicNetworkAccess: _publicNetworkAccess
     ipRules: _cosmosIpRules
-    virtualNetworkSubnetIds: _networkIsolation ? [_peSubnetId, _caEnvSubnetId] : []
+    virtualNetworkSubnetIds: _networkIsolation ? union([_peSubnetId, _caEnvSubnetId], [_applicationPeSubnetId]) : []
     tags: _tags
   }
   dependsOn: [
@@ -3049,12 +3067,17 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if
 //////////////////////////////////////////////////////////////////////////
 
 //Search Service User Managed Identity
-resource searchServiceUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deploySearchService) {
-  name: '${const.abbrs.security.managedIdentity}${resourceNames.searchServiceName}'
-  location: _searchServiceLocation
+module searchServiceUAI 'modules/security/managed-identity.bicep' = if (_useUAI && deploySearchService) {
+  scope: resourceGroup(_foundryResourceGroupName)
+  name: 'searchServiceIdentityDeployment'
+  params: {
+    name: '${const.abbrs.security.managedIdentity}${resourceNames.searchServiceName}'
+    location: _searchServiceLocation
+  }
 }
 
 module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (deploySearchService) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'searchService'
   params: {
     name: resourceNames.searchServiceName
@@ -3079,7 +3102,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
       #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [searchServiceUAI.id] : []
+      userAssignedResourceIds: _useUAI ? [searchServiceUAI.outputs.resourceId] : []
     }
 
     disableLocalAuth: false
@@ -3109,10 +3132,6 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     containerEnv!
     storageAccount!
   ]
-}
-
-resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' existing = if (deploySearchService) {
-  name: resourceNames.searchServiceName
 }
 
 // Search shared private-link names are limited to 60 characters. The plain,
@@ -3160,7 +3179,7 @@ var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearch
 var searchFoundrySharedPrivateLinkReadinessManifest = [for spl in searchFoundrySharedPrivateLinkResources: {
   name: spl.name
   groupId: spl.groupId
-  privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', resourceNames.aiFoundryAccountName)
+  privateLinkResourceId: resourceId(subscription().subscriptionId, _foundryResourceGroupName, 'Microsoft.CognitiveServices/accounts', resourceNames.aiFoundryAccountName)
 }]
 
 var searchSharedPrivateLinkReadinessManifest = (_networkIsolation && deploySearchService)
@@ -3169,31 +3188,30 @@ var searchSharedPrivateLinkReadinessManifest = (_networkIsolation && deploySearc
         ? [{
             name: 'spl-${resourceNames.searchServiceName}-blob-0'
             groupId: 'blob'
-            privateLinkResourceId: resourceId('Microsoft.Storage/storageAccounts', resourceNames.storageAccountName)
+            privateLinkResourceId: resourceId(subscription().subscriptionId, _foundryResourceGroupName, 'Microsoft.Storage/storageAccounts', resourceNames.storageAccountName)
           }]
         : [],
       searchFoundrySharedPrivateLinkReadinessManifest
     )
   : []
 
-@batchSize(1)
-resource searchFoundrySharedPrivateLinks 'Microsoft.Search/searchServices/sharedPrivateLinkResources@2025-05-01' = [for spl in searchFoundrySharedPrivateLinkResources: {
-  parent: searchServiceResource
-  name: spl.name
-  properties: {
-    groupId: spl.groupId
-    privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', resourceNames.aiFoundryAccountName)
-    requestMessage: spl.requestMessage
+module searchFoundrySharedPrivateLinks 'modules/ai-foundry/search-shared-private-links.bicep' = if (!empty(searchFoundrySharedPrivateLinkResources)) {
+  scope: resourceGroup(_foundryResourceGroupName)
+  name: 'searchFoundrySharedPrivateLinksDeployment'
+  params: {
+    searchServiceName: resourceNames.searchServiceName
+    foundryAccountResourceId: aiFoundryAccountResourceId
+    links: searchFoundrySharedPrivateLinkResources
   }
   dependsOn: [
-    aiFoundry
     searchService
   ]
-}]
+}
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
 module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (_deployAiFoundrySearch) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'searchServiceAIFoundry'
   params: {
     name: resourceNames.aiFoundrySearchServiceName
@@ -3249,6 +3267,7 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
 // pattern) so it routes through the same `privateEndpoints` aggregator
 // module and reuses the existing private DNS zone — no duplicate zone.
 module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if (deploySpeechService) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'speechService'
   params: {
     name: resourceNames.speechServiceName
@@ -3292,6 +3311,7 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
 
 // Storage Account
 module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (deployStorageAccount) {
+  scope: resourceGroup(_foundryResourceGroupName)
   name: 'storageAccountSolution'
   params: {
     name: resourceNames.storageAccountName
@@ -3327,6 +3347,11 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
     }
   }
 }
+
+var _documentsContainers = filter(storageAccountContainersList, container => container.?canonical_name == 'DOCUMENTS_STORAGE_CONTAINER')
+var _documentsContainerResourceId = deployStorageAccount && length(_documentsContainers) == 1
+  ? '${storageAccount!.outputs.resourceId}/blobServices/default/containers/${_documentsContainers[0].name}'
+  : ''
 
 //////////////////////////////////////////////////////////////////////////
 // ROLE ASSIGNMENTS
@@ -3601,7 +3626,7 @@ var _crossServiceRoleAssignments = concat(
   (deployAiFoundry && deploySearchService) ? [
     {
       #disable-next-line BCP318
-      principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+      principalId: (_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
       resourceId: aiFoundryAccountResourceId
       principalType: 'ServicePrincipal'
@@ -3611,7 +3636,7 @@ var _crossServiceRoleAssignments = concat(
   (deployStorageAccount && deploySearchService) ? [
     {
       #disable-next-line BCP318
-      principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+      principalId: (_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataReader.guid)
       #disable-next-line BCP318
       resourceId: storageAccount.outputs.resourceId
@@ -3881,6 +3906,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'AZURE_TENANT_ID',     value: tenant().tenantId,                      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SUBSCRIPTION_ID',     value: subscription().subscriptionId,          label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name,                  label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AZURE_FOUNDRY_RESOURCE_GROUP', value: _foundryResourceGroupName, label: 'agent-lz', contentType: 'text/plain' }
+      { name: 'AZURE_NETWORK_RESOURCE_GROUP', value: _networkResourceGroupName, label: 'agent-lz', contentType: 'text/plain' }
       { name: 'LOCATION',            value: location,                               label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENVIRONMENT_NAME',    value: environmentName,                        label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOYMENT_NAME',     value: deployment().name,                      label: appConfigLabel, contentType: 'text/plain' }
@@ -3920,6 +3947,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_ACCOUNT_RESOURCE_ID', value: deployStorageAccount ? storageAccount.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID', value: _documentsContainerResourceId, label: 'agent-lz', contentType: 'text/plain' }
       { name: 'APP_INSIGHTS_RESOURCE_ID', value: _appInsightsResourceId, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'LOG_ANALYTICS_RESOURCE_ID', value: _lawResourceId, label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
@@ -3928,7 +3956,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'AI_FOUNDRY_PROJECT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryProjectResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       // { name: 'AI_FOUNDRY_PROJECT_WORKSPACE_ID', value: (deployAiFoundry) ? aiFoundryFormatProjectWorkspaceId!.outputs.projectWorkspaceIdGuid : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.id : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_RESOURCE_ID', value: deploySearchService ? searchService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SEARCH_SHARED_PRIVATE_LINKS', value: string(searchSharedPrivateLinkReadinessManifest), label: appConfigLabel, contentType: 'application/json' }
@@ -3991,7 +4019,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       #disable-next-line BCP318
       { name: 'CONTAINER_ENV_PRINCIPAL_ID', value: deployContainerEnv ? ((_useUAI) ? containerEnvUAI.properties.principalId : (containerEnv.?identity.?principalId ?? '')) : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'SEARCH_SERVICE_PRINCIPAL_ID', value: deploySearchService ? ((_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SERVICE_PRINCIPAL_ID', value: deploySearchService ? ((_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Container Apps List & Model Deployments ────────────────────────────
       #disable-next-line BCP318
@@ -4017,6 +4045,13 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 output TENANT_ID string = tenant().tenantId
 output SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
+
+@description('Effective Foundry and grounding resource group.')
+output AZURE_FOUNDRY_RESOURCE_GROUP string = _foundryResourceGroupName
+
+@description('Effective locally owned networking resource group; explicit BYO resources retain their actual IDs.')
+output AZURE_NETWORK_RESOURCE_GROUP string = _networkResourceGroupName
+
 output LOCATION string = location
 output ENVIRONMENT_NAME string = environmentName
 output DEPLOYMENT_NAME string = deployment().name

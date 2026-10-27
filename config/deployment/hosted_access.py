@@ -23,6 +23,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from config.continuity.settings import FOUNDRY_TOKEN_AUDIENCE
 from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, DeploymentMode, resolve_mode
+from config.deployment.resource_groups import resource_group_for
 from util.azure_cli import resolve_az_command
 
 
@@ -72,7 +73,7 @@ class Role(str, Enum):
 
 GUID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
 NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
-ARM_PREFIX = rf"/subscriptions/({GUID})/resourceGroups/({NAME})/providers/"
+ARM_PREFIX = rf"/subscriptions/({GUID})/resourceGroups/([^/]+)/providers/"
 RESOURCE_PATHS = {
     Role.CONFIG: rf"Microsoft\.AppConfiguration/configurationStores/{NAME}",
     Role.MODEL: rf"Microsoft\.CognitiveServices/accounts/{NAME}",
@@ -142,9 +143,22 @@ def _endpoint(value: object, suffix: str, path: str = r"/?") -> str:
     return f"https://{parsed.hostname}{parsed.path}".rstrip("/")
 
 
-def _bound_scope(scope: str, path: str, subscription: str, group: str) -> None:
+def _scope_match(scope: str, path: str) -> re.Match[str]:
     match = re.fullmatch(ARM_PREFIX + path, scope, re.IGNORECASE)
-    if not match or not _same(match[1], subscription) or not _same(match[2], group):
+    if not match:
+        raise AccessError("Resource scope is not an exact resource in the declared subscription/resource group.")
+    try:
+        group = resource_group_for({"AZURE_RESOURCE_GROUP": match[2]}, "application")
+    except ValueError as error:
+        raise AccessError("Resource scope has an invalid Azure resource-group name.") from error
+    if group != match[2]:
+        raise AccessError("Resource scope has an invalid Azure resource-group name.")
+    return match
+
+
+def _bound_scope(scope: str, path: str, subscription: str, group: str) -> None:
+    match = _scope_match(scope, path)
+    if not _same(match[1], subscription) or not _same(match[2], group):
         raise AccessError("Resource scope is not an exact resource in the declared subscription/resource group.")
 
 
@@ -154,10 +168,9 @@ class Grant:
     scope: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.role, Role) or not re.fullmatch(
-            ARM_PREFIX + RESOURCE_PATHS[self.role], self.scope, re.IGNORECASE
-        ):
+        if not isinstance(self.role, Role):
             raise AccessError("Grant is outside the closed runtime role/scope allowlist.")
+        _scope_match(self.scope, RESOURCE_PATHS[self.role])
 
     def assignment_name(self, principal: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"{self.scope.lower()}|{principal.lower()}|{self.role.value}"))
@@ -173,6 +186,7 @@ class AccessPlan:
     grants: tuple[Grant, ...] = ()
     audit: str = "not-configured"
     classic: bool = False
+    foundry_resource_group: str = ""
 
     def validate(self) -> None:
         if self.classic:
@@ -190,7 +204,11 @@ class AccessPlan:
         if len(set(roles)) != len(roles) or set(roles) != expected:
             raise AccessError("Incomplete or duplicate runtime role plan.")
         for grant in self.grants:
-            _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, self.resource_group)
+            group = (
+                self.foundry_resource_group or self.resource_group
+                if grant.role is Role.MODEL else self.resource_group
+            )
+            _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, group)
 
 
 def run_az(arguments: list[str]) -> object:
@@ -301,9 +319,10 @@ def discover_instance(
 ) -> HostedInstance:
     """Resolve a live routed identity bound to the declared Foundry project."""
     sub = _guid(environment.get("AZURE_SUBSCRIPTION_ID"))
-    group = _string(environment.get("AZURE_RESOURCE_GROUP"))
-    if not re.fullmatch(NAME, group):
-        raise AccessError("Invalid declared resource group.")
+    try:
+        group = resource_group_for(environment, "foundry")
+    except ValueError as error:
+        raise AccessError(str(error)) from error
     handoff = _object(_json(environment["HOSTED_AGENT_DEPLOYMENT"])) if environment.get("HOSTED_AGENT_DEPLOYMENT") else {}
     foundry = _object(handoff["foundry"]) if handoff.get("foundry") is not None else {}
     agent = _object(handoff["agent"]) if handoff.get("agent") is not None else {}
@@ -360,10 +379,11 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     if resolve_mode(environment) is DeploymentMode.CLASSIC:
         return AccessPlan(classic=True)
     instance = discover_instance(environment, run=run)
-    sub, group, principal, name, version = (
+    sub, foundry_group, principal, name, version = (
         instance.subscription, instance.resource_group, instance.principal_id,
         instance.agent_name, instance.agent_version,
     )
+    group = resource_group_for(environment, "application")
     config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io")
     store_name = urlsplit(config_endpoint).hostname.split(".")[0]
     prefix = f"/subscriptions/{sub}/resourceGroups/{group}/providers/"
@@ -373,11 +393,17 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         raise AccessError("App Configuration endpoint/ARM scope mismatch.")
     if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(_config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP"), group):
         raise AccessError("Configuration store belongs to a different deployment scope.")
+    configured_foundry = _setting(run, config_endpoint, "AZURE_FOUNDRY_RESOURCE_GROUP")
+    configured_group = (
+        _string(configured_foundry.get("value")) if configured_foundry else group
+    )
+    if not _same(configured_group, foundry_group):
+        raise AccessError("Configuration store belongs to a different Foundry destination.")
     model_name = _config_value(run, config_endpoint, "AI_FOUNDRY_ACCOUNT_NAME")
     if not re.fullmatch(NAME, model_name):
         raise AccessError("Invalid configured model account name.")
-    model_id = prefix + f"Microsoft.CognitiveServices/accounts/{model_name}"
-    model = _account_metadata(run, model_id, sub, group)
+    model_id = f"/subscriptions/{sub}/resourceGroups/{foundry_group}/providers/Microsoft.CognitiveServices/accounts/{model_name}"
+    model = _account_metadata(run, model_id, sub, foundry_group)
     if not _same(model.get("id"), model_id) or model.get("kind") not in {"AIServices", "OpenAI"}:
         raise AccessError("Configured model account identity/type mismatch.")
     grants = [Grant(Role.CONFIG, store_id), Grant(Role.MODEL, model_id)]
@@ -400,7 +426,11 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         if not _same(vault.get("id"), vault_id) or _endpoint(properties.get("vaultUri"), ".vault.azure.net") != vault_endpoint or properties.get("enableRbacAuthorization") is not True:
             raise AccessError("Audit vault ARM endpoint/scope or RBAC authorization mismatch.")
         grants.append(Grant(Role.SECRET, f"{vault_id}/secrets/{urlsplit(uri).path.split('/')[2]}"))
-    plan = AccessPlan(sub, group, principal, name, version, tuple(grants), "configured" if audit else "not-configured")
+    plan = AccessPlan(
+        sub, group, principal, name, version, tuple(grants),
+        "configured" if audit else "not-configured",
+        foundry_resource_group=foundry_group,
+    )
     plan.validate()
     return plan
 

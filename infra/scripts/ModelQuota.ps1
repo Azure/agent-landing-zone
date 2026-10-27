@@ -1,9 +1,21 @@
+function Get-FoundryResourceGroup {
+    param(
+        [AllowNull()][string]$ApplicationResourceGroup,
+        [AllowNull()][string]$FoundryResourceGroup
+    )
+    if (-not [string]::IsNullOrWhiteSpace($FoundryResourceGroup)) {
+        return $FoundryResourceGroup.Trim()
+    }
+    return ([string]$ApplicationResourceGroup).Trim()
+}
+
 function Get-ExistingModelDeployments {
     param(
         [Parameter(Mandatory = $true)][string]$Location,
         [AllowEmptyString()][string]$SubscriptionId,
         [AllowEmptyString()][string]$ProjectResourceId = $env:AZURE_AI_PROJECT_RESOURCE_ID,
-        [AllowEmptyString()][string]$ResourceGroup = $env:AZURE_RESOURCE_GROUP,
+        [AllowEmptyString()][string]$ResourceGroup = (Get-FoundryResourceGroup `
+            -ApplicationResourceGroup $env:AZURE_RESOURCE_GROUP -FoundryResourceGroup $env:AZURE_FOUNDRY_RESOURCE_GROUP),
         [Parameter(Mandatory = $true)][scriptblock]$ReadAzureJson,
         [Parameter(Mandatory = $true)][scriptblock]$OnWarning
     )

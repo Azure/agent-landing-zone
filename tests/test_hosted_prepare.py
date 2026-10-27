@@ -44,6 +44,24 @@ def hosted_environment(**overrides: str) -> dict[str, str]:
 
 
 class PrepareEnvironmentTests(unittest.TestCase):
+    @patch("config.deployment.hosted_prepare.resolve_az_command", return_value="az")
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image", return_value=NEW_DIGEST)
+    def test_foundry_split_never_moves_acr_builds_and_declared_registry_id_wins(self, prepare, resolve):
+        subscription = "11111111-1111-1111-1111-111111111111"
+        for declared, expected in (("", "rg-test"), (
+            f"/subscriptions/{subscription}/resourceGroups/rg-registry/providers/Microsoft.ContainerRegistry/registries/registry",
+            "rg-registry",
+        )):
+            environment = hosted_environment(
+                AZURE_SUBSCRIPTION_ID=subscription,
+                AZURE_FOUNDRY_RESOURCE_GROUP="rg-foundry",
+                AZURE_NETWORK_RESOURCE_GROUP="rg-network",
+                AZURE_CONTAINER_REGISTRY_RESOURCE_ID=declared,
+            )
+            with self.subTest(declared=bool(declared)):
+                prepare_environment(environment, MANIFEST)
+                self.assertEqual(expected, prepare.call_args.kwargs["resource_group"])
+
     @patch("config.deployment.hosted_prepare.prepare_hosted_image")
     def test_classic_topology_is_a_no_build_noop(
         self, mock_prepare: MagicMock

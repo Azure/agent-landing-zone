@@ -1,5 +1,6 @@
 <# Read-only mocked operator authorization with no implicit role grants. #>
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\..\scripts\ModelQuota.ps1')
 $source = Get-Content (Join-Path $PSScriptRoot '../../scripts/Invoke-PreflightChecks.ps1') -Raw
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
@@ -11,6 +12,7 @@ function Get-AzdEnvValues {
     return @{
         AZURE_SUBSCRIPTION_ID = 'sub-test'
         AZURE_RESOURCE_GROUP = 'rg-test'
+        AZURE_FOUNDRY_RESOURCE_GROUP = $script:FoundryGroup
         AZURE_AI_PROJECT_RESOURCE_ID = $script:ProjectId
     }
 }
@@ -29,6 +31,7 @@ function Assert-Finding([string]$Code) {
 }
 $operator = 'operator-test'
 $script:ProjectId = '/subscriptions/sub-test/resourceGroups/rg-test/providers/Microsoft.CognitiveServices/accounts/account/projects/project'
+$script:FoundryGroup = ''
 $parameters = @{
     prepareHostedAgent = $true; deployHostedAgent = $false
     grantHostedAgentProjectManager = $false; deployAiFoundry = $true
@@ -72,3 +75,26 @@ $script:Findings = [System.Collections.Generic.List[pscustomobject]]::new()
 Test-HostedAgentConfiguration -P $parameters
 Assert-Finding 'HOSTED_OPERATOR_ACCESS_REQUIRED'
 Write-Host 'PASS new foundation without existing management authorization fails explicitly.'
+
+$script:Permissions = @(@{ actions = @('*'); notActions = @(); dataActions = @('Microsoft.CognitiveServices/*'); notDataActions = @() })
+$oldAmbientFoundry = $env:AZURE_FOUNDRY_RESOURCE_GROUP
+try {
+    $env:AZURE_FOUNDRY_RESOURCE_GROUP = 'stale-ambient-group'
+    foreach ($case in @(
+        @{ Name = 'split Foundry'; Group = 'rg-foundry'; ProjectGroup = 'rg-foundry'; Expected = 'HOSTED_OPERATOR_ACCESS_VERIFIED' },
+        @{ Name = 'wrong application group'; Group = 'rg-foundry'; ProjectGroup = 'rg-test'; Expected = 'HOSTED_OPERATOR_SCOPE_REQUIRED' },
+        @{ Name = 'whitespace fallback'; Group = '  '; ProjectGroup = 'rg-test'; Expected = 'HOSTED_OPERATOR_ACCESS_VERIFIED' }
+    )) {
+        $script:FoundryGroup = $case.Group
+        $script:ProjectId = "/subscriptions/sub-test/resourceGroups/$($case.ProjectGroup)/providers/Microsoft.CognitiveServices/accounts/account/projects/project"
+        $script:Findings = [System.Collections.Generic.List[pscustomobject]]::new()
+        $script:RoleCalls = 0
+        Test-HostedAgentConfiguration -P $parameters
+        Assert-Finding $case.Expected
+        if ($case.Expected -eq 'HOSTED_OPERATOR_SCOPE_REQUIRED' -and $script:RoleCalls) {
+            throw 'Wrong-group project must fail before Azure role inventory.'
+        }
+        Write-Host "PASS selected-environment operator scope: $($case.Name)"
+    }
+}
+finally { $env:AZURE_FOUNDRY_RESOURCE_GROUP = $oldAmbientFoundry }

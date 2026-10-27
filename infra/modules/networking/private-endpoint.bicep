@@ -3,6 +3,8 @@ targetScope = 'resourceGroup'
 param name string
 param location string
 param resourceGroupName string
+@description('Actual subscription of the private endpoint.')
+param subscriptionId string = subscription().subscriptionId
 param tags object
 param subnetResourceId string
 param privateLinkServiceConnections array = []
@@ -10,7 +12,7 @@ param privateDnsZoneGroup object?
 param prefix string = 'nic-'
 
 module privateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if (privateDnsZoneGroup != null) {
-  scope: resourceGroup(resourceGroupName)
+  scope: resourceGroup(subscriptionId, resourceGroupName)
   params: {
     name: name
     location: location
@@ -23,7 +25,7 @@ module privateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if 
 }
 
 module privateEndpointWithoutDns 'br/public:avm/res/network/private-endpoint:0.11.0' = if (privateDnsZoneGroup == null) {
-  scope: resourceGroup(resourceGroupName)
+  scope: resourceGroup(subscriptionId, resourceGroupName)
   params: {
     name: name
     location: location
