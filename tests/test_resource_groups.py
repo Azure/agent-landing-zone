@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -17,6 +18,28 @@ from config.deployment import resource_groups as rg
 ROOT = Path(__file__).resolve().parents[1]
 SUBSCRIPTION = "11111111-1111-1111-1111-111111111111"
 OTHER_SUBSCRIPTION = "22222222-2222-2222-2222-222222222222"
+
+
+class BootstrapDependencyTests(unittest.TestCase):
+    def test_resource_group_cli_bootstraps_without_validation_packages(self) -> None:
+        script = (
+            "import runpy, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "sys.argv = ['config.deployment.resource_groups', '--help']\n"
+            "try:\n"
+            "    runpy.run_module('config.deployment.resource_groups', run_name='__main__')\n"
+            "except SystemExit as error:\n"
+            "    if error.code != 0:\n"
+            "        raise\n"
+            "assert 'yaml' not in sys.modules\n"
+            "assert 'jsonschema' not in sys.modules\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script, str(ROOT)],
+            cwd=ROOT, capture_output=True, text=True, timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--bind-only", result.stdout)
 
 
 class ScratchTest(unittest.TestCase):
@@ -159,6 +182,13 @@ class BootstrapTests(ScratchTest):
         before_env = self.env_file.read_bytes()
         def azure(arguments: list[str]) -> tuple[int, str, str]:
             if arguments[:2] == ["resource", "list"]:
+                self.assertNotIn("--tag", arguments)
+                self.assertEqual(
+                    "rg-app", arguments[arguments.index("--resource-group") + 1]
+                )
+                self.assertEqual(
+                    SUBSCRIPTION, arguments[arguments.index("--subscription") + 1]
+                )
                 return 0, "[]", ""
             self.assertEqual(["group", "exists"], arguments[:2])
             return 0, "true", ""
@@ -175,6 +205,71 @@ class BootstrapTests(ScratchTest):
             self.assertEqual(before, state.read_bytes())
             self.assertEqual(before_time, state.stat().st_mtime_ns)
         self.assertEqual(before_env, self.env_file.read_bytes())
+
+    def test_legacy_inventory_filters_tags_without_widening_resource_scope(self) -> None:
+        selection = rg.resolve_resource_groups(self.environment)
+        for resources, expected in (
+            ([], False),
+            ([{"tags": None}], False),
+            ([{"id": "untagged-resource"}], False),
+            ([{"tags": {"azd-env-name": "another-environment"}}], False),
+            ([{"tags": {"azd-env-name": "OFFLINE"}}], False),
+            ([{"tags": {"azd-env-name": "offline"}}], True),
+            ([{"tags": {"AZD-ENV-NAME": "offline"}}], True),
+        ):
+            with self.subTest(resources=resources), patch.object(
+                rg, "_run_az", return_value=(0, json.dumps(resources), "")
+            ) as run:
+                self.assertEqual(
+                    expected,
+                    rg._legacy_deployed(
+                        self.environment, self.env_file, selection, "offline",
+                        check_inventory=True,
+                    ),
+                )
+                run.assert_called_once_with([
+                    "resource", "list", "--resource-group", "rg-app",
+                    "--subscription", SUBSCRIPTION,
+                    "--output", "json", "--only-show-errors",
+                ])
+
+    def test_legacy_inventory_malformed_or_inaccessible_fails_closed(self) -> None:
+        selection = rg.resolve_resource_groups(self.environment)
+        for response in (
+            (0, "not-json", ""),
+            (0, "{}", ""),
+            (0, "[null]", ""),
+            (0, '[{"tags": []}]', ""),
+            (0, '[{"tags": "invalid"}]', ""),
+            (0, '[{"tags": {"azd-env-name": 42}}]', ""),
+            (1, "", "ERROR: (AuthorizationFailed) forbidden"),
+        ):
+            with self.subTest(response=response), patch.object(
+                rg, "_run_az", return_value=response
+            ) as run:
+                with self.assertRaises(rg.ResourceGroupError):
+                    rg._legacy_deployed(
+                        self.environment, self.env_file, selection, "offline",
+                        check_inventory=True,
+                    )
+                self.assertEqual(1, run.call_count)
+                self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
+
+    def test_tagged_legacy_resources_still_reject_split_adoption_before_writes(self) -> None:
+        self.environment["AZURE_FOUNDRY_RESOURCE_GROUP"] = "rg-ai"
+
+        def azure(arguments: list[str]) -> tuple[int, str, str]:
+            if arguments[:2] == ["resource", "list"]:
+                return 0, '[{"tags": {"azd-env-name": "offline"}}]', ""
+            self.assertEqual(["group", "exists"], arguments[:2])
+            return 0, "true", ""
+
+        with patch.object(rg, "_run_az", side_effect=azure):
+            with self.assertRaisesRegex(
+                rg.ResourceGroupError, "existing deployment without a resource-group binding"
+            ):
+                self.prepare()
+        self.assertFalse(rg.binding_path(self.azure_dir, "offline").exists())
 
     def test_missing_false_checks_all_destinations_without_any_writes(self) -> None:
         self.environment.update(
@@ -352,7 +447,8 @@ class BootstrapTests(ScratchTest):
             run.assert_not_called()
         self.environment.pop("APP_CONFIG_ENDPOINT")
         with patch.object(rg, "_run_az", side_effect=[
-            (0, "true", ""), (0, "true", ""), (0, '[{"id":"previous-resource"}]', ""),
+            (0, "true", ""), (0, "true", ""),
+            (0, '[{"id":"previous-resource","tags":{"azd-env-name":"offline"}}]', ""),
         ]):
             with self.assertRaisesRegex(rg.ResourceGroupError, "existing deployment"):
                 self.prepare()
