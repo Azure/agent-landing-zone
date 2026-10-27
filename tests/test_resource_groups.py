@@ -1029,6 +1029,10 @@ class HookTests(ScratchTest):
                 )
         self.assertIsInstance(parameters["vnetAddressPrefixes"]["value"], list)
         self.assertTrue(parameters["vnetAddressPrefixes"]["value"])
+        self.assertEqual(
+            {"value": "${DEPLOY_SUBNETS=true}"},
+            parameters["deploySubnets"],
+        )
 
     def test_composition_preserves_explicit_subnet_overrides_for_both_vnet_paths(self) -> None:
         from config.deployment.composition import compose_parameters

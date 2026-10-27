@@ -224,7 +224,7 @@
     "vmSize":                                { "value": "${VM_SIZE=Standard_D2s_v3}" },
 
     "useExistingVNet":                       { "value": "${USE_EXISTING_VNET}" },  
-    "deploySubnets":                         { "value": "${DEPLOY_SUBNETS}" },  
+    "deploySubnets":                         { "value": "${DEPLOY_SUBNETS=true}" },
     "sideBySideDeploy":                      { "value": "${SIDE_BY_SIDE}" }, 
     "existingVnetResourceId":                { "value": "${EXISTING_VNET_RESOURCE_ID}" },
     "policyManagedPrivateDns":               { "value": "${POLICY_MANAGED_PRIVATE_DNS=false}" },
