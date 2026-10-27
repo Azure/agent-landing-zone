@@ -58,6 +58,13 @@ elif [ "$network_exit" -ne 0 ]; then
 fi
 
 #-------------------------------------------------------------------------------
+# BEGIN component runtime egress
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.egress --apply) || {
+  echo "Component egress reconciliation failed; application configuration has not started." >&2
+  exit 1
+}
+# END component runtime egress
+
 # Container APP API Keys Warning
 #-------------------------------------------------------------------------------
 echo

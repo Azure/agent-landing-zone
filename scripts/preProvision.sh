@@ -187,6 +187,13 @@ if [ $COMPOSE_EXIT -ne 0 ]; then
     exit $COMPOSE_EXIT
 fi
 
+# BEGIN component runtime egress
+(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.egress --plan --save) || {
+    echo "Component egress planning failed; provisioning has not started." >&2
+    exit 1
+}
+# END component runtime egress
+
 # The composed infra/main.parameters.json is environment-specific; hide local
 # regeneration from git status so the committed seed stays untouched.
 if command -v git >/dev/null 2>&1 &&

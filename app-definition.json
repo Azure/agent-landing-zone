@@ -10,6 +10,7 @@
       "path": "ui",
       "source": { "commit": "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554" },
       "profiles": ["blob-delegator"],
+      "egress": [],
       "ingress": "external"
     },
     {
@@ -18,6 +19,14 @@
       "path": "orchestrator",
       "source": { "commit": "243e61191a7fdc5f1cf92f2ac47b779d58be3fa3" },
       "profiles": ["model-user", "retrieval-reader", "conversation-store"],
+      "egress": [
+        {
+          "fqdn": "openaipublic.blob.core.windows.net",
+          "protocol": "https",
+          "port": 443,
+          "purpose": "Download tiktoken encoding assets when the runtime cache is empty."
+        }
+      ],
       "ingress": "external"
     },
     {
@@ -26,6 +35,14 @@
       "path": "ingestion",
       "source": { "commit": "833aa54f2b12db342b84f96e8873b111ad980754" },
       "profiles": ["model-user", "conversation-store", "ingestion-writer"],
+      "egress": [
+        {
+          "fqdn": "openaipublic.blob.core.windows.net",
+          "protocol": "https",
+          "port": 443,
+          "purpose": "Download tiktoken encoding assets for chunking and token estimation when the runtime cache is empty."
+        }
+      ],
       "ingress": "external",
       "resources": { "cpu": 1.0, "memory": "3.0Gi" }
     }

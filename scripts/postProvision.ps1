@@ -58,6 +58,11 @@ if ($networkExitCode -ne 0) {
 }
 
 #-------------------------------------------------------------------------------
+# BEGIN component runtime egress
+& python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.egress', '--apply']; runpy.run_module('config.deployment.egress', run_name='__main__')"
+if ($LASTEXITCODE -ne 0) { Write-Error "Component egress reconciliation failed; application configuration has not started."; exit $LASTEXITCODE }
+# END component runtime egress
+
 # Container APP API Keys Warning
 #-------------------------------------------------------------------------------
 Write-Host ""

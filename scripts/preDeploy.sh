@@ -166,6 +166,7 @@ fi
 app_definition_dir="$(cd "$(dirname "$app_definition_path")" && pwd -P)"
 definition_id="$(jq -er '.id' "$app_definition_path")" || { red "Application definition has no id."; exit 1; }
 
+
 # Echo the manifest component name that a definition component maps to.
 manifest_component_for() {
   jq -r --arg n "$1" '[.components[].name | select(. == $n or endswith("-" + $n))][0] // empty' "$manifest_path"
@@ -211,6 +212,13 @@ python3 -m config.deployment.private_network --stage pre-deploy || {
   red "Private deployment prerequisites failed. Use a VPN/VNet-connected host; RUN_FROM_JUMPBOX is not a connectivity bypass."
   exit "$network_exit"
 }
+
+# BEGIN component runtime egress
+(cd "$repo_root" && python3 -m config.deployment.egress --apply) || {
+  red "Component egress reconciliation failed; application deployment has not started."
+  exit 1
+}
+# END component runtime egress
 
 # Under network isolation the registry has no public access, so ACR Task builds
 # only work through the in-VNet agent pool (#741). Fail before touching any app.

@@ -183,6 +183,11 @@ try {
     Pop-Location
 }
 
+# BEGIN component runtime egress
+Invoke-PythonModule -ModuleName 'config.deployment.egress' -Arguments @('--plan', '--save')
+if ($LASTEXITCODE -ne 0) { Write-Error "Component egress planning failed; provisioning has not started."; exit $LASTEXITCODE }
+# END component runtime egress
+
 # The composed infra/main.parameters.json is environment-specific; hide local
 # regeneration from git status so the committed seed stays untouched.
 if (Get-Command git -ErrorAction SilentlyContinue) {
