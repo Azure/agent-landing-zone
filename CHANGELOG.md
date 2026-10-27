@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v5.1.0] - 2026-10-27
 
 ### Added
 - Add optional per-component runtime egress declarations, an offline review
@@ -10,6 +10,27 @@
   no firewall operations.
 - Declare the orchestrator and ingestion cold-cache tiktoken dependency;
   the UI declares no additional runtime egress.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.2 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Focused application, lifecycle, schema, selection and policy reconciliation
+  suites: 216 passed, 3 skipped and 220 subtests passed. Both hook variants and
+  actual compiled foundation rule-group priorities are covered.
+- All 16 offline foundation entrypoints pass. Final projection checks reject
+  25 mutations while retaining the original protected fingerprints and the
+  closed platform-outputs v1 schema.
+- Real cold-cache tokenizer initialization passes separately with the pinned
+  ingestion tiktoken 0.7.0 and orchestrator tiktoken 0.14.0, downloading both
+  encoding assets from the declared HTTPS host.
+- Strict central documentation build, agent asset validation and published
+  runtime tag/commit checks pass.
 
 ## [v5.0.0] - 2026-10-27
 
