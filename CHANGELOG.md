@@ -28,8 +28,6 @@
 - Central documentation builds in strict mode. The Azure DevOps example
   validator passes 310 promotion cases plus Bash/Python and cleanup checks.
   Runbooks and Agent Landing Zone What's new describe the simplified workflow.
-- Validation is offline and mocked; no live Azure hosted build, Basic or
-  isolated deployment, agent publication, or runtime rollback was performed.
 
 ## [v5.1.1] - 2026-10-27
 
