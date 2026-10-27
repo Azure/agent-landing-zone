@@ -35,6 +35,17 @@ try {
         @{ Name = 'egress source wildcard'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.subnets.containerapp = '*' } },
         @{ Name = 'egress isolation gate removed'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.networkIsolation = $true } },
         @{ Name = 'egress extra selector'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.subnets.unexpected = '*' } },
+        @{ Name = 'shared PE selector restored'; Change = { param($t) $t.variables._separateApplicationPeSubnet = "[not(empty(parameters('applicationPeSubnetName')))]" } },
+        @{ Name = 'application creation flag default disabled'; Change = { param($t) $t.parameters.deployApplicationPeSubnet.defaultValue = $false } },
+        @{ Name = 'application PE name default empty'; Change = { param($t) $t.parameters.applicationPeSubnetName.defaultValue = '' } },
+        @{ Name = 'application PE fallback restored'; Change = { param($t) $t.resources.privateEndpoints.properties.parameters.endpoints.value = $t.resources.privateEndpoints.properties.parameters.endpoints.value.Replace("parameters('applicationPeSubnetName')", "parameters('peSubnetName')") } },
+        @{ Name = 'GatewaySubnet removed from generic NSG exclusions'; Change = { param($t) $t.resources.virtualNetworkSubnets.properties.template.variables.invalidNsgSubnets = @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet') } },
+        @{ Name = 'AI Gateway outbound HTTPS rule widened'; Change = { param($t) $t.resources.aiGatewayNsg.properties.template.resources[0].properties.securityRules[0].properties.destinationPortRange = '*' } },
+        @{ Name = 'Power Platform delegation changed'; Change = { param($t) $t.variables.subnetDefinitions[10].delegation = 'Microsoft.Web/serverFarms' } },
+        @{ Name = 'Cosmos PE ACL subnet prerequisite lost'; Change = { param($t) $t.variables.subnetDefinitions[1].required = "[parameters('deployAiFoundry')]" } },
+        @{ Name = 'Cosmos ACA ACL subnet prerequisite lost'; Change = { param($t) $t.variables.subnetDefinitions[7].required = "[parameters('deployContainerEnv')]" } },
+        @{ Name = 'unreviewed subnet definition injected'; Change = { param($t) $t.variables.subnetDefinitions += @{ purpose = 'unexpected'; create = $true } } },
+        @{ Name = 'new VNet ownership projection drift'; Change = { param($t) $t.resources.virtualNetwork.properties.parameters.subnets.value = @() } },
         @{ Name = 'wrong Foundry scope'; Change = { param($t) $t.resources.aiFoundry.resourceGroup = 'wrong-group' } },
         @{ Name = 'wrong network scope'; Change = { param($t) $t.resources.virtualNetwork.resourceGroup = 'wrong-group' } },
         @{ Name = 'grounding Storage moved to app'; Change = { param($t) $t.resources.storageAccount.resourceGroup = '[resourceGroup().name]' } },
@@ -78,7 +89,48 @@ try {
         if (-not $caught) { throw "Normalizer swallowed $($case.Name)." }
         Write-Host "PASS rejected $($case.Name)"
     }
-    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) rejected mutations; original fingerprints unchanged."
+
+    # Every deploying value accepted by the subnet adapter gets an independent
+    # rejection test. Unlike testing only the final historical hash, this also
+    # protects new fields which the adapter intentionally removes. Metadata
+    # hashes are the sole non-deploying exception used by the existing engine.
+    function Get-SubnetDeltaPaths($Rule, [object[]]$Path = @()) {
+        switch ($Rule.kind) {
+            { $_ -cin @('added', 'changed') } {
+                if (($Path -join '/') -notlike '*/metadata/_generator/templateHash') {
+                    ,$Path
+                }
+            }
+            { $_ -cin @('object', 'array') } {
+                foreach ($key in $Rule.changes.Keys) {
+                    Get-SubnetDeltaPaths $Rule.changes[$key] ($Path + $key)
+                }
+            }
+        }
+    }
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection))
+    if ($subnetPaths.Count -eq 0) { throw 'Subnet normalization has no exact deploying delta assertions.' }
+    foreach ($path in $subnetPaths) {
+        $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100
+        $parent = $changed
+        foreach ($segment in $path[0..($path.Count - 2)]) {
+            # Assign directly: an if-expression pipeline would unwrap a
+            # singleton resources array before its numeric path segment.
+            if ($parent -is [array]) { $parent = $parent[[int]$segment] }
+            else { $parent = $parent[$segment] }
+        }
+        $key = $path[-1]
+        if ($parent -is [array]) { $key = [int]$key }
+        $parent[$key] = 'unreviewed-subnet-mutation'
+        $caught = $false
+        try { $null = ConvertTo-LegacyResourceGroupGraph $changed }
+        catch {
+            if (-not $_.Exception.Message.StartsWith('SCOPED:')) { throw }
+            $caught = $true
+        }
+        if (-not $caught) { throw "Subnet normalizer swallowed mutation at /$($path -join '/')." }
+    }
+    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) graph and $($subnetPaths.Count) subnet-delta mutations rejected; original fingerprints unchanged."
 }
 finally {
     if (Test-Path $compiled) { Remove-Item -LiteralPath $compiled -Force }

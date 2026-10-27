@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+- Prepare dedicated Power Platform and AI Gateway subnets with the required
+  service delegations. Isolated deployments create all twelve architecture
+  subnets by default, with individual creation switches and configurable
+  names and IPv4 ranges for new and existing virtual networks.
+
+### Changed
+- Use a dedicated application private endpoint subnet by default, independently
+  of the Foundry and grounding private endpoint subnet. Use the reserved
+  `GatewaySubnet` name without NSG, route-table or delegation attachments.
+- Apply global and individual subnet creation ownership consistently to both
+  virtual network paths. Validate enabled consumers, actual existing-network
+  properties, address overlap, delegated-subnet providers and APIM integration
+  NSG requirements before provisioning; do not silently reuse the Foundry subnet.
+- These are defaults for new deployments. Existing occupied subnets and private
+  endpoints are not automatically renamed or migrated; review explicit network
+  inputs and resource dependencies before applying the changed topology.
+
 ## [v5.2.0] - 2026-10-27
 
 ### Changed

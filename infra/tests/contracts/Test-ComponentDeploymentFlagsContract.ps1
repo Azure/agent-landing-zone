@@ -34,6 +34,14 @@ function Test-Contains {
     }
 }
 
+function Test-ExactExpression([string]$Name, [string]$Actual, [string]$Expected) {
+    if ($Actual -cne $Expected) {
+        $failures.Add("$Name -- unsupported compiled expression.") | Out-Null
+        Write-Host "  [FAIL] $Name -- expected $Expected; got $Actual" -ForegroundColor Red
+    }
+    else { Write-Host "  [PASS] $Name" -ForegroundColor Green }
+}
+
 try {
     if (Get-Command az -ErrorAction SilentlyContinue) {
         $env:PYTHONIOENCODING = 'utf-8'
@@ -70,14 +78,9 @@ try {
                 "parameters('deployAppConfig')",
                 "parameters('appRuntimeConfigurationMode')"
             )
-        Test-Contains -Name 'BYO subnet/NSG protection validation expression' `
+        Test-ExactExpression -Name 'BYO subnet/NSG protection evaluates actual selected writes' `
             -Actual ([string]$validation.properties.parameters.existingSubnetNsgAssociationsAreProtected.value) `
-            -Required @(
-                "parameters('networkIsolation')",
-                "parameters('useExistingVNet')",
-                "parameters('deploySubnets')",
-                "parameters('deployNsgs')"
-            )
+            -Expected "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), not(empty(variables('selectedSubnetDefinitions')))), not(parameters('deployNsgs'))))]"
         Test-Contains -Name 'Validation module fail messages' `
             -Actual ([string]$validation.properties.template.outputs.validated.value) `
             -Required @(
@@ -108,13 +111,12 @@ try {
             "parameters('deployAppConfig')",
             "variables('_runtimeConfigIsAppConfig')"
         )
-    Test-Contains -Name 'Defensive existing-subnet update gate' `
+    Test-ExactExpression -Name 'Selected subnet set includes global and isolation precedence' `
+        -Actual ([string]$template.variables.selectedSubnetDefinitions) `
+        -Expected "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]"
+    Test-ExactExpression -Name 'Defensive existing-subnet update gate' `
         -Actual ([string]$template.resources.virtualNetworkSubnets.condition) `
-        -Required @(
-            "parameters('useExistingVNet')",
-            "parameters('deploySubnets')",
-            "parameters('deployNsgs')"
-        )
+        -Expected "[and(and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs')), not(empty(variables('selectedSubnetDefinitions'))))]"
     Test-Contains -Name 'Container Apps private DNS follows environment deployment' `
         -Actual ([string]$template.variables._dnsZonesList) `
         -Required @("and(parameters('deployContainerEnv'), not(variables('_byoZoneContainerApps')))")
