@@ -267,6 +267,26 @@ def test_azure_empty_optional_fields_are_a_noop_not_an_endless_update():
     assert not reconcile(selected, SOURCES, current)["changed"]
 
 
+@pytest.mark.parametrize("owners", [[""], ["malformed"], ["valid-app/web", "valid-app/web"], [1], []])
+def test_malformed_owner_ids_do_not_authorize_rule_removal(owners):
+    selected = plan()
+    current = group(reconcile(selected, SOURCES, None)["properties"])
+    current["properties"]["ruleCollections"][0]["rules"][0]["description"] = (
+        "agent-lz-egress/v1:agent-lz-default:" + canonical(owners)
+    )
+    with pytest.raises(ValueError, match="owners"):
+        reconcile(selected, SOURCES, current)
+
+
+def test_case_insensitive_unowned_rule_name_collision_is_not_adopted():
+    selected = plan()
+    current = group(reconcile(selected, SOURCES, None)["properties"])
+    rule = current["properties"]["ruleCollections"][0]["rules"][0]
+    rule.update(name=rule["name"].upper(), description="Operator-owned exception")
+    with pytest.raises(ValueError, match="name collision"):
+        reconcile(selected, SOURCES, current)
+
+
 def test_managed_apply_is_child_only_scoped_idempotent_and_conditionally_guarded():
     selected = plan()
     client = FakeNetwork()

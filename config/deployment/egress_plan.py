@@ -8,6 +8,7 @@ import hashlib
 import ipaddress
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from config.appdefinition import load_definition, load_selected_definition, validate_definition
@@ -85,8 +86,6 @@ def declaration_plan(
 def _boolean_parameter(
     parameters: Mapping[str, Any], name: str, environment: Mapping[str, str], default: bool,
 ) -> bool:
-    import re
-
     value = parameters.get(name, {}).get("value", default)
     if isinstance(value, str):
         match = re.fullmatch(r"\$\{([A-Z_]+)(?:=([^}]*))?\}", value)
@@ -193,7 +192,9 @@ def reconcile(
         except json.JSONDecodeError as error:
             raise ValueError("Malformed runtime-egress ownership metadata.") from error
         if (not isinstance(owners, list) or not owners or
-                any(not isinstance(owner, str) for owner in owners) or
+                any(not isinstance(owner, str) or not re.fullmatch(
+                    r"[a-z][a-z0-9-]{2,39}/[a-z][a-z0-9-]{1,23}", owner,
+                ) for owner in owners) or
                 len(owners) != len(set(owners))):
             raise ValueError("Malformed runtime-egress owners.")
         old_owned.append({key: value for key, value in rule.items() if key in {
@@ -225,7 +226,7 @@ def reconcile(
                        "owners": [{"component": owner, "purpose": purpose}
                                   for owner, purpose in sorted(owners.items())]})
     new_collection = {**collection, "rules": unrelated + rules}
-    if {rule["name"] for rule in unrelated} & {rule["name"] for rule in rules}:
+    if {rule["name"].lower() for rule in unrelated} & {rule["name"].lower() for rule in rules}:
         raise ValueError("Runtime rule name collision without matching ownership metadata.")
     # Keep an empty owned collection's group but not an invalid empty collection.
     new_collections = []
