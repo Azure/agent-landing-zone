@@ -230,6 +230,7 @@ variables {
   containerRegistryName = "acrtfcompute001"
   vnetName              = "vnet-fixture"
   dbAccountName         = "cosmostfcompute"
+  deployCosmosDb        = true
   containerEnvName      = "cae-mockfixture"
   appConfigName         = "configtfcompute"
   # Short, valid connection names isolate this domain from service naming.

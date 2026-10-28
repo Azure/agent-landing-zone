@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment.composition import compose_parameters
+from config.deployment.composition import compose_parameters, panel_database_containers
 from config.deployment.app_settings import substitute_values
 from config.deployment.provider import resolve_provider
 from config.deployment.resolution import resolve_parameters
@@ -67,6 +67,106 @@ def test_common_resolution_preserves_bicep_composition(topology):
     expected = compose_parameters(source(), environment)["parameters"]
     assert resolved == {key: entry["value"] for key, entry in expected.items()}
     assert original == before
+
+
+@pytest.mark.parametrize("topology,enabled", [
+    ("classic", True), ("hosted-panel", True), ("hosted-no-panel", False),
+])
+@pytest.mark.parametrize("ingestion", ["true", "false"])
+def test_cosmos_is_selected_by_consumers_in_both_providers(topology, enabled, ingestion):
+    environment = {
+        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        "DEPLOY_INGESTION_CONTAINER_APP": ingestion,
+        "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
+    }
+    bicep = compose_parameters(source(), environment)["parameters"]
+    terraform = compose_inputs(values(), environment)
+    assert bicep["deployCosmosDb"]["value"] is enabled
+    assert terraform["deployCosmosDb"] is enabled
+    assert terraform["databaseContainersList"] == bicep["databaseContainersList"]["value"]
+    assert bool(terraform["databaseContainersList"]) is enabled
+    assert bicep["deployAAfAgentSvc"]["value"] == "${DEPLOY_AAF_AGENT_SVC=true}"
+    assert terraform["deployAAfAgentSvc"] is True
+    assert terraform["aiFoundryCosmosDBAccountResourceId"] is None
+
+
+@pytest.mark.parametrize("selection,enabled", [("true", True), ("false", False)])
+def test_hosted_cosmos_explicit_opt_in_and_opt_out(selection, enabled):
+    environment = {
+        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+        "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
+        "DEPLOY_COSMOS_DB": selection,
+    }
+    assert compose_parameters(source(), environment)["parameters"]["deployCosmosDb"]["value"] is enabled
+    assert compose_inputs(values(), environment)["deployCosmosDb"] is enabled
+
+
+@pytest.mark.parametrize("topology", ["classic", "hosted-panel", "hosted-no-panel"])
+def test_required_cosmos_cannot_be_explicitly_disabled(topology):
+    environment = {
+        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
+        "DEPLOY_COSMOS_DB": "false",
+    }
+    if topology == "hosted-no-panel":
+        environment["PRESERVE_CLASSIC_RUNTIME"] = "true"
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
+        compose_parameters(source(), environment)
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
+        compose_inputs(values(), environment)
+
+
+@pytest.mark.parametrize("selection", ["", "yes", "1", "invalid"])
+def test_cosmos_selection_rejects_non_boolean_values(selection):
+    environment = {**ENVIRONMENT, "DEPLOY_COSMOS_DB": selection}
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB must be"):
+        compose_parameters(source(), environment)
+    with pytest.raises(ValueError, match="deployCosmosDb|DEPLOY_COSMOS_DB"):
+        compose_inputs(values(), environment)
+
+
+@pytest.mark.parametrize("kind", ["containerapp", "azure.ai.agent"])
+@pytest.mark.parametrize("topology", ["hosted-no-panel", "hosted-panel"])
+def test_custom_conversation_store_retains_its_containers(tmp_path, kind, topology):
+    definition = tmp_path / "app-definition.json"
+    definition.write_text(json.dumps({
+        "id": "custom-cosmos",
+        "components": [{
+            "name": "worker", "path": "worker", "kind": kind,
+            "profiles": ["conversation-store"],
+        }],
+    }), encoding="utf-8")
+    environment = {
+        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
+        "AGENTLZ_APP_DEFINITION": str(definition),
+    }
+    bicep = compose_parameters(source(), environment)["parameters"]
+    terraform = compose_inputs(values(), environment)
+    assert bicep["deployCosmosDb"]["value"] is True
+    assert terraform["deployCosmosDb"] is True
+    assert terraform["databaseContainersList"] == bicep["databaseContainersList"]["value"]
+    expected_names = {container["name"] for container in values()["databaseContainersList"]}
+    assert expected_names <= {container["name"] for container in terraform["databaseContainersList"]}
+    if topology == "hosted-panel":
+        assert {container["name"] for container in panel_database_containers()} <= {
+            container["name"] for container in terraform["databaseContainersList"]
+        }
+    environment["DEPLOY_COSMOS_DB"] = "false"
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
+        compose_parameters(source(), environment)
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
+        compose_inputs(values(), environment)
+
+
+def test_custom_component_without_cosmos_capability_does_not_enable_storage():
+    environment = {
+        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+        "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
+        "AGENTLZ_APP_DEFINITION": "samples/custom-app/containerapp",
+    }
+    assert compose_parameters(source(), environment)["parameters"]["deployCosmosDb"]["value"] is False
+    assert compose_inputs(values(), environment)["deployCosmosDb"] is False
 
 
 def test_native_types_context_collections_and_no_arm_envelope():

@@ -133,10 +133,50 @@ try {
         -Actual ($template.resources.aiFoundry | ConvertTo-Json -Compress -Depth 100) `
         -Required @("parameters('aiFoundryDisableLocalAuth')")
 
+    if ($template.parameters.deployCosmosDb.defaultValue -cne $false) {
+        $failures.Add('Application Cosmos must default false.') | Out-Null
+    }
+    Test-ExactExpression -Name 'Cosmos UAI follows application Cosmos deployment' `
+        -Actual ([string]$template.resources.cosmosUAI.condition) `
+        -Expected "[and(variables('_useUAI'), parameters('deployCosmosDb'))]"
+    foreach ($symbol in @(
+        'cosmosDBAccount', 'cosmosSqlDatabase',
+        'assignCosmosDBCosmosDbBuiltInDataContributorExecutor',
+        'assignCosmosDBCosmosDbBuiltInDataContributorContainerApps',
+        'assignCosmosDBCosmosDbBuiltInDataContributorTestVm',
+        'cosmosConfigKeyVaultPopulate'
+    )) {
+        Test-Contains -Name "$symbol follows application Cosmos deployment" `
+            -Actual ([string]$template.resources.$symbol.condition) `
+            -Required @("parameters('deployCosmosDb')")
+    }
+    $containerSettings = @($template.variables.copy | Where-Object name -CEQ '_databaseContainerNamesSettings')
+    if ($containerSettings.Count -ne 1) {
+        $failures.Add('Canonical Cosmos container settings must have one compiled loop.') | Out-Null
+    } else {
+        Test-ExactExpression -Name 'Canonical Cosmos container settings follow application deployment' `
+            -Actual ([string]$containerSettings[0].count) `
+            -Expected "[length(if(parameters('deployCosmosDb'), parameters('databaseContainersList'), createArray()))]"
+    }
+    $databaseBootstrap = @($template.variables._containerRuntimeEnv | Where-Object name -in @('DATABASE_ACCOUNT_NAME', 'DATABASE_NAME'))
+    if ($databaseBootstrap.Count -ne 2) {
+        $failures.Add('Both application database bootstrap names must be present.') | Out-Null
+    }
+    foreach ($entry in $databaseBootstrap) {
+        Test-Contains -Name "$($entry.name) bootstrap follows application Cosmos deployment" `
+            -Actual ([string]$entry.value) `
+            -Required @("parameters('deployCosmosDb')")
+    }
+    if ([string]$template.variables.varAfCosmosCfgComplete -match "parameters\('deployCosmosDb'\)") {
+        $failures.Add('Foundry Cosmos must not depend on the application Cosmos flag.') | Out-Null
+    }
+
     $parametersFile = Join-Path (Split-Path -Parent $MainFile) 'main.parameters.json'
     $parameterValues = (Get-Content -LiteralPath $parametersFile -Raw | ConvertFrom-Json -Depth 100).parameters
+    Test-ExactExpression -Name 'Application Cosmos defaults off with an explicit azd opt-in' `
+        -Actual ([string]$parameterValues.deployCosmosDb.value) `
+        -Expected '${DEPLOY_COSMOS_DB=false}'
     $expectedEnvironmentMappings = [ordered]@{
-        deployCosmosDb            = '${DEPLOY_COSMOS_DB=true}'
         deployContainerApps       = '${DEPLOY_CONTAINER_APPS=true}'
         deployContainerRegistry   = '${DEPLOY_CONTAINER_REGISTRY=true}'
         deployContainerEnv        = '${DEPLOY_CONTAINER_ENV=true}'

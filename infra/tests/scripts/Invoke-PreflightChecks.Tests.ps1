@@ -186,8 +186,11 @@ $mainParametersPath = Join-Path -Path (Split-Path -Parent (Split-Path -Parent $P
 Reset-Findings
 $incorporatedDefaults = Get-EffectiveParameters -Path $mainParametersPath
 Assert-True 'Incorporated literal true defaults do not consume empty azd aliases' (
-    @('deployCosmosDb', 'deployContainerApps', 'deployContainerRegistry', 'deployContainerEnv', 'deployNsgs' |
+    @('deployContainerApps', 'deployContainerRegistry', 'deployContainerEnv', 'deployNsgs' |
         Where-Object { $incorporatedDefaults[$_] -cne 'true' }).Count -eq 0
+)
+Assert-True 'Application Cosmos alias preserves an explicit empty value for validation' (
+    $incorporatedDefaults['deployCosmosDb'] -ceq ''
 )
 # Exercise upstream alias expansion independently of the umbrella's literal
 # parameter surface; neither missing keys nor literals are environment aliases.
@@ -1141,10 +1144,17 @@ Assert-True 'Two slots permit two requested Search services' (Test-FindingAbsent
 function az { }
 function Get-CurrentAzureSubscriptionId { return 'offline' }
 function Test-CognitiveServicesQuotaHeadroom { }
-function Test-CosmosAvailabilityZone { }
+function Test-CosmosAvailabilityZone {
+    param($Location)
+    $script:CosmosZoneRegions += @($Location)
+}
 function Test-ProviderLocation {
     param($ProviderNamespace, $ResourceType, $Location, $DisplayName, $CodePrefix)
     if ($ProviderNamespace -eq 'Microsoft.Search') { $script:SearchProviderLocation = $Location }
+    if ($ProviderNamespace -eq 'Microsoft.DocumentDB') {
+        $script:CosmosProviderCalls++
+        $script:CosmosProviderRegions += @($Location)
+    }
 }
 function Test-AzureSearchSkuQuota {
     param($SubscriptionId, $Location, $Sku, $RequiredHeadroom)
@@ -1171,6 +1181,45 @@ foreach ($case in @(
     Assert-True "Search count $($case.expected) is checked" ($script:SearchRequiredCount -eq $case.expected)
     Assert-True "Search quota region is '$($case.region)'" ($script:SearchQuotaLocation -eq $case.region) "Actual: '$script:SearchQuotaLocation'"
     Assert-True "Search provider region is '$($case.region)'" ($script:SearchProviderLocation -eq $case.region) "Actual: '$script:SearchProviderLocation'"
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Application Cosmos regional checks require an explicit selection' -ForegroundColor Cyan
+foreach ($enabled in @($null, $false, $true)) {
+    $script:CosmosProviderCalls = 0
+    $parameters = @{
+        location = 'eastus'; deployAiFoundry = $false
+        deploySearchService = $false; deployJumpbox = $false
+    }
+    if ($null -ne $enabled) { $parameters.deployCosmosDb = $enabled }
+    Test-RegionalReadiness -P $parameters
+    $expectedCalls = if ($enabled -eq $true) { 1 } else { 0 }
+    Assert-True "Application Cosmos '$enabled' selects $expectedCalls regional calls" (
+        $script:CosmosProviderCalls -eq $expectedCalls
+    )
+}
+
+Write-Host 'Foundry Cosmos regional checks remain independent of application storage' -ForegroundColor Cyan
+foreach ($case in @(
+    @{ application = $false; agents = $true; existing = ''; expected = @('westus3') },
+    @{ application = $true; agents = $true; existing = ''; expected = @('eastus', 'westus3') },
+    @{ application = $false; agents = $false; existing = ''; expected = @() },
+    @{ application = $false; agents = $true; existing = '/existing/cosmos'; expected = @() }
+)) {
+    $script:CosmosProviderRegions = @()
+    $script:CosmosZoneRegions = @()
+    Test-RegionalReadiness -P @{
+        location = 'westus3'; cosmosLocation = 'eastus'
+        deployCosmosDb = $case.application; deployAiFoundry = $true
+        deployAAfAgentSvc = $case.agents; aiFoundryCosmosDBAccountResourceId = $case.existing
+        deploySearchService = $false; deployJumpbox = $false
+    }
+    Assert-True 'Cosmos provider readiness covers only selected application and Foundry regions' (
+        ($script:CosmosProviderRegions -join ',') -ceq ($case.expected -join ',')
+    )
+    Assert-True 'Cosmos availability covers only selected application and Foundry regions' (
+        ($script:CosmosZoneRegions -join ',') -ceq ($case.expected -join ',')
+    )
 }
 
 # --------------------------------------------------------------------------

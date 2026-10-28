@@ -441,6 +441,23 @@ class MainCliTests(unittest.TestCase):
         description = json.loads(payload)
         self.assertEqual("classic", description["topology"])
         self.assertEqual("orchestrator", description["chat_backend"])
+        self.assertTrue(description["deploy_cosmos_db"])
+
+    def test_describe_includes_explicit_hosted_cosmos_selection_without_azure_calls(self) -> None:
+        for selected in ("true", "false"):
+            with self.subTest(selected=selected):
+                environment = {
+                    "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+                    "DEPLOY_COSMOS_DB": selected,
+                }
+                with patch("sys.argv", ["prog", "--describe"]), patch("os.environ", environment):
+                    with patch("config.deployment.topology.subprocess.run") as run:
+                        with patch("builtins.print") as output:
+                            self.assertEqual(0, topology.main())
+                        run.assert_not_called()
+                self.assertEqual(
+                    selected == "true", json.loads(output.call_args.args[0])["deploy_cosmos_db"]
+                )
 
     def test_describe_preserves_migrating_runtime_until_cutover(self) -> None:
         argv = ["prog", "--describe"]
@@ -460,6 +477,7 @@ class MainCliTests(unittest.TestCase):
         self.assertTrue(description["deploy_hosted_agent_orchestration"])
         self.assertEqual("classic", description["runtime_topology"])
         self.assertEqual("orchestrator", description["runtime_chat_backend"])
+        self.assertTrue(description["deploy_cosmos_db"])
 
     @patch(
         "config.deployment.topology.read_persisted_settings",
@@ -545,6 +563,7 @@ class MainCliTests(unittest.TestCase):
         description = json.loads(mock_print.call_args.args[0])
         self.assertEqual("hosted-no-panel", description["runtime_topology"])
         self.assertEqual("hosted_agent", description["runtime_chat_backend"])
+        self.assertFalse(description["deploy_cosmos_db"])
 
     def test_validate_hosted_deploy_rejects_missing_foundry_project(self) -> None:
         argv = ["prog", "--validate-hosted-deploy"]
