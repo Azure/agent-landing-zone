@@ -5,6 +5,12 @@ import * as const from '../../constants/constants.bicep'
 @description('Master switch for deploying the spoke-local Azure Firewall.')
 param deployAzureFirewall bool
 
+@allowed(['Basic', 'Standard'])
+param azureFirewallSku string = 'Basic'
+
+@allowed(['standalone', 'ailz-integrated'])
+param deploymentMode string = 'standalone'
+
 @description('Enable DNS proxy on the existing firewall policy without changing client DNS. Defaults to false.')
 param enableFirewallDnsProxy bool = false
 
@@ -43,6 +49,9 @@ param virtualNetworkResourceId string
 
 @description('Name of the AzureFirewallSubnet.')
 param azureFirewallSubnetName string
+
+@allowed(['AzureFirewallManagementSubnet'])
+param azureFirewallManagementSubnetName string = 'AzureFirewallManagementSubnet'
 
 @description('Address prefix of the jumpbox subnet (rule source scoping).')
 param jumpboxSubnetPrefix string
@@ -506,8 +515,29 @@ var _firewallAcrTaskAgentPoolRuleCollections = [
 // Azure Firewall for egress traffic control
 ///////////////////////////////////////////////////////////////////////////
 
+var _validatedSku = azureFirewallSku == 'Basic' && enableFirewallDnsProxy
+  ? fail('Azure Firewall Basic does not support DNS proxy. Select Standard explicitly or disable enableFirewallDnsProxy.')
+  : deployAzureFirewall && networkIsolation && deploymentMode != 'standalone' && azureFirewallSku == 'Basic'
+    ? fail('Local Azure Firewall Basic is supported only in standalone mode.')
+    : azureFirewallSku
+var _basicManagement = deployAzureFirewall && networkIsolation && deploymentMode == 'standalone' && _validatedSku == 'Basic'
+
 resource firewallPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployAzureFirewall && networkIsolation) {
   name: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.firewall}${resourceToken}'
+  location: location
+  sku: {
+    name: 'Standard'
+    tier: 'Regional'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+  }
+  tags: tags
+}
+
+resource firewallManagementPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_basicManagement) {
+  name: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.firewall}${resourceToken}-management'
   location: location
   sku: {
     name: 'Standard'
@@ -526,12 +556,14 @@ resource firewallPolicy 'Microsoft.Network/firewallPolicies@2024-07-01' = if (de
   tags: tags
   properties: {
     sku: {
-      tier: 'Standard'
+      tier: _validatedSku
     }
     threatIntelMode: 'Alert'
-    dnsSettings: {
-      enableProxy: enableFirewallDnsProxy
-    }
+    ...(_validatedSku == 'Standard' ? {
+      dnsSettings: {
+        enableProxy: enableFirewallDnsProxy
+      }
+    } : {})
   }
 }
 
@@ -618,7 +650,7 @@ resource azureFirewall 'Microsoft.Network/azureFirewalls@2024-07-01' = if (deplo
   properties: {
     sku: {
       name: 'AZFW_VNet'
-      tier: 'Standard'
+      tier: _validatedSku
     }
     ipConfigurations: [
       {
@@ -633,6 +665,19 @@ resource azureFirewall 'Microsoft.Network/azureFirewalls@2024-07-01' = if (deplo
         }
       }
     ]
+    ...(_basicManagement ? {
+      managementIpConfiguration: {
+        name: 'managementIpconfig'
+        properties: {
+          publicIPAddress: {
+            id: firewallManagementPublicIp!.id
+          }
+          subnet: {
+            id: '${virtualNetworkResourceId}/subnets/${azureFirewallManagementSubnetName}'
+          }
+        }
+      }
+    } : {})
     firewallPolicy: {
       id: firewallPolicy.id
     }

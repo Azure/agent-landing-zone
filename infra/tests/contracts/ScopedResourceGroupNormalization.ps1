@@ -116,9 +116,14 @@ function Get-ArchitectureSubnetProjection {
     return $fixture.projection
 }
 
+. (Join-Path $PSScriptRoot 'FirewallBasicNormalization.ps1')
+
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0031: check only the reviewed Basic/default/subnet delta before the
+    # existing adapters and original security fingerprints. Never alter actual.
+    $copy = Invoke-ScopedProjection $copy (Get-FirewallBasicProjection)
     # ADR-0030: restore only the reviewed optional-application-Cosmos delta.
     # Remaining mutations still reach the original exact graph fingerprints.
     Assert-ScopedValue $copy.parameters.deployCosmosDb.defaultValue $false '/parameters/deployCosmosDb/defaultValue'

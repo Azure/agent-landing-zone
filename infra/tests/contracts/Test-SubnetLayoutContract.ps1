@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Compiles and validates the ADR-0027 twelve-subnet provisioning contract.
+    Compiles and validates the ADR-0027/0031 topology-aware subnet contract.
 .DESCRIPTION
     Uses the existing Azure CLI Bicep compiler without Azure credentials/writes.
     Exact emitted expressions guard bounded scenario projections, not a generic
@@ -44,23 +44,32 @@ $layout = @(
     ,@('applicationPe', 'deployApplicationPeSubnet', 'applicationPeSubnet', 'application-pe-subnet', '192.168.3.128/26', 'APPLICATION_PE', '')
     ,@('powerPlatform', 'deployPowerPlatformSubnet', 'powerPlatformSubnet', 'powerplatform-subnet', '192.168.4.0/24', 'POWER_PLATFORM', 'Microsoft.PowerPlatform/enterprisePolicies')
     ,@('aiGateway', 'deployAiGatewaySubnet', 'aiGatewaySubnet', 'ai-gateway-subnet', '192.168.5.0/24', 'AI_GATEWAY', 'Microsoft.Web/serverFarms')
+    ,@('firewallManagement', 'deployAzureFirewallManagementSubnet', 'azureFirewallManagementSubnet', 'AzureFirewallManagementSubnet', '192.168.3.192/26', 'FIREWALL_MANAGEMENT', '')
 )
 
 function Assert-LayoutShape($Template, $Bindings) {
-    Assert-Equal 'Exactly twelve definitions' $Template.variables.subnetDefinitions.Count 12
+    Assert-Equal 'Exactly thirteen definitions' $Template.variables.subnetDefinitions.Count 13
     for ($i = 0; $i -lt $layout.Count; $i++) {
         $role, $flag, $stem, $name, $cidr, $alias, $delegation = $layout[$i]
         $definition = $Template.variables.subnetDefinitions[$i]
         Assert-Equal "$role purpose" $definition.purpose $role
-        Assert-Equal "$role creation ownership" $definition.create "[parameters('$flag')]"
+        $creation = switch ($role) {
+            'firewall' { "[coalesce(parameters('deployAzureFirewallSubnet'), variables('_localFirewall'))]" }
+            'firewallManagement' { "[and(variables('_basicFirewallManagement'), coalesce(parameters('deployAzureFirewallManagementSubnet'), true()))]" }
+            default { "[parameters('$flag')]" }
+        }
+        Assert-Equal "$role creation ownership" $definition.create $creation
         Assert-Equal "$role name wiring" $definition.name "[parameters('${stem}Name')]"
         Assert-Equal "$role prefix wiring" $definition.addressPrefix "[parameters('${stem}Prefix')]"
         Assert-Equal "$role delegation" $definition.delegation $delegation
-        Assert-Equal "$flag Boolean true default" @($Template.parameters[$flag].type, $Template.parameters[$flag].defaultValue) @('bool', $true)
+        $default = if ($role -eq 'gateway') { $false } elseif ($role -in 'firewall', 'firewallManagement') { $null } else { $true }
+        Assert-Equal "$flag Boolean type/default" @($Template.parameters[$flag].type, $Template.parameters[$flag].defaultValue) @('bool', $default)
+        if ($role -in 'firewall', 'firewallManagement') { Assert-Equal "$flag nullable" $Template.parameters[$flag].nullable $true }
         Assert-Equal "$role name default" $Template.parameters["${stem}Name"].defaultValue $name
         Assert-Equal "$role prefix default" $Template.parameters["${stem}Prefix"].defaultValue $cidr
         $flagAlias = ($flag -creplace '([a-z])([A-Z])', '$1_$2').ToUpperInvariant()
-        Assert-Equal "$flag azd binding" $Bindings[$flag].value ('${' + $flagAlias + '=true}')
+        $defaultToken = if ($null -eq $default) { 'null' } else { "$default".ToLowerInvariant() }
+        Assert-Equal "$flag azd binding" $Bindings[$flag].value ('${' + $flagAlias + '=' + $defaultToken + '}')
         Assert-Equal "$role name azd binding" $Bindings["${stem}Name"].value ('${AZURE_' + $alias + '_SUBNET_NAME=' + $name + '}')
         Assert-Equal "$role prefix azd binding" $Bindings["${stem}Prefix"].value ('${AZURE_' + $alias + '_SUBNET_PREFIX=' + $cidr + '}')
     }
@@ -74,6 +83,11 @@ function Get-Selection($Template, [hashtable]$Overrides, [bool]$Isolation = $tru
     foreach ($row in $layout) {
         $role, $flag, $stem = $row[0..2]
         $create = if ($Overrides.ContainsKey($flag)) { $Overrides[$flag] } else { $Template.parameters[$flag].defaultValue }
+        $localFirewall = -not $Overrides.ContainsKey('deployAzureFirewall') -or $Overrides.deployAzureFirewall
+        $basic = $localFirewall -and (-not $Overrides.ContainsKey('azureFirewallSku') -or $Overrides.azureFirewallSku -eq 'Basic') -and
+            (-not $Overrides.ContainsKey('deploymentMode') -or $Overrides.deploymentMode -eq 'standalone')
+        if ($role -eq 'firewall' -and $null -eq $create) { $create = $localFirewall }
+        if ($role -eq 'firewallManagement') { $create = $basic -and ($null -eq $create -or $create) }
         if ($create -isnot [bool]) { throw "$flag must be a Boolean" }
         if ($Isolation -and $Global -and $create) {
             $name = if ($Overrides.ContainsKey("${stem}Name")) { $Overrides["${stem}Name"] } else { $Template.parameters["${stem}Name"].defaultValue }
@@ -102,13 +116,13 @@ function Assert-ValidSelection($Definitions, [string[]]$Vnet = @('192.168.0.0/21
     $selected = @($Definitions | Where-Object create)
     $names = @($relevant | ForEach-Object { $_.name.ToLowerInvariant() })
     if (@($names | Select-Object -Unique).Count -ne $names.Count) { throw 'Duplicate names' }
-    $reserved = @{ gateway = 'GatewaySubnet'; bastion = 'AzureBastionSubnet'; firewall = 'AzureFirewallSubnet' }
+    $reserved = @{ gateway = 'GatewaySubnet'; bastion = 'AzureBastionSubnet'; firewall = 'AzureFirewallSubnet'; firewallManagement = 'AzureFirewallManagementSubnet' }
     foreach ($subnet in $relevant) {
         if ([string]::IsNullOrEmpty($subnet.name) -or $subnet.name.Length -gt 80 -or $subnet.name.Contains('/') -or $subnet.name.Contains(' ')) { throw 'Invalid name' }
         if ($reserved.ContainsKey($subnet.purpose)) {
             if ($subnet.name -cne $reserved[$subnet.purpose]) { throw 'Invalid reserved name' }
         }
-        elseif ($subnet.name.ToLowerInvariant() -in @('gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet')) { throw 'Reserved name used by another role' }
+        elseif ($subnet.name.ToLowerInvariant() -in @('gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet', 'azurefirewallmanagementsubnet', 'routeserversubnet')) { throw 'Reserved name used by another role' }
         if ([string]::IsNullOrEmpty($subnet.addressPrefix)) { throw 'Missing required prefix' }
         if (-not $Byo -and $subnet.required -and -not $subnet.create) { throw 'Missing managed subnet in new VNet' }
     }
@@ -118,6 +132,7 @@ function Assert-ValidSelection($Definitions, [string[]]$Vnet = @('192.168.0.0/21
         $range = Get-Range $selected[$i].addressPrefix
         if (-not $Byo -and @($vnetRanges | Where-Object { $range.Start -ge $_.Start -and $range.End -le $_.End }).Count -eq 0) { throw 'Outside VNet' }
         if ($selected[$i].purpose -eq 'aiGateway' -and ($range.Bits -gt 27 -or -not $Nsgs)) { throw 'AI Gateway requires NSG and /27 or larger' }
+        if ($selected[$i].purpose -in 'firewall', 'firewallManagement' -and $range.Bits -gt 26) { throw 'Firewall subnets require /26 or larger' }
         for ($j = 0; $j -lt $i; $j++) {
             $other = Get-Range $selected[$j].addressPrefix
             if ($range.Start -le $other.End -and $range.End -ge $other.Start) { throw 'Overlapping subnets' }
@@ -149,14 +164,15 @@ try {
     Assert-Equal 'ACR pool requires its own subnet' $t.variables.subnetDefinitions[8].required "[variables('_deployAcrTaskAgentPool')]"
     Assert-Equal 'Foundry, grounding and Cosmos ACL consumers require Foundry PE subnet' $t.variables.subnetDefinitions[1].required "[or(or(or(or(or(or(parameters('deployAiFoundry'), parameters('deployStorageAccount')), parameters('deploySearchService')), parameters('deploySpeechService')), variables('_deployAiFoundryStorage')), variables('_deployAiFoundrySearch')), parameters('deployCosmosDb'))]"
     Assert-Equal 'Application consumers require dedicated application PE subnet' $t.variables.subnetDefinitions[9].required "[or(or(or(or(or(parameters('deployCosmosDb'), parameters('deployKeyVault')), parameters('deployAppConfig')), parameters('deployContainerEnv')), parameters('deployContainerRegistry')), variables('_deployAmpls'))]"
-    Assert-Equal 'Other subnet consumers retain their service gates and Cosmos ACA ACL prerequisite' @($t.variables.subnetDefinitions[3].required, $t.variables.subnetDefinitions[4].required, $t.variables.subnetDefinitions[5].required, $t.variables.subnetDefinitions[6].required, $t.variables.subnetDefinitions[7].required) @("[variables('_deployBastion')]", "[parameters('deployAzureFirewall')]", "[variables('_publicIngressEnabled')]", "[variables('_deployJumpbox')]", "[or(parameters('deployContainerEnv'), parameters('deployCosmosDb'))]")
+    Assert-Equal 'Other subnet consumers retain their service gates and Cosmos ACA ACL prerequisite' @($t.variables.subnetDefinitions[3].required, $t.variables.subnetDefinitions[4].required, $t.variables.subnetDefinitions[5].required, $t.variables.subnetDefinitions[6].required, $t.variables.subnetDefinitions[7].required) @("[variables('_deployBastion')]", "[variables('_localFirewall')]", "[variables('_publicIngressEnabled')]", "[variables('_deployJumpbox')]", "[or(parameters('deployContainerEnv'), parameters('deployCosmosDb'))]")
+    Assert-Equal 'Management consumer only active standalone isolated Basic' $t.variables.subnetDefinitions[12].required "[variables('_basicFirewallManagement')]"
     Assert-Equal 'ACR waits for serialized BYO completion' ($t.resources.acrTaskAgentPool.dependsOn -contains 'virtualNetworkSubnets') $true
 
     $s = $byo.properties.template
     $writes = @($s.resources | Where-Object { $_.copy.name -eq 'subnetsM' })[0]
     $nsgs = @($s.resources | Where-Object { $_.copy.name -eq 'nsgsM' })[0]
     Assert-Equal 'BYO writes serialized' @($writes.copy.mode, $writes.copy.batchSize) @('serial', 1)
-    Assert-Equal 'BYO reserved NSG exclusions' $s.variables.invalidNsgSubnets @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet', 'GatewaySubnet')
+    Assert-Equal 'BYO reserved NSG exclusions' $s.variables.invalidNsgSubnets @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet', 'GatewaySubnet', 'AzureFirewallManagementSubnet')
     Assert-Equal 'No duplicate/unused generic service NSG' $nsgs.condition "[and(and(and(parameters('deploySubnets'), parameters('deployNsgs')), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[copyIndex()].name))), empty(coalesce(tryGet(parameters('subnets')[copyIndex()], 'networkSecurityGroupResourceId'), '')))]"
     Assert-Equal 'BYO never deploys the complete VNet collection' @($s.resources | Where-Object name -eq 'virtualNetworkDeployment')[0].condition "[and(not(parameters('useExistingVNet')), parameters('deploySubnets'))]"
     Assert-Equal 'Child writes honor target subscription' $writes.subscriptionId "[parameters('subscriptionId')]"
@@ -181,7 +197,7 @@ try {
         names = "[map(variables('relevant'), lambda('subnet', toLower(lambdaVariables('subnet').name)))]"
         namesValid = "[empty(filter(variables('relevant'), lambda('subnet', or(or(or(empty(lambdaVariables('subnet').name), greater(length(lambdaVariables('subnet').name), 80)), contains(lambdaVariables('subnet').name, '/')), contains(lambdaVariables('subnet').name, ' ')))))]"
         namesUnique = "[equals(length(variables('names')), length(union(variables('names'), variables('names'))))]"
-        reservedNamesValid = "[empty(filter(variables('relevant'), lambda('subnet', if(contains(variables('reservedNames'), lambdaVariables('subnet').purpose), not(equals(lambdaVariables('subnet').name, variables('reservedNames')[lambdaVariables('subnet').purpose])), contains(createArray('gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet'), toLower(lambdaVariables('subnet').name))))))]"
+        reservedNamesValid = "[empty(filter(variables('relevant'), lambda('subnet', if(contains(variables('reservedNames'), lambdaVariables('subnet').purpose), not(equals(lambdaVariables('subnet').name, variables('reservedNames')[lambdaVariables('subnet').purpose])), contains(createArray('gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet', 'azurefirewallmanagementsubnet', 'routeserversubnet'), toLower(lambdaVariables('subnet').name))))))]"
         prefixesPresent = "[empty(filter(variables('relevant'), lambda('subnet', empty(lambdaVariables('subnet').addressPrefix))))]"
         prefixesValid = "[if(variables('prefixesPresent'), empty(filter(variables('selected'), lambda('subnet', not(__bicep.alignedIpv4(lambdaVariables('subnet').addressPrefix))))), false())]"
         vnetPrefixesValid = "[if(parameters('useExistingVNet'), true(), and(not(empty(parameters('vnetAddressPrefixes'))), empty(filter(parameters('vnetAddressPrefixes'), lambda('prefix', not(__bicep.alignedIpv4(lambdaVariables('prefix'))))))))]"
@@ -189,6 +205,7 @@ try {
         overlaps = "[if(variables('rangesValid'), not(empty(filter(variables('selected'), lambda('subnet', not(empty(filter(variables('selected'), lambda('other', and(and(not(equals(lambdaVariables('subnet').name, lambdaVariables('other').name)), lessOrEquals(__bicep.cidrStart(lambdaVariables('subnet').addressPrefix), __bicep.cidrEnd(lambdaVariables('other').addressPrefix))), greaterOrEquals(__bicep.cidrEnd(lambdaVariables('subnet').addressPrefix), __bicep.cidrStart(lambdaVariables('other').addressPrefix))))))))))), false())]"
         contained = "[if(and(not(parameters('useExistingVNet')), variables('rangesValid')), empty(filter(variables('selected'), lambda('subnet', empty(filter(parameters('vnetAddressPrefixes'), lambda('prefix', and(greaterOrEquals(__bicep.cidrStart(lambdaVariables('subnet').addressPrefix), __bicep.cidrStart(lambdaVariables('prefix'))), lessOrEquals(__bicep.cidrEnd(lambdaVariables('subnet').addressPrefix), __bicep.cidrEnd(lambdaVariables('prefix')))))))))), true())]"
         aiGatewayValid = "[if(variables('prefixesValid'), empty(filter(variables('selected'), lambda('subnet', and(equals(lambdaVariables('subnet').purpose, 'aiGateway'), or(greater(int(split(lambdaVariables('subnet').addressPrefix, '/')[1]), 27), not(parameters('deployNsgs'))))))), false())]"
+        firewallPrefixesValid = "[if(variables('prefixesValid'), empty(filter(variables('relevant'), lambda('subnet', and(contains(createArray('firewall', 'firewallManagement'), lambdaVariables('subnet').purpose), or(not(__bicep.alignedIpv4(lambdaVariables('subnet').addressPrefix)), greater(int(split(lambdaVariables('subnet').addressPrefix, '/')[1]), 26)))))), false())]"
         consumersHaveSubnets = "[or(parameters('useExistingVNet'), empty(filter(parameters('subnetDefinitions'), lambda('subnet', and(lambdaVariables('subnet').required, not(lambdaVariables('subnet').create))))))]"
         byoNsgsProtected = "[or(or(not(parameters('useExistingVNet')), empty(variables('selected'))), parameters('deployNsgs'))]"
     }
@@ -196,7 +213,7 @@ try {
     Assert-Equal 'Exact reserved purpose/name pairs' @($v.variables.reservedNames.gateway, $v.variables.reservedNames.bastion, $v.variables.reservedNames.firewall) @('GatewaySubnet', 'AzureBastionSubnet', 'AzureFirewallSubnet')
     Assert-Equal 'New VNet writes wait for fatal layout validation' ($new.dependsOn -contains 'networkLayoutValidation') $true
     Assert-Equal 'BYO writes wait for fatal layout validation' ($byo.dependsOn -contains 'networkLayoutValidation') $true
-    Assert-Equal 'All predicates are fatal invariants' $v.outputs.validated.value "[if(or(or(not(variables('namesValid')), not(variables('namesUnique'))), not(variables('reservedNamesValid'))), fail('Subnet names must be nonempty, unique, valid names and use the exact reserved GatewaySubnet, AzureBastionSubnet and AzureFirewallSubnet names for those purposes.'), if(or(or(not(variables('prefixesPresent')), not(variables('prefixesValid'))), not(variables('vnetPrefixesValid'))), fail('Required subnet prefixes must be nonempty; managed subnet and new VNet prefixes must be aligned IPv4 CIDRs with prefix length 0 through 29.'), if(or(variables('overlaps'), not(variables('contained'))), fail('Managed subnet CIDRs must not overlap and must be contained in the new VNet address space.'), if(not(variables('aiGatewayValid')), fail('Managed AI Gateway integration requires a /27 or larger subnet and deployNsgs=true.'), if(not(variables('consumersHaveSubnets')), fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.'), if(not(variables('byoNsgsProtected')), fail('Managed BYO subnet writes require deployNsgs=true to protect NSG associations.'), true()))))))]"
+    Assert-Equal 'All predicates are fatal invariants' $v.outputs.validated.value "[if(or(or(not(variables('namesValid')), not(variables('namesUnique'))), not(variables('reservedNamesValid'))), fail('Subnet names must be nonempty, unique, valid names and use the exact reserved GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet and AzureFirewallManagementSubnet names for those purposes.'), if(or(or(not(variables('prefixesPresent')), not(variables('prefixesValid'))), not(variables('vnetPrefixesValid'))), fail('Required subnet prefixes must be nonempty; managed subnet and new VNet prefixes must be aligned IPv4 CIDRs with prefix length 0 through 29.'), if(or(variables('overlaps'), not(variables('contained'))), fail('Managed subnet CIDRs must not overlap and must be contained in the new VNet address space.'), if(not(variables('firewallPrefixesValid')), fail('Firewall data and management subnets require aligned IPv4 CIDRs of /26 or larger.'), if(not(variables('aiGatewayValid')), fail('Managed AI Gateway integration requires a /27 or larger subnet and deployNsgs=true.'), if(not(variables('consumersHaveSubnets')), fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.'), if(not(variables('byoNsgsProtected')), fail('Managed BYO subnet writes require deployNsgs=true to protect NSG associations.'), true())))))))]"
     $functions = $v.functions[0].members
     Assert-Equal 'Aligned IPv4 CIDR function' $functions.alignedIpv4.output.value "[if(equals(length(split(parameters('prefix'), '/')), 2), and(and(and(equals(length(split(split(parameters('prefix'), '/')[0], '.')), 4), equals(split(parameters('prefix'), '/')[0], parseCidr(parameters('prefix')).network)), greaterOrEquals(int(split(parameters('prefix'), '/')[1]), 0)), lessOrEquals(int(split(parameters('prefix'), '/')[1]), 29)), false())]"
     Assert-Equal 'CIDR start arithmetic' $functions.cidrStart.output.value "[reduce(split(parseCidr(parameters('prefix')).network, '.'), 0, lambda('value', 'octet', add(mul(lambdaVariables('value'), 256), int(lambdaVariables('octet')))))]"
@@ -210,21 +227,25 @@ try {
         Assert-ValidSelection $defaults -Byo $isByo
         foreach ($row in $layout) {
             $selection = @(Get-Selection $t @{ $row[1] = $false })
-            Assert-Equal "$($row[1]) omission; BYO=$isByo" @($selection.purpose) @($layout | Where-Object { $_[0] -ne $row[0] } | ForEach-Object { $_[0] })
+            Assert-Equal "$($row[1]) omission; BYO=$isByo" @($selection.purpose) @($defaults | Where-Object { $_.purpose -ne $row[0] } | ForEach-Object { $_.purpose })
         }
         Assert-Equal "Global creation off; BYO=$isByo" @(Get-Selection $t @{} -Global $false).Count 0
         Assert-Equal "Public mode; BYO=$isByo" @(Get-Selection $t @{} -Isolation $false).Count 0
         $overrides = @{}
         foreach ($row in $layout) { $overrides["$($row[2])Prefix"] = $row[4].Replace('192.168.', '10.20.') }
         $custom = @(Get-Selection $t $overrides)
-        Assert-Equal "Custom prefix propagation; BYO=$isByo" @($custom.addressPrefix) @($layout | ForEach-Object { $_[4].Replace('192.168.', '10.20.') })
+        Assert-Equal "Custom prefix propagation; BYO=$isByo" @($custom.addressPrefix) @($layout | Where-Object { $_[0] -ne 'gateway' } | ForEach-Object { $_[4].Replace('192.168.', '10.20.') })
         Assert-ValidSelection $custom -Vnet @('10.20.0.0/21') -Byo $isByo
     }
     foreach ($mutation in @(
         @{ applicationPeSubnetName = '' }
         @{ applicationPeSubnetPrefix = '' }
         @{ applicationPeSubnetName = 'pe-subnet' }
-        @{ gatewaySubnetName = 'gateway-subnet' }
+        @{ deployGatewaySubnet = $true; gatewaySubnetName = 'gateway-subnet' }
+        @{ azureFirewallManagementSubnetName = 'management' }
+        @{ azureFirewallManagementSubnetPrefix = '192.168.3.192/27' }
+        @{ azureFirewallManagementSubnetPrefix = '192.168.3.193/26' }
+        @{ azureFirewallManagementSubnetPrefix = '192.168.2.0/26' }
         @{ powerPlatformSubnetName = 'GatewaySubnet' }
         @{ aiGatewaySubnetPrefix = '192.168.5.0/28' }
         @{ powerPlatformSubnetPrefix = '192.168.4.1/24' }
@@ -247,7 +268,7 @@ try {
     Assert-ValidSelection @(Get-Selection $t @{ powerPlatformSubnetPrefix = '192.168.4.0/28' })
     Assert-ValidSelection @(Get-Selection $t @{ aiGatewaySubnetPrefix = '192.168.5.0/27' })
     $customName = @(Get-Selection $t @{ applicationPeSubnetName = 'my-application-pe'; powerPlatformSubnetName = 'my-powerplatform' })
-    Assert-Equal 'Configured ordinary names propagate unchanged' @($customName[9].name, $customName[10].name) @('my-application-pe', 'my-powerplatform')
+    Assert-Equal 'Configured ordinary names propagate unchanged' @(@($customName | Where-Object purpose -eq applicationPe)[0].name, @($customName | Where-Object purpose -eq powerPlatform)[0].name) @('my-application-pe', 'my-powerplatform')
 
     # Cosmos-only isolation: all other consuming services are disabled. The
     # exact predicates above still require all three Cosmos ACL subnet targets.

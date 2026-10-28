@@ -43,6 +43,20 @@ mock_provider "modtm" {}
 mock_provider "random" {}
 mock_provider "time" {}
 
+# Only the management contract reads the BYO VNet itself. Other BYO reads
+# retain the missing-resource default unless a scenario explicitly supplies it.
+override_data {
+  target = data.azapi_resource.network_existing_management_vnet[0]
+  values = {
+    output = {
+      properties = {
+        addressSpace = { addressPrefixes = ["192.168.0.0/21"] }
+        subnets      = []
+      }
+    }
+  }
+}
+
 variables {
   subscriptionId    = "00000000-0000-0000-0000-000000000002"
   tenantId          = "00000000-0000-0000-0000-000000000001"
@@ -73,20 +87,47 @@ run "public_default_has_no_network_resources" {
     condition     = length(local.network_foundry_private_endpoints) == 0 && local.network_ingress_context.nsg_resource_id == ""
     error_message = "Public mode must not export a managed Foundry endpoint or ingress NSG."
   }
+  assert {
+    condition     = length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 && length(module.network_public_ip) == 0
+    error_message = "Public mode must not create either firewall IP, firewall or policy."
+  }
 }
 
-run "isolated_has_exact_subnet_purposes_and_dedicated_application_pe" {
+run "isolated_basic_has_required_subnets_and_dedicated_application_pe" {
   command = plan
   variables {
     networkIsolation = true
     deployCosmosDb   = true
   }
   assert {
-    condition = toset(keys(local.managed_subnets)) == toset([
-      "agent", "pe", "gateway", "bastion", "firewall", "appGateway", "jumpbox",
-      "acaEnvironment", "devopsBuildAgents", "applicationPe", "powerPlatform", "aiGateway"
-    ])
-    error_message = "All twelve subnet creation flags default on independently of consumers."
+    condition = (
+      alltrue([for purpose in ["agent", "pe", "bastion", "appGateway", "jumpbox", "acaEnvironment", "devopsBuildAgents", "applicationPe", "powerPlatform", "aiGateway"] : contains(keys(local.managed_subnets), purpose)]) &&
+      contains(keys(local.managed_subnets), "firewall") && contains(keys(local.managed_subnets), "firewallManagement") &&
+      !contains(keys(local.managed_subnets), "gateway")
+    )
+    error_message = "Basic requires both firewall subnets, keeps workload defaults and does not reserve GatewaySubnet."
+  }
+  assert {
+    condition = (
+      module.network_firewall[0].resource.sku_tier == "Basic" &&
+      module.network_firewall_policy[0].resource.sku == "Basic" &&
+      length(module.network_firewall_policy[0].resource.dns) == 0 &&
+      length(module.network_firewall[0].resource.management_ip_configuration) == 1 &&
+      module.network_firewall[0].resource.management_ip_configuration[0].name == "managementIpconfig" &&
+      toset(keys(module.network_public_ip)) == toset(["firewall", "firewallManagement"])
+    )
+    error_message = "Default Basic must use matching policy, no DNS block, both IPs and the pinned AVM management interface."
+  }
+  assert {
+    condition = (
+      local.subnet_definitions.firewallManagement.address_prefix == "192.168.3.192/26" &&
+      local.subnet_definitions.firewallManagement.route_table_id == "" &&
+      local.subnet_definitions.firewallManagement.network_security_group_id == "" &&
+      local.subnet_definitions.firewallManagement.nat_gateway_id == "" &&
+      local.subnet_definitions.firewallManagement.delegation == "" &&
+      length(local.subnet_definitions.firewallManagement.service_endpoints) == 0
+    )
+    error_message = "Basic management networking must not inherit workload NSGs, UDRs, NAT, delegations or endpoints."
   }
   assert {
     condition     = local.subnet_definitions.agent.delegation == "Microsoft.App/environments" && local.subnet_definitions.acaEnvironment.delegation == "Microsoft.App/environments"
@@ -213,6 +254,16 @@ run "external_route_table_is_not_owned" {
   assert {
     condition     = !local.network_route_table && local.network_context.route_table_id == var.hubIntegrationExistingRouteTableResourceId
     error_message = "An existing route table must be passed through without local ownership or route writes."
+  }
+  assert {
+    condition = (
+      !contains(keys(local.managed_subnets), "firewall") &&
+      !contains(keys(local.managed_subnets), "firewallManagement") &&
+      !contains(keys(local.managed_subnets), "gateway") &&
+      length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 &&
+      length(module.network_public_ip) == 0
+    )
+    error_message = "External egress must not create unused local firewall or gateway networking."
   }
 }
 
@@ -403,6 +454,525 @@ run "reject_competing_egress_owners" {
   variables {
     networkIsolation              = true
     hubIntegrationEgressNextHopIp = "10.0.0.4"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "standard_keeps_dns_proxy_without_management_dependencies" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    azureFirewallSku                    = "Standard"
+    enableFirewallDnsProxy              = true
+    deployAzureFirewallManagementSubnet = true
+    useZoneRedundancy                   = true
+  }
+  assert {
+    condition = (
+      module.network_firewall[0].resource.sku_tier == "Standard" &&
+      module.network_firewall_policy[0].resource.sku == "Standard" &&
+      module.network_firewall_policy[0].resource.dns[0].proxy_enabled &&
+      length(module.network_firewall[0].resource.management_ip_configuration) == 0 &&
+      !contains(keys(local.managed_subnets), "firewallManagement") &&
+      toset(keys(module.network_public_ip)) == toset(["firewall"])
+    )
+    error_message = "Standard preserves selectable DNS proxy and never creates Basic management dependencies, even with an explicit management flag."
+  }
+}
+
+run "integrated_external_hub_with_gateway_has_no_local_reservations" {
+  command = plan
+  variables {
+    networkIsolation                       = true
+    deploymentMode                         = "ailz-integrated"
+    deployAzureFirewall                    = false
+    hubIntegrationEgressNextHopIp          = "10.0.0.4"
+    hubIntegrationPeeringUseRemoteGateways = true
+    deployAzureFirewallManagementSubnet    = true
+  }
+  assert {
+    condition = (
+      !contains(keys(local.managed_subnets), "firewall") &&
+      !contains(keys(local.managed_subnets), "firewallManagement") &&
+      !contains(keys(local.managed_subnets), "gateway") &&
+      length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 &&
+      length(module.network_public_ip) == 0
+    )
+    error_message = "A shared hub gateway does not require any local firewall or gateway reservation."
+  }
+}
+
+run "external_hub_without_gateway_allows_explicit_reservations_only" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    deploymentMode                      = "ailz-integrated"
+    deployAzureFirewall                 = false
+    hubIntegrationEgressNextHopIp       = "10.0.0.4"
+    deployAzureFirewallSubnet           = true
+    deployGatewaySubnet                 = true
+    deployAzureFirewallManagementSubnet = true
+  }
+  assert {
+    condition = (
+      contains(keys(local.managed_subnets), "firewall") && contains(keys(local.managed_subnets), "gateway") &&
+      !contains(keys(local.managed_subnets), "firewallManagement") &&
+      length(module.network_public_ip) == 0 && length(module.network_firewall) == 0
+    )
+    error_message = "Explicit data and gateway reservations must not create either service or management networking."
+  }
+}
+
+run "standalone_gateway_reservation_is_opt_in" {
+  command = plan
+  variables {
+    networkIsolation    = true
+    deployGatewaySubnet = true
+  }
+  assert {
+    condition     = contains(keys(local.managed_subnets), "gateway") && contains(keys(local.managed_subnets), "firewallManagement")
+    error_message = "Standalone Basic must honor an explicit GatewaySubnet reservation."
+  }
+}
+
+run "public_ignores_isolated_reservations" {
+  command = plan
+  variables {
+    deployAzureFirewallSubnet           = true
+    deployAzureFirewallManagementSubnet = true
+    deployGatewaySubnet                 = true
+  }
+  assert {
+    condition     = length(local.managed_subnets) == 0 && length(module.network_public_ip) == 0 && length(module.network_firewall) == 0
+    error_message = "Isolation gates subnet and firewall/IP creation even when reservation flags are true."
+  }
+}
+
+run "basic_management_wiring_keeps_data_private_next_hop" {
+  command = plan
+  variables {
+    networkIsolation = true
+  }
+  # Override producers only: the firewall and policy still use their real
+  # pinned AVM plans, so the management object shape is actually evaluated.
+  override_module {
+    target = module.network_subnet["firewall"]
+    outputs = {
+      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/virtualNetworks/vnet/subnets/AzureFirewallSubnet"
+    }
+  }
+  override_module {
+    target = module.network_subnet["firewallManagement"]
+    outputs = {
+      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/virtualNetworks/vnet/subnets/AzureFirewallManagementSubnet"
+    }
+  }
+  override_module {
+    target = module.network_public_ip["firewall"]
+    outputs = {
+      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/data"
+    }
+  }
+  override_module {
+    target = module.network_public_ip["firewallManagement"]
+    outputs = {
+      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/management"
+    }
+  }
+  override_resource {
+    target          = module.network_firewall[0].azurerm_firewall.this
+    override_during = plan
+    values = {
+      id               = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/azureFirewalls/basic"
+      ip_configuration = { private_ip_address = "192.168.2.132" }
+    }
+  }
+  assert {
+    condition = (
+      module.network_firewall[0].resource.management_ip_configuration[0].subnet_id == local.subnet_ids.firewallManagement &&
+      module.network_firewall[0].resource.management_ip_configuration[0].public_ip_address_id == module.network_public_ip["firewallManagement"].resource_id &&
+      module.network_firewall[0].resource.ip_configuration[0].subnet_id == local.subnet_ids.firewall &&
+      module.network_firewall[0].resource.ip_configuration[0].public_ip_address_id == module.network_public_ip["firewall"].resource_id &&
+      azapi_resource.network_default_route[0].body.properties.nextHopIpAddress == module.network_firewall[0].resource.ip_configuration[0].private_ip_address
+    )
+    error_message = "The management NIC must use its own subnet/IP; workload UDRs must still use the data-plane private IP."
+  }
+}
+
+run "basic_reuses_required_byo_firewall_subnets_without_owning_them" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    useExistingVNet                     = true
+    existingVnetResourceId              = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+    deployAzureFirewallSubnet           = false
+    deployAzureFirewallManagementSubnet = false
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_subnet["firewall"]
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/AzureFirewallSubnet"
+      output = {
+        properties = {
+          addressPrefix = "192.168.2.128/26"
+          delegations   = []
+        }
+      }
+    }
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_subnet["firewallManagement"]
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/AzureFirewallManagementSubnet"
+      output = {
+        properties = {
+          addressPrefixes = ["192.168.3.192/26"]
+          delegations     = []
+        }
+      }
+    }
+  }
+  assert {
+    condition = (
+      !contains(keys(local.managed_subnets), "firewall") && !contains(keys(local.managed_subnets), "firewallManagement") &&
+      contains(keys(data.azapi_resource.network_existing_subnet), "firewall") &&
+      contains(keys(data.azapi_resource.network_existing_subnet), "firewallManagement")
+    )
+    error_message = "Explicit false must look up compatible required BYO subnets without acquiring create/delete ownership."
+  }
+}
+
+run "reject_basic_dns_proxy" {
+  command = plan
+  variables {
+    networkIsolation       = true
+    enableFirewallDnsProxy = true
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_integrated_local_basic" {
+  command = plan
+  variables {
+    networkIsolation = true
+    deploymentMode   = "ailz-integrated"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_unknown_firewall_sku" {
+  command = plan
+  variables {
+    azureFirewallSku = "Premium"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [var.azureFirewallSku]
+}
+
+run "reject_management_reserved_name" {
+  command = plan
+  variables {
+    azureFirewallManagementSubnetName = "azurefirewallmanagementsubnet"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [var.azureFirewallManagementSubnetName]
+}
+
+run "reject_management_prefix_too_small" {
+  command = plan
+  variables {
+    azureFirewallManagementSubnetPrefix = "192.168.3.192/27"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [var.azureFirewallManagementSubnetPrefix]
+}
+
+run "reject_management_unaligned_prefix" {
+  command = plan
+  variables {
+    azureFirewallManagementSubnetPrefix = "192.168.3.193/26"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [var.azureFirewallManagementSubnetPrefix]
+}
+
+run "reject_management_overlap" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    azureFirewallManagementSubnetPrefix = "192.168.3.128/26"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_management_outside_new_vnet" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    azureFirewallManagementSubnetPrefix = "10.0.0.0/26"
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_required_management_disabled_without_byo" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    deployAzureFirewallManagementSubnet = false
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_required_data_disabled_without_byo" {
+  command = plan
+  variables {
+    networkIsolation          = true
+    deployAzureFirewallSubnet = false
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_global_subnets_disabled_without_byo" {
+  command = plan
+  variables {
+    networkIsolation = true
+    deploySubnets    = false
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_management_outside_actual_byo_vnet" {
+  command = plan
+  variables {
+    networkIsolation       = true
+    useExistingVNet        = true
+    existingVnetResourceId = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_management_vnet[0]
+    values = {
+      output = { properties = { addressSpace = { addressPrefixes = ["10.0.0.0/16"] }, subnets = [] } }
+    }
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_management_overlap_with_actual_byo_subnet" {
+  command = plan
+  variables {
+    networkIsolation       = true
+    useExistingVNet        = true
+    existingVnetResourceId = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_management_vnet[0]
+    values = {
+      output = {
+        properties = {
+          addressSpace = { addressPrefixes = ["192.168.0.0/21"] }
+          subnets = [{
+            name       = "shared-workload"
+            properties = { addressPrefix = "192.168.3.192/26" }
+          }]
+        }
+      }
+    }
+  }
+  plan_options {
+    target = [terraform_data.network_contract]
+  }
+  expect_failures = [terraform_data.network_contract]
+}
+
+run "reject_byo_management_workload_routing" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    useExistingVNet                     = true
+    existingVnetResourceId              = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+    deployAzureFirewallManagementSubnet = false
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_subnet["firewallManagement"]
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/AzureFirewallManagementSubnet"
+      output = {
+        properties = {
+          addressPrefix = "192.168.3.192/26"
+          delegations   = []
+          routeTable    = { id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/routeTables/workload" }
+        }
+      }
+    }
+  }
+  plan_options {
+    target = [terraform_data.network_existing_subnet_contract]
+  }
+  expect_failures = [terraform_data.network_existing_subnet_contract["firewallManagement"]]
+}
+
+run "basic_allows_larger_aligned_management_subnet" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    azureFirewallManagementSubnetPrefix = "192.168.6.0/25"
+    useZoneRedundancy                   = true
+  }
+  assert {
+    condition     = local.managed_subnets.firewallManagement.address_prefix == "192.168.6.0/25" && length(module.network_firewall[0].resource.management_ip_configuration) == 1
+    error_message = "Basic must accept an aligned management range larger than /26 without moving workload ranges."
+  }
+}
+
+run "integrated_local_standard_is_supported" {
+  command = plan
+  variables {
+    networkIsolation    = true
+    deploymentMode      = "ailz-integrated"
+    azureFirewallSku    = "Standard"
+    deployGatewaySubnet = true
+  }
+  assert {
+    condition     = contains(keys(local.managed_subnets), "firewall") && contains(keys(local.managed_subnets), "gateway") && !contains(keys(local.managed_subnets), "firewallManagement")
+    error_message = "The Basic topology guard must not reject an integrated local Standard firewall or its explicit gateway reservation."
+  }
+}
+
+run "byo_management_allows_verified_internet_only_routes" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    useExistingVNet                     = true
+    existingVnetResourceId              = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+    deployAzureFirewallManagementSubnet = false
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_subnet["firewallManagement"]
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/AzureFirewallManagementSubnet"
+      output = {
+        properties = {
+          addressPrefix = "192.168.6.0/25"
+          delegations   = []
+          routeTable    = { id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/routeTables/management" }
+        }
+      }
+    }
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_management_routes[0]
+    values = {
+      output = {
+        properties = {
+          disableBgpRoutePropagation = true
+          routes = [{
+            properties = { addressPrefix = "0.0.0.0/0", nextHopType = "Internet" }
+          }]
+        }
+      }
+    }
+  }
+  assert {
+    condition     = !contains(keys(local.managed_subnets), "firewallManagement") && length(data.azapi_resource.network_existing_management_routes) == 1
+    error_message = "A compatible BYO management route table must be verified without acquiring ownership or changing its routes."
+  }
+}
+
+run "reject_missing_byo_management_subnet" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    useExistingVNet                     = true
+    existingVnetResourceId              = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+    deployAzureFirewallManagementSubnet = false
+  }
+  plan_options {
+    target = [terraform_data.network_existing_subnet_contract]
+  }
+  expect_failures = [terraform_data.network_existing_subnet_contract["firewallManagement"]]
+}
+
+run "reject_byo_management_small_prefix_and_nsg" {
+  command = plan
+  variables {
+    networkIsolation                    = true
+    useExistingVNet                     = true
+    existingVnetResourceId              = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+    deployAzureFirewallManagementSubnet = false
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_subnet["firewallManagement"]
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/AzureFirewallManagementSubnet"
+      output = {
+        properties = {
+          addressPrefix        = "192.168.3.192/27"
+          networkSecurityGroup = { id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/networkSecurityGroups/shared" }
+        }
+      }
+    }
+  }
+  plan_options {
+    target = [terraform_data.network_existing_subnet_contract]
+  }
+  expect_failures = [terraform_data.network_existing_subnet_contract["firewallManagement"]]
+}
+
+run "reject_managed_write_removing_byo_management_associations" {
+  command = plan
+  variables {
+    networkIsolation       = true
+    useExistingVNet        = true
+    existingVnetResourceId = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/virtualNetworks/shared"
+  }
+  override_data {
+    target = data.azapi_resource.network_existing_management_vnet[0]
+    values = {
+      output = {
+        properties = {
+          addressSpace = { addressPrefixes = ["192.168.0.0/21"] }
+          subnets = [{
+            name       = "AzureFirewallManagementSubnet"
+            properties = { addressPrefix = "192.168.3.192/26", routeTable = { id = "/subscriptions/00000000-0000-0000-0000-000000000004/resourceGroups/rg-shared/providers/Microsoft.Network/routeTables/shared" } }
+          }]
+        }
+      }
+    }
   }
   plan_options {
     target = [terraform_data.network_contract]

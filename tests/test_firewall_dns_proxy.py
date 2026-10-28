@@ -40,31 +40,62 @@ def firewall_template():
     return compile_template("infra/modules/networking/azure-firewall.bicep")
 
 
-def evaluate(value, parameters):
+def evaluate(value, parameters, variables=None):
     """Evaluate only compiled parameter bindings and Boolean gates, fail closed.
 
     This deliberately cannot invoke Azure or Python eval. Unsupported ARM
     expressions fail rather than silently substituting an expected test value.
     """
     if isinstance(value, dict):
-        return {key: evaluate(item, parameters) for key, item in value.items()}
+        return {key: evaluate(item, parameters, variables) for key, item in value.items()}
     if not isinstance(value, str) or not value.startswith("["):
         return value
 
     def expression(text):
+        text = text.strip()
         match = re.fullmatch(r"parameters\('([^']+)'\)", text)
         if match:
             return parameters[match[1]]
-        if text.startswith("and(") and text.endswith(")"):
-            arguments = text[4:-1]
-            depth = 0
+        match = re.fullmatch(r"variables\('([^']+)'\)", text)
+        if match:
+            return evaluate(variables[match[1]], parameters, variables)
+        if text.startswith("'") and text.endswith("'"):
+            return text[1:-1].replace("''", "'")
+        if text in ("true()", "false()", "null()"):
+            return {"true()": True, "false()": False, "null()": None}[text]
+        call = re.fullmatch(r"(\w+)\((.*)\)", text, re.S)
+        if call:
+            name, arguments = call.groups()
+            parts, start, depth, quoted = [], 0, 0, False
             for index, char in enumerate(arguments):
-                depth += (char == "(") - (char == ")")
-                if char == "," and depth == 0:
-                    left = expression(arguments[:index].strip())
-                    right = expression(arguments[index + 1:].strip())
-                    assert isinstance(left, bool) and isinstance(right, bool)
-                    return left and right
+                if char == "'":
+                    quoted = not quoted
+                if not quoted:
+                    depth += (char == "(") - (char == ")")
+                    if char == "," and depth == 0:
+                        parts.append(arguments[start:index])
+                        start = index + 1
+            parts.append(arguments[start:])
+            if name == "if":
+                return expression(parts[1] if expression(parts[0]) else parts[2])
+            if name in ("and", "or"):
+                return (all if name == "and" else any)(expression(part) for part in parts)
+            args = [expression(part) for part in parts if part.strip()]
+            if name == "fail":
+                raise ValueError(args[0])
+            if name == "equals":
+                return args[0] == args[1]
+            if name == "not":
+                return not args[0]
+            if name == "createObject":
+                return dict(zip(args[::2], args[1::2]))
+            if name == "createArray":
+                return args
+            if name in ("union", "shallowMerge"):
+                result = {}
+                for arg in (args[0] if name == "shallowMerge" else args):
+                    result.update(arg)
+                return result
         raise AssertionError(f"Unsupported compiled ARM expression: {text}")
 
     return expression(value[1:-1])
@@ -72,6 +103,14 @@ def evaluate(value, parameters):
 
 def resource(template, name):
     return template["resources"][name]
+
+
+def module_defaults(template):
+    return {
+        name: declaration["defaultValue"]
+        for name, declaration in template["parameters"].items()
+        if "defaultValue" in declaration
+    }
 
 
 def test_parameter_defaults_and_azd_surface(template, firewall_template):
@@ -83,29 +122,41 @@ def test_parameter_defaults_and_azd_surface(template, firewall_template):
     forwarding = firewall["parameters"][SETTING]["value"]
     policy = resource(firewall["template"], "firewallPolicy")
     for proxy in (False, True):
-        module_parameters = {SETTING: evaluate(forwarding, {SETTING: proxy})}
-        assert evaluate(policy["properties"]["dnsSettings"], module_parameters) == {
-            "enableProxy": proxy,
+        module_parameters = {
+            **module_defaults(firewall["template"]),
+            SETTING: evaluate(forwarding, {SETTING: proxy}), "azureFirewallSku": "Standard",
+            "networkIsolation": True, "deployAzureFirewall": True,
         }
+        assert evaluate(policy["properties"], module_parameters, firewall["template"]["variables"])["dnsSettings"] == {"enableProxy": proxy}
     for path in ("main.parameters.json", "infra/main.parameters.json"):
         parameters = json.loads((ROOT / path).read_text(encoding="utf-8"))
         assert parameters["parameters"][SETTING]["value"] == ENV_VALUE
 
 
+@pytest.mark.parametrize("sku", ["Basic", "Standard"])
 @pytest.mark.parametrize("proxy", [None, False, True])
-def test_compiled_policy_renders_selected_proxy_and_reprovisions(firewall_template, proxy):
+def test_compiled_policy_renders_selected_proxy_and_reprovisions(firewall_template, proxy, sku):
     parameters = {
-        SETTING: firewall_template["parameters"][SETTING]["defaultValue"],
+        **module_defaults(firewall_template),
+        SETTING: firewall_template["parameters"][SETTING]["defaultValue"], "azureFirewallSku": sku,
+        "networkIsolation": True, "deployAzureFirewall": True,
     }
     if proxy is not None:
         parameters[SETTING] = proxy
     policy = resource(firewall_template, "firewallPolicy")
-    expected = {"enableProxy": proxy is True}
-    assert evaluate(policy["properties"]["dnsSettings"], parameters) == expected
+    if sku == "Basic" and proxy:
+        with pytest.raises(ValueError):
+            evaluate(policy["properties"], parameters, firewall_template["variables"])
+        return
+    rendered = evaluate(policy["properties"], parameters, firewall_template["variables"])
+    if sku == "Basic":
+        assert "dnsSettings" not in rendered or rendered["dnsSettings"] is None
+    else:
+        assert rendered["dnsSettings"] == {"enableProxy": proxy is True}
     # Reusing the same persisted input renders the same policy on each provision.
-    assert evaluate(policy["properties"]["dnsSettings"], parameters) == expected
-    assert policy["properties"]["sku"] == {"tier": "Standard"}
-    assert policy["properties"]["threatIntelMode"] == "Alert"
+    assert evaluate(policy["properties"], parameters, firewall_template["variables"]) == rendered
+    assert rendered["sku"] == {"tier": sku}
+    assert rendered["threatIntelMode"] == "Alert"
 
 
 @pytest.mark.parametrize("deploy,isolation,proxy", list(itertools.product([False, True], repeat=3)))

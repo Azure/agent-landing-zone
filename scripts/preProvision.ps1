@@ -197,7 +197,18 @@ if ($topologyExitCode -ne 0) {
     exit $topologyExitCode
 }
 $azureEnvName = $env:AZURE_ENV_NAME
-foreach ($line in $topologyOutput) {
+Push-Location $projectRoot
+try {
+    $firewallOutput = Invoke-PythonModule -ModuleName 'config.deployment.firewall' -Arguments @('--input', $parameterSource)
+    $firewallExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($firewallExitCode -ne 0) {
+    Write-Error "Firewall input resolution failed; provisioning has not started."
+    exit $firewallExitCode
+}
+foreach ($line in (@($topologyOutput) + @($firewallOutput))) {
     if ("$line" -match '^([^=]+)=(.*)$') {
         $name = $matches[1]
         $value = $matches[2]

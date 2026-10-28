@@ -301,13 +301,14 @@ Test-Topology -P @{
 Assert-True 'FAIL EGRESS_MUTEX raised' (Test-FindingPresent 'EGRESS_MUTEX')
 
 # --------------------------------------------------------------------------
-Write-Host 'Topology: deployAzureFirewall + hub egress IP warns' -ForegroundColor Cyan
+Write-Host 'Topology: deployAzureFirewall + hub egress IP fails' -ForegroundColor Cyan
 Reset-Findings
 Test-Topology -P @{
     deployAzureFirewall              = $true
+    networkIsolation                 = $true
     hubIntegrationEgressNextHopIp    = '10.100.0.4'
 }
-Assert-True 'WARN FW_AND_EXTERNAL_EGRESS raised' (Test-FindingPresent 'FW_AND_EXTERNAL_EGRESS')
+Assert-True 'FAIL FW_AND_EXTERNAL_EGRESS raised' (@($script:Findings | Where-Object { $_.Code -eq 'FW_AND_EXTERNAL_EGRESS' -and $_.Severity -eq 'FAIL' }).Count -eq 1)
 
 # --------------------------------------------------------------------------
 Write-Host 'Topology: ailz-integrated without hub params warns' -ForegroundColor Cyan
@@ -616,13 +617,14 @@ Assert-True 'No CIDR findings on default layout' ((@($script:Findings).Count) -e
 # --------------------------------------------------------------------------
 Write-Host 'Architecture subnet selection, strict flags, names and addressing' -ForegroundColor Cyan
 $defaultSubnets = @(Get-SubnetSelection -P @{ networkIsolation = $true })
-Assert-True 'All twelve subnet creations default on' ($defaultSubnets.Count -eq 12 -and @($defaultSubnets | Where-Object Managed).Count -eq 12)
+Assert-True 'Basic defaults select twelve of thirteen definitions without GatewaySubnet' ($defaultSubnets.Count -eq 13 -and @($defaultSubnets | Where-Object Managed).Count -eq 12 -and -not ($defaultSubnets | Where-Object Flag -eq deployGatewaySubnet).Managed)
 $expectedSubnets = @{
     deployAgentSubnet = @('agent-subnet', '192.168.0.0/24', 'Microsoft.App/environments')
     deployPeSubnet = @('pe-subnet', '192.168.2.0/26', '')
     deployApplicationPeSubnet = @('application-pe-subnet', '192.168.3.128/26', '')
     deployAzureBastionSubnet = @('AzureBastionSubnet', '192.168.2.64/26', '')
     deployAzureFirewallSubnet = @('AzureFirewallSubnet', '192.168.2.128/26', '')
+    deployAzureFirewallManagementSubnet = @('AzureFirewallManagementSubnet', '192.168.3.192/26', '')
     deployGatewaySubnet = @('GatewaySubnet', '192.168.2.192/26', '')
     deployAppGatewaySubnet = @('AppGatewaySubnet', '192.168.3.0/27', '')
     deployJumpboxSubnet = @('jumpbox-subnet', '192.168.3.64/27', '')
@@ -639,7 +641,7 @@ foreach ($s in $defaultSubnets) {
         $p[$s.Flag] = $false
         $selected = @(Get-SubnetSelection -P $p)
         Assert-True "$($s.Flag) independently omits only its creation (BYO=$byo)" (
-            @($selected | Where-Object Managed).Count -eq 11 -and
+            @($selected | Where-Object Managed).Count -eq (12 - [int]$s.Managed) -and
             -not ($selected | Where-Object Flag -eq $s.Flag).Managed -and
             ($selected | Where-Object Flag -eq $s.Flag).Required -eq $s.Required
         )
@@ -647,6 +649,7 @@ foreach ($s in $defaultSubnets) {
 }
 foreach ($key in @('deploySubnets') + @($defaultSubnets.Flag)) {
     foreach ($invalid in @('', $null, 'yes', 'no', '1', '0', 1, 'banana', '${UNRESOLVED}')) {
+        if ($null -eq $invalid -and $key -in 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet') { continue }
         Reset-Findings
         Test-BooleanParameterValues -P @{ $key = $invalid }
         Assert-True "$key rejects explicit '$invalid'" (Test-FindingPresent 'BOOL_VALUE_INVALID')
@@ -693,7 +696,7 @@ Assert-True 'Valid JSON publicIngress preserves its enabled subnet consumer' (
 )
 foreach ($key in @($defaultSubnets.NameKey)) {
     Reset-Findings
-    Test-LocalCidrSanity -P @{ networkIsolation = $true; $key = '' }
+    Test-LocalCidrSanity -P @{ networkIsolation = $true; deployGatewaySubnet = $true; $key = '' }
     Assert-True "Empty managed subnet name $key is rejected" (Test-FindingPresent 'SUBNET_NAME_INVALID')
 }
 foreach ($name in 'invalid/name', 'trailing-', ('a' * 81), ' leading') {
@@ -710,6 +713,7 @@ foreach ($case in @(
 )) {
     Reset-Findings
     $case.networkIsolation = $true
+    $case.deployGatewaySubnet = $true
     Test-LocalCidrSanity -P $case
     Assert-True "Reserved name misuse '$($case.Values -join ',')' is rejected" (Test-FindingPresent 'SUBNET_RESERVED_NAME')
 }
@@ -723,7 +727,7 @@ foreach ($cidr in '192.168.5.1/24', '192.168.005.0/24', '256.0.0.0/24', '10.0/24
 }
 foreach ($s in $defaultSubnets | Where-Object Flag -in 'deployApplicationPeSubnet', 'deployGatewaySubnet', 'deployAppGatewaySubnet', 'deployPowerPlatformSubnet', 'deployAiGatewaySubnet') {
     Reset-Findings
-    Test-LocalCidrSanity -P @{ networkIsolation = $true; $s.PrefixKey = '192.168.0.0/24' }
+    Test-LocalCidrSanity -P @{ networkIsolation = $true; $s.Flag = $true; $s.PrefixKey = '192.168.0.0/24' }
     Assert-True "Overlap rejected for $($s.PrefixKey)" (Test-FindingPresent 'SUBNET_OVERLAP')
 }
 Reset-Findings
@@ -745,7 +749,69 @@ $custom = @{ networkIsolation = $true; vnetAddressPrefixes = @('10.20.0.0/21') }
 foreach ($s in $defaultSubnets) { $custom[$s.PrefixKey] = $s.Cidr.Replace('192.168.', '10.20.') }
 Reset-Findings
 Test-LocalCidrSanity -P $custom
-Assert-True 'Custom address space and all twelve operator prefixes are honored for a new VNet' ($script:Findings.Count -eq 0)
+Assert-True 'Custom address space and all selected operator prefixes are honored for a new VNet' ($script:Findings.Count -eq 0)
+
+# --------------------------------------------------------------------------
+Write-Host 'Basic/Standard topology, auto intent and explicit reservations' -ForegroundColor Cyan
+foreach ($auto in @($null, 'null')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployAzureFirewallSubnet = $auto; deployAzureFirewallManagementSubnet = $auto }
+    Assert-True 'Nullable firewall creation accepts auto only on nullable flags' ($script:Findings.Count -eq 0)
+    $autoSelection = @(Get-SubnetSelection -P @{ networkIsolation = $true; deployAzureFirewallSubnet = $auto; deployAzureFirewallManagementSubnet = $auto })
+    Assert-True 'Auto resolves both required Basic subnet creations' (
+        ($autoSelection | Where-Object Flag -eq deployAzureFirewallSubnet).Managed -and
+        ($autoSelection | Where-Object Flag -eq deployAzureFirewallManagementSubnet).Managed
+    )
+}
+foreach ($case in @(
+    @{ azureFirewallSku = 'Premium'; Code = 'FIREWALL_SKU_INVALID' },
+    @{ azureFirewallSku = 'basic'; Code = 'FIREWALL_SKU_INVALID' },
+    @{ azureFirewallSku = 'Basic'; enableFirewallDnsProxy = $true; Code = 'BASIC_FIREWALL_DNS_PROXY_UNSUPPORTED' },
+    @{ deploymentMode = 'ailz-integrated'; Code = 'BASIC_FIREWALL_STANDALONE_REQUIRED' },
+    @{ deployAzureFirewall = $false; Code = 'EXTERNAL_EGRESS_REQUIRED' },
+    @{ hubIntegrationExistingRouteTableResourceId = '/synthetic/rt'; Code = 'FW_AND_EXTERNAL_EGRESS' }
+)) {
+    $code = $case.Code; $case.Remove('Code')
+    $case.networkIsolation = $true
+    Reset-Findings
+    Test-Topology -P $case
+    Assert-True "$code blocks invalid intent before writes" (@($script:Findings | Where-Object { $_.Code -eq $code -and $_.Severity -eq 'FAIL' }).Count -eq 1)
+}
+Reset-Findings
+Test-Topology -P @{ networkIsolation = $true; azureFirewallSku = 'Standard'; enableFirewallDnsProxy = $true }
+Assert-True 'Explicit Standard permits DNS proxy without fallback' (@($script:Findings | Where-Object Severity -eq FAIL).Count -eq 0)
+foreach ($gateway in $false, $true) {
+    foreach ($routing in 'hubIntegrationEgressNextHopIp', 'hubIntegrationExistingRouteTableResourceId') {
+        $p = @{ networkIsolation = $true; deploymentMode = 'ailz-integrated'; deployAzureFirewall = $false; hubIntegrationPeeringUseRemoteGateways = $gateway }
+        $p[$routing] = if ($routing -eq 'hubIntegrationEgressNextHopIp') { '10.0.0.4' } else { '/synthetic/routes' }
+        $selected = @(Get-SubnetSelection -P $p)
+        Assert-True "External hub (gateway=$gateway, $routing) owns no local firewall/gateway subnets" (
+            @($selected | Where-Object { $_.Managed -and $_.Flag -in 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet', 'deployGatewaySubnet' }).Count -eq 0
+        )
+        Reset-Findings
+        Test-Topology -P $p
+        Assert-True 'Explicit external routing with local firewall disabled is valid' (@($script:Findings | Where-Object Severity -eq FAIL).Count -eq 0)
+        $p.deployAzureFirewallSubnet = $true; $p.deployGatewaySubnet = $true; $p.deployAzureFirewallManagementSubnet = $true
+        $selected = @(Get-SubnetSelection -P $p)
+        Assert-True 'Explicit reservations add only data and gateway, never inactive management' (
+            ($selected | Where-Object Flag -eq deployAzureFirewallSubnet).Managed -and
+            ($selected | Where-Object Flag -eq deployGatewaySubnet).Managed -and
+            -not ($selected | Where-Object Flag -eq deployAzureFirewallManagementSubnet).Managed
+        )
+        $p.networkIsolation = $false
+        Assert-True 'Public mode suppresses even explicit reservations' (@(Get-SubnetSelection -P $p | Where-Object Managed).Count -eq 0)
+    }
+}
+foreach ($prefix in '192.168.3.192/27', '192.168.3.193/26', '192.168.2.0/26', '10.0.0.0/26', 'fd00::/64') {
+    Reset-Findings
+    Test-LocalCidrSanity -P @{ networkIsolation = $true; azureFirewallManagementSubnetPrefix = $prefix }
+    Assert-True "Invalid management CIDR $prefix is blocking" (@($script:Findings | Where-Object Severity -eq FAIL).Count -gt 0)
+}
+foreach ($flag in 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet') {
+    Reset-Findings
+    Test-LocalCidrSanity -P @{ networkIsolation = $true; $flag = $false }
+    Assert-True "Explicit false $flag requires BYO, never silently enables creation" (Test-FindingPresent 'SUBNET_REQUIRED_NOT_MANAGED')
+}
 
 # --------------------------------------------------------------------------
 Write-Host 'Consumer-aware live BYO verification (mocked read-only Azure boundary)' -ForegroundColor Cyan
@@ -756,7 +822,7 @@ function New-TestSubnet {
     return [pscustomobject]@{
         name = $Name; addressPrefix = $Prefix
         delegations = @(if ($Delegation) { [pscustomobject]@{ serviceName = $Delegation } })
-        serviceEndpoints = @(); networkSecurityGroup = $null; routeTable = $null; privateEndpoints = @()
+        serviceEndpoints = @(); networkSecurityGroup = $null; routeTable = $null; natGateway = $null; privateEndpoints = @()
     }
 }
 function Set-TestVnet {
@@ -800,6 +866,36 @@ try {
     Assert-True 'Required reuse performs selected subnet lookups using the full cross-subscription ID' (
         @($script:AzCalls | Where-Object { ($_ -join ' ') -like "network vnet subnet show --ids $byoId/subnets/*" }).Count -eq $required.Count
     )
+    $managementDefinition = $defaultSubnets | Where-Object Flag -eq deployAzureFirewallManagementSubnet
+    foreach ($association in 'networkSecurityGroup', 'natGateway', 'serviceEndpoints', 'delegations') {
+        $management = New-TestSubnet 'AzureFirewallManagementSubnet' '192.168.3.192/26'
+        $management.$association = if ($association -eq 'delegations') { @(@{ serviceName = 'Microsoft.Web/serverFarms' }) } elseif ($association -eq 'serviceEndpoints') { @(@{ service = 'Microsoft.Storage' }) } else { @{ id = '/synthetic/association' } }
+        Reset-Findings
+        Test-ReusedSubnetProperties -Definition $managementDefinition -Subnet $management
+        Assert-True "BYO management rejects $association" (@($script:Findings | Where-Object Severity -eq FAIL).Count -gt 0)
+    }
+    $management = New-TestSubnet 'AzureFirewallManagementSubnet' '192.168.3.192/26'
+    $management.routeTable = @{ id = '/synthetic/management-routes' }
+    foreach ($routes in @(
+        $null,
+        @{ routes = @(@{ addressPrefix = '0.0.0.0/0'; nextHopType = 'VirtualAppliance' }); disableBgpRoutePropagation = $true },
+        @{ routes = @(@{ addressPrefix = '0.0.0.0/0'; nextHopType = 'Internet' }); disableBgpRoutePropagation = $false },
+        @{ routes = @(); disableBgpRoutePropagation = $true }
+    )) {
+        $script:MockRoutes = $routes
+        Reset-Findings
+        Test-ReusedSubnetProperties -Definition $managementDefinition -Subnet $management
+        Assert-True 'Unverified or incompatible BYO management routing fails closed' (@($script:Findings | Where-Object Severity -eq FAIL).Count -eq 1)
+    }
+    $script:MockRoutes = @{ routes = @(@{ addressPrefix = '0.0.0.0/0'; nextHopType = 'Internet' }); disableBgpRoutePropagation = $true }
+    Reset-Findings
+    Test-ReusedSubnetProperties -Definition $managementDefinition -Subnet $management
+    Assert-True 'Explicit verified BYO management Internet path is accepted' ($script:Findings.Count -eq 0)
+    Set-TestVnet -Subnets @($management)
+    Reset-Findings
+    $managedBasic = $byo.Clone(); $managedBasic.deploySubnets = $true
+    Test-ExistingVnetSubnets -P $managedBasic | Out-Null
+    Assert-True 'Managed PUT cannot erase a network-owned management route table' (Test-FindingPresent 'FIREWALL_MANAGEMENT_ASSOCIATION_REWRITE')
     foreach ($s in $defaultSubnets | Where-Object Required) {
         Set-TestVnet -Subnets @($required | Where-Object name -ne $s.Name)
         Reset-Findings
@@ -846,7 +942,7 @@ try {
         @{ Key = 'deployContainerRegistry'; Subnets = @('devops-build-agents-subnet', 'application-pe-subnet') },
         @{ Key = 'deployJumpbox'; Subnets = @('jumpbox-subnet') },
         @{ Key = 'deployBastion'; Subnets = @('AzureBastionSubnet') },
-        @{ Key = 'deployAzureFirewall'; Subnets = @('AzureFirewallSubnet') },
+        @{ Key = 'deployAzureFirewall'; Subnets = @('AzureFirewallSubnet', 'AzureFirewallManagementSubnet') },
         @{ Key = 'deployStorageAccount'; Subnets = @('pe-subnet') },
         @{ Key = 'deploySearchService'; Subnets = @('pe-subnet') },
         @{ Key = 'deploySpeechService'; Subnets = @('pe-subnet') },

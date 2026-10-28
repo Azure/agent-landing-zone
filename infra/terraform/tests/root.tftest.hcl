@@ -50,6 +50,15 @@ run "product_defaults" {
   }
   assert {
     condition = (
+      var.azureFirewallSku == "Basic" && var.deployAzureFirewallSubnet == null &&
+      var.deployAzureFirewallManagementSubnet == null && !var.deployGatewaySubnet &&
+      var.azureFirewallManagementSubnetName == "AzureFirewallManagementSubnet" &&
+      var.azureFirewallManagementSubnetPrefix == "192.168.3.192/26"
+    )
+    error_message = "Firewall defaults must retain Basic, nullable creation intent and opt-in gateway reservation."
+  }
+  assert {
+    condition = (
       var.deployJumpbox == null && var.deployBastion == null && var.deployNatGateway == null &&
       !local.effective_flags.jumpbox && !local.effective_flags.bastion && !local.effective_flags.nat &&
       !local.effective_flags.acr_pool && !local.effective_flags.hosted_prerequisites

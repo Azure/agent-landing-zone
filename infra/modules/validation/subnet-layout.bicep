@@ -19,8 +19,9 @@ var reservedNames = {
   gateway: 'GatewaySubnet'
   bastion: 'AzureBastionSubnet'
   firewall: 'AzureFirewallSubnet'
+  firewallManagement: 'AzureFirewallManagementSubnet'
 }
-var reservedNamesValid = empty(filter(relevant, subnet => contains(reservedNames, subnet.purpose) ? subnet.name != reservedNames[subnet.purpose] : contains(['gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet'], toLower(subnet.name))))
+var reservedNamesValid = empty(filter(relevant, subnet => contains(reservedNames, subnet.purpose) ? subnet.name != reservedNames[subnet.purpose] : contains(['gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet', 'azurefirewallmanagementsubnet', 'routeserversubnet'], toLower(subnet.name))))
 var prefixesPresent = empty(filter(relevant, subnet => empty(subnet.addressPrefix)))
 var prefixesValid = prefixesPresent ? empty(filter(selected, subnet => !alignedIpv4(subnet.addressPrefix))) : false
 var vnetPrefixesValid = useExistingVNet ? true : !empty(vnetAddressPrefixes) && empty(filter(vnetAddressPrefixes, prefix => !alignedIpv4(prefix)))
@@ -36,19 +37,24 @@ var contained = !useExistingVNet && rangesValid
 var aiGatewayValid = prefixesValid
   ? empty(filter(selected, subnet => subnet.purpose == 'aiGateway' && (int(split(subnet.addressPrefix, '/')[1]) > 27 || !deployNsgs)))
   : false
+var firewallPrefixesValid = prefixesValid
+  ? empty(filter(relevant, subnet => contains(['firewall', 'firewallManagement'], subnet.purpose) && (!alignedIpv4(subnet.addressPrefix) || int(split(subnet.addressPrefix, '/')[1]) > 26)))
+  : false
 var consumersHaveSubnets = useExistingVNet || empty(filter(subnetDefinitions, subnet => subnet.required && !subnet.create))
 var byoNsgsProtected = !useExistingVNet || empty(selected) || deployNsgs
 
 output validated bool = !namesValid || !namesUnique || !reservedNamesValid
-  ? fail('Subnet names must be nonempty, unique, valid names and use the exact reserved GatewaySubnet, AzureBastionSubnet and AzureFirewallSubnet names for those purposes.')
+  ? fail('Subnet names must be nonempty, unique, valid names and use the exact reserved GatewaySubnet, AzureBastionSubnet, AzureFirewallSubnet and AzureFirewallManagementSubnet names for those purposes.')
   : !prefixesPresent || !prefixesValid || !vnetPrefixesValid
     ? fail('Required subnet prefixes must be nonempty; managed subnet and new VNet prefixes must be aligned IPv4 CIDRs with prefix length 0 through 29.')
     : overlaps || !contained
       ? fail('Managed subnet CIDRs must not overlap and must be contained in the new VNet address space.')
-      : !aiGatewayValid
-        ? fail('Managed AI Gateway integration requires a /27 or larger subnet and deployNsgs=true.')
-        : !consumersHaveSubnets
-          ? fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.')
-          : !byoNsgsProtected
-            ? fail('Managed BYO subnet writes require deployNsgs=true to protect NSG associations.')
-            : true
+      : !firewallPrefixesValid
+        ? fail('Firewall data and management subnets require aligned IPv4 CIDRs of /26 or larger.')
+        : !aiGatewayValid
+          ? fail('Managed AI Gateway integration requires a /27 or larger subnet and deployNsgs=true.')
+          : !consumersHaveSubnets
+            ? fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.')
+            : !byoNsgsProtected
+              ? fail('Managed BYO subnet writes require deployNsgs=true to protect NSG associations.')
+              : true
