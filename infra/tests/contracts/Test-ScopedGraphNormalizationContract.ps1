@@ -72,6 +72,8 @@ try {
         @{ Name = 'unrelated resource injection'; Change = { param($t) $t.resources.unexpected = @{ type = 'Microsoft.Storage/storageAccounts'; name = 'drift' } } },
         @{ Name = 'unrelated output injection'; Change = { param($t) $t.outputs.unexpected = @{ type = 'string'; value = 'drift' } } },
         @{ Name = 'compiled manifest spoofing'; Change = { param($t) $t.variables['$fxv#0'].repo = 'https://example.invalid/drift.git' } },
+        @{ Name = 'compiled UI source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[0].commit = '0000000000000000000000000000000000000000' } },
+        @{ Name = 'compiled orchestrator source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[1].commit = '0000000000000000000000000000000000000000' } },
         @{ Name = 'compiled component tag spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[2].tag = 'v99.0.0' } },
         @{ Name = 'compiled component commit spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[2].commit = '0000000000000000000000000000000000000000' } }
     )

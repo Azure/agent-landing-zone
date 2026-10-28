@@ -5567,14 +5567,14 @@
                   {
                     "name": "agent-app-ui",
                     "repo": "https://github.com/Azure/agent-app-ui.git",
-                    "tag": "v3.3.1",
-                    "commit": "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554"
+                    "tag": "v3.4.0",
+                    "commit": "605323634381d190f3e872eb137443d0bc28f3ca"
                   },
                   {
                     "name": "agent-app-orchestrator",
                     "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-                    "tag": "v5.2.2",
-                    "commit": "243e61191a7fdc5f1cf92f2ac47b779d58be3fa3"
+                    "tag": "v5.3.0",
+                    "commit": "2c0579ef29a15bc862b150c1a6a8387f74de398e"
                   },
                   {
                     "name": "agent-app-ingestion",

@@ -59,6 +59,17 @@ class IntegrationPinTests(unittest.TestCase):
                 components["agent-app-ui"]["commit"],
             ),
         )
+        fixture = json.loads(
+            (ROOT / "infra" / "tests" / "contracts" / "fixtures"
+             / "incorporated-foundation-normalization.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            manifest["components"],
+            fixture["projection"]["changes"]["variables"]["changes"]["$fxv#0"]
+            ["changes"]["components"]["after"],
+        )
 
     def test_infra_is_in_repository_source_without_submodule_pin(self) -> None:
         self.assertFalse((ROOT / ".gitmodules").exists())
