@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
+from pathlib import Path
 import subprocess
 from typing import Mapping
 
 from config.continuity.settings import public_settings as continuity_public_settings
+from config.panel.settings import public_settings as panel_public_settings
+from config import find_repo_root
+from config.deployment.appconfig_intent import Setting, prepare_publication, resolve_intent
+from config.deployment.egress import selected_environment
 from config.deployment.composition import (
     APP_CONFIG_LABEL,
     DEPLOY_INGESTION_CONTAINER_APP,
@@ -34,18 +40,20 @@ def _resolve_az_command() -> str:
 
 
 def _run_az(arguments: list[str], *, required: bool = True) -> str:
-    completed = subprocess.run(
-        [_resolve_az_command(), *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            [_resolve_az_command(), *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("Azure CLI App Configuration/runtime request could not complete; check CLI availability and connectivity.") from None
     output = completed.stdout.strip()
     if completed.returncode != 0 or (required and not output):
-        detail = completed.stderr.strip() or output
-        raise RuntimeError(
-            f"Azure CLI command failed: az {' '.join(arguments)}: {detail}"
-        )
+        # Arguments and provider error bodies can contain private setting values.
+        raise RuntimeError("Azure CLI App Configuration/runtime request failed; check destination, access and CLI diagnostics securely.")
     return output
 
 
@@ -282,6 +290,7 @@ def build_settings(
         **continuity_public_settings(environment),
         **retrieval_settings,
         **source_settings,
+        **panel_public_settings(environment),
     }
 
 
@@ -290,7 +299,12 @@ KEYLESS_AUTH_KEYS = frozenset(
 )
 
 
-def publish_settings(endpoint: str, settings: Mapping[str, str]) -> None:
+def publish_settings(
+    endpoint: str,
+    settings: Mapping[str, str],
+    *,
+    entries: list[Setting] | None = None,
+) -> None:
     # Empty keyless-auth values are not published so values set by
     # infrastructure or an operator are never clobbered.
     ordered_settings = [
@@ -302,7 +316,14 @@ def publish_settings(endpoint: str, settings: Mapping[str, str]) -> None:
     if "CHAT_BACKEND" in settings:
         ordered_settings.append(("CHAT_BACKEND", settings["CHAT_BACKEND"]))
 
-    for key, value in ordered_settings:
+    publication = entries if entries is not None else [
+        Setting(name=key, value=value, label=APP_CONFIG_LABEL, contentType="text/plain")
+        for key, value in ordered_settings
+    ]
+    for setting in publication:
+        key, value = setting["name"], setting["value"]
+        if key in KEYLESS_AUTH_KEYS and not value:
+            continue
         _run_az(
             [
                 "appconfig",
@@ -315,9 +336,9 @@ def publish_settings(endpoint: str, settings: Mapping[str, str]) -> None:
                 "--value",
                 value,
                 "--label",
-                APP_CONFIG_LABEL,
+                setting["label"],
                 "--content-type",
-                "text/plain",
+                setting["contentType"],
                 "--auth-mode",
                 "login",
                 "--yes",
@@ -328,17 +349,35 @@ def publish_settings(endpoint: str, settings: Mapping[str, str]) -> None:
         )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--require-hosted-endpoint", action="store_true")
-    args = parser.parse_args()
-    endpoint = _required(os.environ, "APP_CONFIG_ENDPOINT")
-    settings = build_settings(
-        os.environ,
-        require_hosted_endpoint=args.require_hosted_endpoint,
+    parser.add_argument(
+        "--input", type=Path,
+        help="Declared parameter source used for provision; defaults to root main.parameters.json. Never generated tfvars/state.",
     )
-    publish_settings(endpoint, settings)
-    print(resolve_mode(os.environ).value)
+    args = parser.parse_args(argv)
+    try:
+        root = find_repo_root()
+        selected = selected_environment(root, _required(os.environ, "AZURE_ENV_NAME"))
+        intent = resolve_intent(args.input if args.input is not None else root / "main.parameters.json", selected)
+        authority_environment = dict(selected)
+        # Existing preDeploy sets this ephemeral marker before persisting it and
+        # explicitly clears it during rollback. Preserve that existing gate, but
+        # never take declaration substitutions/destination bindings from process
+        # defaults seeded by postProvision.
+        if "HOSTED_CUTOVER_COMPLETE" in os.environ:
+            authority_environment["HOSTED_CUTOVER_COMPLETE"] = os.environ["HOSTED_CUTOVER_COMPLETE"]
+        settings = build_settings(
+            authority_environment,
+            require_hosted_endpoint=args.require_hosted_endpoint,
+        )
+        entries = prepare_publication(intent, settings)
+        publish_settings(_required(selected, "APP_CONFIG_ENDPOINT"), settings, entries=entries)
+    except (ValueError, OSError, RuntimeError) as exc:
+        logging.error("%s", exc)
+        return 1
+    print(resolve_mode(authority_environment).value)
     return 0
 
 

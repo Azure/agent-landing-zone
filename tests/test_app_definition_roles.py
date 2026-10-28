@@ -206,7 +206,10 @@ class RoleAssignmentTests(unittest.TestCase):
         classic = plan_assignments(bundled(), hosted_orchestration=False)
         self.assertEqual({"ui", "orchestrator", "ingestion"}, {item.component for item in classic})
         ui_roles = {item.assignment.role for item in classic if item.component == "ui"}
-        self.assertEqual({a.role for a in expand_profiles(["blob-delegator"])}, ui_roles)
+        self.assertEqual(
+            {a.role for a in expand_profiles(["blob-delegator", "retrieval-reader"])},
+            ui_roles,
+        )
         self.assertIn("AcrPull", ui_roles)
         self.assertEqual({"frontend", "orchestrator", "dataingest"}, {item.service for item in classic})
 

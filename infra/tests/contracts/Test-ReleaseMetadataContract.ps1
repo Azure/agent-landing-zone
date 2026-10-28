@@ -9,7 +9,7 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'scripts\ReleaseMetadata.ps1')
-. (Join-Path $root 'scripts\parity\Parity.WorkflowYaml.ps1')
+. (Join-Path $root 'scripts\WorkflowYaml.ps1')
 $manifest = Get-Content (Join-Path $root 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
 $changelog = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw
 Assert-ReleaseMetadata $manifest $changelog
@@ -43,10 +43,10 @@ foreach ($case in $cases) {
     if (-not $caught) { throw 'Release metadata guard accepted an invalid mutation.' }
 }
 
-foreach ($name in @('bicep-validate', 'terraform-parity-validate')) {
-    $workflow = ConvertFrom-ParityWorkflowYaml -Yaml (Get-Content (Join-Path $root ".github\workflows\$name.yml") -Raw)
+foreach ($name in @('bicep-validate')) {
+    $workflow = ConvertFrom-WorkflowYaml -Yaml (Get-Content (Join-Path $root ".github\workflows\$name.yml") -Raw)
     foreach ($event in @('pull_request', 'push')) {
-        foreach ($path in @('manifest.json', 'CHANGELOG.md', 'scripts/ReleaseMetadata.ps1', 'tests/contracts/Test-ReleaseMetadataContract.ps1', 'scripts/parity/Parity.WorkflowYaml.ps1')) {
+        foreach ($path in @('manifest.json', 'CHANGELOG.md', 'scripts/ReleaseMetadata.ps1', 'tests/contracts/Test-ReleaseMetadataContract.ps1', 'scripts/WorkflowYaml.ps1', 'tests/scripts/WorkflowYaml.Tests.ps1')) {
             $covered = @($workflow['on'][$event].paths | Where-Object { $path -clike $_ }).Count -gt 0
             if (-not $covered) { throw "$name/$event does not cover $path." }
         }
@@ -56,5 +56,5 @@ foreach ($name in @('bicep-validate', 'terraform-parity-validate')) {
         throw "$name must run the release metadata contract once."
     }
 }
-Write-Host "Release metadata contract passed: actual files, 8 valid cases, $($cases.Count) rejected mutations, both workflow triggers and test steps."
+Write-Host "Release metadata contract passed: actual files, 8 valid cases, $($cases.Count) rejected mutations, Bicep workflow triggers and test step."
 exit 0

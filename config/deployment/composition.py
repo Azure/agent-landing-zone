@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Mapping
 
 from config.continuity.settings import public_settings as continuity_public_settings
+from config.deployment.app_settings import (
+    merge_app_configuration_settings,
+    substitute_values,
+)
 from config.deployment.existing_images import (
     apply_existing_images,
     discover_existing_images,
@@ -699,6 +703,36 @@ def compose_parameters(
     parameters = result.get("parameters")
     if not isinstance(parameters, dict):
         raise ValueError("Parameter document must contain a 'parameters' object.")
+    values = {
+        name: entry.get("value") if isinstance(entry, dict) else None
+        for name, entry in parameters.items()
+    }
+    if "additionalAppConfigurationSettings" in values:
+        values["additionalAppConfigurationSettings"] = substitute_values(
+            values["additionalAppConfigurationSettings"], environment,
+        )
+    parameters.update({
+        name: {"value": value}
+        for name, value in _resolve_application_overrides(
+            values, environment,
+            expected_hosted_source_commit=expected_hosted_source_commit,
+        ).items()
+    })
+    return result
+
+
+def _resolve_application_overrides(
+    source: Mapping[str, object],
+    environment: Mapping[str, str],
+    *,
+    expected_hosted_source_commit: str | None = None,
+) -> dict[str, object]:
+    """Resolve shared application intent without an ARM or Terraform envelope.
+
+    The Bicep compatibility adapter keeps untouched parameter entries verbatim.
+    Native adapters merge these same overrides into a plain value map.
+    """
+    parameters: dict[str, object] = {}
 
     mode = resolve_mode(environment)
     deploy_ingestion = resolve_ingestion_selection(environment)
@@ -749,36 +783,31 @@ def compose_parameters(
             require_image_digest=False,
         )
 
-    parameters["prepareHostedAgent"] = {"value": prepare_hosted}
+    parameters["prepareHostedAgent"] = prepare_hosted
     if prepare_hosted and not hosted:
         # Custom Hosted preparation requires foundation pull, not additional
         # operator privilege. Bundled/foundation callers retain their default.
-        parameters["grantHostedAgentProjectManager"] = {"value": False}
-    parameters["deployHostedAgent"] = {"value": deploy_hosted}
-    parameters["deployCosmosDb"] = {
-        "value": mode is DeploymentMode.CLASSIC
+        parameters["grantHostedAgentProjectManager"] = False
+    parameters["deployHostedAgent"] = deploy_hosted
+    parameters["deployCosmosDb"] = (
+        mode is DeploymentMode.CLASSIC
         or panel
         or preserving_classic_runtime
-    }
+    )
     if hosted and is_truthy(environment.get("NETWORK_ISOLATION")):
-        parameters["deployAcrTaskAgentPool"] = {"value": True}
+        parameters["deployAcrTaskAgentPool"] = True
 
     if hosted:
         agent_configuration = hosted_agent_configuration(environment)
         if not deploy_hosted:
             # Deploy rebuilds stale generated images after the foundation is ready.
             agent_configuration["version"] = ""
-        parameters["hostedAgent"] = {
-            "value": agent_configuration,
-        }
+        parameters["hostedAgent"] = agent_configuration
 
-    apps_parameter = parameters.get("containerAppsList")
-    if not isinstance(apps_parameter, dict) or not isinstance(
-        apps_parameter.get("value"), list
-    ):
+    apps = copy.deepcopy(source.get("containerAppsList"))
+    if not isinstance(apps, list):
         raise ValueError("containerAppsList must contain an array value.")
 
-    apps = apps_parameter["value"]
     if not deploy_ingestion:
         apps = [
             app for app in apps
@@ -805,29 +834,21 @@ def compose_parameters(
                     if role != "CosmosDBBuiltInDataContributor"
                 ]
     apps.extend(custom_container_apps(environment, apps, hosted_orchestration=hosted))
-    parameters["containerAppsList"] = {"value": apps}
+    parameters["containerAppsList"] = apps
     if hosted and not preserving_classic_runtime:
         # The orchestrator API key only protects classic UI-to-orchestrator
         # calls. Hosted mode authenticates with Entra tokens, so no key is
         # created in Key Vault or referenced from App Configuration.
-        parameters["useCAppAPIKey"] = {"value": False}
+        parameters["useCAppAPIKey"] = False
 
-    databases_parameter = parameters.get("databaseContainersList")
-    existing_containers = (
-        databases_parameter.get("value")
-        if isinstance(databases_parameter, dict)
-        else None
+    existing_containers = copy.deepcopy(source.get("databaseContainersList"))
+    parameters["databaseContainersList"] = resolve_database_containers(
+        mode,
+        existing_containers if isinstance(existing_containers, list) else [],
+        preserving_classic_runtime=preserving_classic_runtime,
     )
-    parameters["databaseContainersList"] = {
-        "value": resolve_database_containers(
-            mode,
-            existing_containers if isinstance(existing_containers, list) else [],
-            preserving_classic_runtime=preserving_classic_runtime,
-        )
-    }
 
-    parameters["additionalAppConfigurationSettings"] = {
-        "value": [
+    generated_settings = [
             _setting(DEPLOY_INGESTION_CONTAINER_APP, str(deploy_ingestion).lower()),
             *(
                 [_setting("SEARCH_RAG_INDEX_NAME", environment["SEARCH_RAG_INDEX_NAME"].strip())]
@@ -879,8 +900,15 @@ def compose_parameters(
                 "hosted_agent" if runtime_hosted else "orchestrator",
             ),
         ]
-    }
-    return result
+    parameters["additionalAppConfigurationSettings"] = merge_app_configuration_settings(
+        source.get("additionalAppConfigurationSettings", []), generated_settings,
+        default_label=source.get("appConfigLabel", APP_CONFIG_LABEL),
+        application_names=[
+            app["canonical_name"] for app in apps
+            if isinstance(app, dict) and isinstance(app.get("canonical_name"), str)
+        ],
+    )
+    return parameters
 
 
 def compose_file(

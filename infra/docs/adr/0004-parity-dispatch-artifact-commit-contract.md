@@ -1,12 +1,15 @@
 # ADR-0004: Separate the handoff artifact commit from the comparison baselines in the parity dispatch
 
-- Status: proposed
+- Status: superseded by [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md)
 - Date: 2026-08-22
 - Owners: AI Landing Zone maintainers and Terraform pattern-module maintainers
 - Related context: issue #136 and Terraform pull request #170 (context, not review or approval evidence)
 - Refines: [ADR-0003](./0003-repository-native-terraform-parity-coordination.md)
 
 ## Context
+
+> Historical decision: external Terraform publication and its dispatch contract
+> are retired. The original proposal below is retained for audit, not operator use.
 
 ADR-0003 established a repository-native parity ledger and a bounded, identifier-only
 `repository_dispatch` from this repository to the Terraform pattern-module repository. The consumer

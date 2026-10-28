@@ -13,11 +13,16 @@ from typing import Mapping, Sequence
 
 from config.appdefinition.binding import resolve_env_name
 from config.appdefinition.errors import EnvironmentNotFoundError
+from config.deployment.provider import resolve_provider
 from config.deployment.resource_groups import (
     ResourceGroupError,
+    check_binding,
     read_binding,
+    resolve_resource_groups,
     resource_group_for,
 )
+from config.deployment.terraform_groups import OWNERSHIP_FILENAME, read_group_ownership
+from util.terraform_backend import ensure_backend_binding, resolve_backend
 
 LOGGER = logging.getLogger(__name__)
 RESOURCE_GROUP_KEYS = (
@@ -25,6 +30,10 @@ RESOURCE_GROUP_KEYS = (
     "AZURE_APP_RESOURCE_GROUP",
     "AZURE_FOUNDRY_RESOURCE_GROUP",
     "AZURE_NETWORK_RESOURCE_GROUP",
+)
+BACKEND_KEYS = (
+    "TF_STATE_RESOURCE_GROUP", "TF_STATE_STORAGE_ACCOUNT", "TF_STATE_CONTAINER",
+    "TF_STATE_SUBSCRIPTION_ID", "ARM_ENVIRONMENT", "ARM_ACCESS_KEY", "ARM_SAS_TOKEN",
 )
 
 
@@ -76,7 +85,7 @@ def read_environment(environment_name: str | None = None) -> dict[str, str]:
     if not isinstance(values, dict):
         raise TeardownError("azd environment values must be an object.")
     environment: dict[str, str] = {}
-    for key in (*RESOURCE_GROUP_KEYS, "AZURE_ENV_NAME", "AZURE_SUBSCRIPTION_ID"):
+    for key in (*RESOURCE_GROUP_KEYS, *BACKEND_KEYS, "AZURE_ENV_NAME", "AZURE_SUBSCRIPTION_ID"):
         value = values.get(key)
         if value is None:
             continue
@@ -87,7 +96,8 @@ def read_environment(environment_name: str | None = None) -> dict[str, str]:
 
 
 def require_safe_teardown(
-    environment: Mapping[str, str], azure_dir: Path, environment_name: str | None
+    environment: Mapping[str, str], azure_dir: Path, environment_name: str | None,
+    *, provider: str = "bicep",
 ) -> None:
     context = dict(environment)
     if environment_name:
@@ -100,6 +110,23 @@ def require_safe_teardown(
         bound = read_binding(azure_dir, name)
     except ResourceGroupError as exc:
         raise TeardownError(f"Automatic teardown is blocked by the recorded binding: {exc}") from exc
+    ownership_file = azure_dir / name / OWNERSHIP_FILENAME
+    if provider == "terraform":
+        if bound is None or bound.application is None:
+            raise TeardownError("Terraform teardown requires the original resolved resource-group binding.")
+        selection = resolve_resource_groups(context)
+        check_binding(selection, bound)
+        if read_group_ownership(ownership_file, selection, bound) is None:
+            raise TeardownError("Terraform teardown requires the original resource-group ownership record.")
+        ensure_backend_binding(resolve_backend(context), azure_dir)
+        return
+    if provider != "bicep":
+        raise TeardownError("Unsupported infrastructure provider; automatic teardown is blocked.")
+    if ownership_file.exists():
+        raise TeardownError(
+            "Terraform ownership was recorded but Bicep is selected. Restore the "
+            "original infrastructure provider before teardown."
+        )
     if bound is not None and bound.split:
         raise TeardownError(
             "azd down is blocked by this environment's recorded multi-resource-group "
@@ -125,15 +152,20 @@ def require_safe_teardown(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--env-name", default=os.environ.get("AZURE_ENV_NAME"))
     parser.add_argument("--azure-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         environment = read_environment(args.env_name)
-        require_safe_teardown(environment, args.azure_dir, args.env_name)
+        for key in ("ARM_ACCESS_KEY", "ARM_SAS_TOKEN"):
+            if os.environ.get(key):
+                environment[key] = os.environ[key]
+        provider = resolve_provider(args.repo_root)["provider"]
+        require_safe_teardown(environment, args.azure_dir, args.env_name, provider=provider)
     except (
-        TeardownError, ResourceGroupError, EnvironmentNotFoundError,
+        ValueError, EnvironmentNotFoundError,
         OSError, json.JSONDecodeError,
     ) as exc:
         LOGGER.error("%s", exc)

@@ -1070,6 +1070,7 @@ class HookTests(ScratchTest):
 
     def exercise_hook(
         self, shell: str, app_code: int, rg_code: int, inspect_defaults: bool = False,
+        provider: str = "bicep",
     ) -> None:
         suffix = "ps1" if shell == "pwsh" else "sh"
         scripts = self.scratch / "scripts"
@@ -1082,24 +1083,34 @@ class HookTests(ScratchTest):
         environment = dict(
             os.environ, TRACE=str(trace), APP_CODE=str(app_code), RG_CODE=str(rg_code),
             REAL_PYTHON=sys.executable,
+            INFRA_TEST_PROVIDER=provider,
         )
         if inspect_defaults:
             (self.scratch / "infra").mkdir(exist_ok=True)
-            (self.scratch / "infra" / "main.bicep").write_text("", encoding="utf-8")
+            if provider == "bicep":
+                (self.scratch / "infra" / "main.bicep").write_text("", encoding="utf-8")
         selection = json.dumps({
             "foundry": "rg-ai", "application": "rg-app", "network": "rg-net",
             "create_resource_groups": True,
+            "ownershipFile": str(self.azure_dir / "offline" / "terraform-resource-groups.json"),
         })
         if shell == "pwsh":
             wrapper = self.scratch / "wrapper.ps1"
             wrapper.write_text(
-                "function azd { $global:LASTEXITCODE = 0; 'AZURE_ENV_NAME=\"offline\"' }\n"
+                "function azd { $global:LASTEXITCODE = 0; "
+                "if ($args -contains 'json') { '{\"AZURE_ENV_NAME\":\"offline\"}' } "
+                "else { 'AZURE_ENV_NAME=\"offline\"' } }\n"
                 "function python {\n"
-                " if ($args[1] -like '*config.appdefinition*') {\n"
+                " if ($args[1] -like '*config.deployment.provider*') {\n"
+                "  $global:LASTEXITCODE = 0\n"
+                "  @{ provider = $env:INFRA_TEST_PROVIDER; path = 'infra/terraform'; module = 'main' } | ConvertTo-Json -Compress\n"
+                " } elseif ($args[1] -like '*config.appdefinition*') {\n"
                 "  Add-Content -LiteralPath $env:TRACE -Value appdefinition\n"
                 "  $global:LASTEXITCODE = [int]$env:APP_CODE\n"
-                " } elseif ($args[1] -like '*config.deployment.resource_groups*') {\n"
-                "  Add-Content -LiteralPath $env:TRACE -Value resource_groups\n"
+                " } elseif ($args[1] -like '*config.deployment.resource_groups*' -or "
+                "$args[1] -like '*config.deployment.terraform_groups*') {\n"
+                "  $groupModule = if ($env:INFRA_TEST_PROVIDER -eq 'terraform') { 'terraform_groups' } else { 'resource_groups' }\n"
+                "  Add-Content -LiteralPath $env:TRACE -Value $groupModule\n"
                 "  $global:LASTEXITCODE = [int]$env:RG_CODE\n"
                 f"  '{selection}'\n"
                 " } elseif ($args[1] -like '*config.deployment.topology*') {\n"
@@ -1119,12 +1130,21 @@ class HookTests(ScratchTest):
         else:
             bin_dir = self.scratch / "bin"
             bin_dir.mkdir(exist_ok=True)
-            (bin_dir / "azd").write_text("#!/bin/sh\nprintf 'AZURE_ENV_NAME=\"offline\"\\n'\n", encoding="utf-8")
+            (bin_dir / "azd").write_text(
+                "#!/bin/sh\ncase \"$*\" in\n"
+                "*'--output json'*) printf '%s\\n' '{\"AZURE_ENV_NAME\":\"offline\"}';;\n"
+                "*) printf 'AZURE_ENV_NAME=\"offline\"\\n';;\nesac\n",
+                encoding="utf-8",
+            )
             (bin_dir / "python3").write_text(
                 '#!/bin/sh\ncase "$2" in\n'
+                'config.deployment.provider) printf \'{"provider":"%s","path":"infra/terraform","module":"main"}\\n\' "$INFRA_TEST_PROVIDER"; exit 0;;\n'
                 'config.appdefinition) echo appdefinition >> "$TRACE"; exit "$APP_CODE";;\n'
                 'config.deployment.resource_groups) echo resource_groups >> "$TRACE"; '
                 f"printf '%s\\n' '{selection}'; " + 'exit "$RG_CODE";;\n'
+                'config.deployment.terraform_groups) echo terraform_groups >> "$TRACE"; '
+                f"printf '%s\\n' '{selection}'; " + 'exit "$RG_CODE";;\n'
+                '*"import json, sys"*) exec "$REAL_PYTHON" "$@";;\n'
                 'config.deployment.topology) '
                 '[ "$AZURE_RESOURCE_GROUP" = rg-ai ] && '
                 '[ "$AZURE_APP_RESOURCE_GROUP" = rg-app ] && '
@@ -1142,7 +1162,8 @@ class HookTests(ScratchTest):
             command = [shutil.which(shell), str(script)]
         result = subprocess.run(command, cwd=self.scratch, env=environment,
                                 capture_output=True, text=True, timeout=30)
-        expected = ["appdefinition"] + (["resource_groups"] if not app_code else [])
+        group_module = "terraform_groups" if provider == "terraform" else "resource_groups"
+        expected = ["appdefinition"] + ([group_module] if not app_code else [])
         if inspect_defaults:
             expected.append("defaults_exported")
         self.assertEqual(expected, trace.read_text(encoding="utf-8-sig").splitlines(), result.stdout + result.stderr)
@@ -1171,6 +1192,13 @@ class HookTests(ScratchTest):
                 with self.subTest(shell=shell):
                     (self.scratch / "trace").unlink(missing_ok=True)
                     self.exercise_hook(shell, 0, 0, inspect_defaults=True)
+
+    def test_terraform_destinations_do_not_use_the_bicep_bootstrap(self) -> None:
+        for shell in ("pwsh", "bash"):
+            if shutil.which(shell):
+                with self.subTest(shell=shell):
+                    (self.scratch / "trace").unlink(missing_ok=True)
+                    self.exercise_hook(shell, 0, 0, inspect_defaults=True, provider="terraform")
 
 
 if __name__ == "__main__":

@@ -176,27 +176,6 @@ foreach ($group in $groups) {
                     if (@($tools | Sort-Object -Unique).Count -ne $tools.Count) {
                         Add-ValidationError $path.FullName 'duplicate tool aliases'
                     }
-                    if ($name -eq 'terraform-parity') {
-                        if (@($tools | Where-Object { $_ -notin @('read', 'search') }).Count -gt 0) {
-                            Add-ValidationError $path.FullName 'terraform-parity agent must be read-only'
-                        }
-                        foreach ($requiredText in @(
-                            'approval.status=approved',
-                            'Pending',
-                            'cannot be consumed',
-                            'inventoryCommitSha',
-                            'inventoryReviewUrl',
-                            'Azure/terraform-azurerm-avm-ptn-aiml-landing-zone',
-                            'Do not edit',
-                            'merge',
-                            'deploy',
-                            'publish'
-                        )) {
-                            if ($asset.Text -notmatch [regex]::Escape($requiredText)) {
-                                Add-ValidationError $path.FullName "terraform-parity agent is missing required boundary text: $requiredText"
-                            }
-                        }
-                    }
                 }
             }
             'skill' {

@@ -103,3 +103,24 @@ venv.bak/
 # provision and marks it skip-worktree so the regenerated file does not show
 # in git status. To commit seed changes, first run:
 #   git update-index --no-skip-worktree infra/main.parameters.json
+
+# Terraform state/plans may contain secrets. Keep caches and environment inputs
+# out of source, including materialized native azd main.tfvars.json. Retain the
+# non-secret backend template and provider lock file.
+**/.terraform/
+**/.terraform-plugin-cache/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+*.plan
+*.plan.json
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+*.tfbackend
+*.backend.conf
+*.backend.conf.json
+!infra/terraform/provider.conf.json
+!infra/terraform/.terraform.lock.hcl
