@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v5.5.0] - 2026-10-28
 
 ### Added
 - Platform configuration for integrated delegated hosted retrieval:
@@ -19,6 +19,16 @@
 - ADR-0029 defines the coordinated UI/runtime credential forwarding,
   request isolation, failure and adoption contract.
 
+### Changed
+- Ship coordinated UI and orchestrator knowledge security, including signed
+  user/session-bound citation downloads, current-user Storage authorization
+  for shared documents, and exact-document checks for conversation uploads.
+- Preserve downstream Conditional Access challenges through both hosted
+  protocols and offer explicit standalone or portal sign-in recovery without
+  replaying failed or partially completed operations.
+- Require manual dispatch for the orchestrator's development deployment
+  workflow; normal source updates retain their quality checks.
+
 ### Fixed
 - Enable native document permissions on new application indexes and reconcile
   existing compatible indexes with conditional updates, without deleting
@@ -29,10 +39,22 @@
   make provisioning succeed.
 
 ### Validation
-- Local validation only; live Azure two-user and private-network acceptance
-  is explicitly deferred. Matching UI/runtime changes are coordinated
-  separately; this feature does not update release pins or claim a newly
-  validated published combination.
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Platform retrieval provisioning, permission profiles, shared deployment
+  composition and Bicep/Terraform interface contracts pass.
+- Component acceptance covers full behavioral suites, actual hosted SDK
+  contracts, installed-wheel and offline Linux-container execution, and the
+  protected quality checks.
+- Central documentation builds in strict MkDocs mode, including both
+  infrastructure-provider runbooks and the complete authentication recovery
+  setup.
 
 ## [v5.4.0] - 2026-10-27
 
