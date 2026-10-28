@@ -17,6 +17,8 @@
   with the documented single-writer model for shared state.
 - Require bidirectional Bicep/Terraform parity for every infrastructure change
   in AGENTS, Copilot instructions and constitution v2.1.0.
+- Align managed Code Quality analysis with the remaining Python sources after
+  retiring the JavaScript-only parity tooling.
 - Organize central deployment runbooks by infrastructure-only/full-stack outcome,
   with separate Bicep and Terraform paths and a Terraform composition overview.
 
