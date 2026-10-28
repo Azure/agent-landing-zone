@@ -378,6 +378,7 @@
           "roles": [
             "AppConfigurationDataReader",
             "AcrPull",
+            "SearchIndexDataReader",
             "StorageBlobDataReader",
             "StorageBlobDelegator",
             "KeyVaultSecretsUser"

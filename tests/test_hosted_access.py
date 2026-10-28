@@ -290,7 +290,7 @@ class HostedAccessTests(unittest.TestCase):
         self.azure.live["versions"] = {"latest": dict(self.azure.version, version="8")}
         self.assertEqual("7", self.discover().agent_version)
 
-    def test_role_allowlist_excludes_search_blob_conversation_elevated(self):
+    def test_nonretrieval_plan_excludes_search_blob_conversation_elevated(self):
         self.assertEqual({
             "516239f1-63e1-4d78-a4de-a74fb236a071",
             "4633458b-17de-408a-b874-0445c86b69e6",
