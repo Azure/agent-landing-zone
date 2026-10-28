@@ -4,6 +4,11 @@ This is the stable repository-wide contract for GitHub Copilot engineering
 agents. Detailed procedures belong in `.github/skills/`; file-specific rules
 belong in `.github/instructions/`.
 
+When this directory is part of Agent Landing Zone, the root `AGENTS.md` and
+constitution also apply. The incorporated Bicep foundation and product-owned
+`terraform/` composition are co-maintained; the root manifest's `infra.source`
+records Bicep provenance only.
+
 The assets under `.github/agents/` and `.github/skills/` guide engineers who
 develop and operate this repository. They do not define Microsoft Foundry
 agents, Container Apps, MCP servers, or any other deployed Azure resource.
@@ -14,7 +19,7 @@ Follow, in this order:
 
 1. Security, privacy, authorization, and platform instructions.
 2. Task requirements and acceptance criteria.
-3. Executable Bicep, parameter, manifest, and pipeline contracts.
+3. Executable Bicep/Terraform, parameter, manifest, and pipeline contracts.
 4. `.github/copilot-instructions.md`, this contract, and applicable scoped
    instructions.
 5. Local conventions observed in the affected files.
@@ -42,6 +47,8 @@ Azure services in standard and network-isolated deployment modes.
   - `app-configuration/`: App Configuration key-value population.
   - `bing-search/`: Grounding with Bing resources.
 - `constants/` is the source for role IDs and resource abbreviations.
+- `terraform/` contains the Agent Landing Zone Terraform root, with flat domain
+  composition, explicit AVM module pins and a committed provider lock.
 - `scripts/` and `install.ps1` contain cross-platform PowerShell automation.
 - `pipelines/azuredevops/` and `.github/workflows/` contain validation and
   deployment automation.
@@ -55,6 +62,21 @@ modules rather than duplicating them inline. Drive deployment shape from
 `containerAppsList`, `modelDeploymentList`, `databaseContainersList`,
 `storageAccountContainersList`, and related data structures instead of
 workload-specific branches.
+
+## Bicep and Terraform parity
+
+Every infrastructure change, including fixes and defaults, must assess the
+counterpart in both directions. Update affected Bicep modules and Terraform
+domain files in the same coordinated change, or explain and test why the other
+implementation needs no change. Compare supported inputs/defaults, ownership,
+outputs, identity/RBAC, networking, App Configuration and lifecycle behavior.
+Preserve foundation/application separation and provider-specific state
+boundaries; equal generated names are not required.
+
+Run the relevant checks for both providers and shared hooks. Terraform checks
+include formatting, backend-disabled readonly initialization, validation and
+the affected tests under `terraform/tests`. Record approved differences and
+unverified scenarios explicitly; compilation and mocks are not deployed parity.
 
 ## Compatibility and parameterization
 
@@ -76,8 +98,9 @@ workload-specific branches.
 
 ## Identity, networking, and naming
 
-- Prefer managed identity and least-privilege RBAC. Keep role assignments
-  explicit and centralized through `modules/security/`.
+- Prefer managed identity and least-privilege RBAC. Keep Bicep role assignments
+  explicit through `modules/security/` and Terraform assignments through
+  `terraform/main.identity.tf`, using the shared role constants.
 - Read role IDs and abbreviations from `constants/`; do not duplicate literals.
 - Never hardcode tenant IDs, subscription IDs, credentials, or environment-
   specific resource names.
@@ -145,7 +168,8 @@ This repository uses semantic versioning. `main` holds released versions and
 the integration branch includes the latest release from `main`. Release tags
 and GitHub Release titles use exactly `vMAJOR.MINOR.PATCH`; keep
 `manifest.json`, changelog, tag, and release title aligned. Major or minor
-changes require Portal and Terraform landing-zone parity review.
+changes require Portal parity review. Bicep/Terraform parity review applies to
+every infrastructure behavior change, including patches.
 
 ## Collaboration and handoffs
 

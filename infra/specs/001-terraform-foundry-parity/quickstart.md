@@ -1,5 +1,10 @@
 # Quickstart: Validate Terraform Parity Coordination
 
+> **Retired:** Do not run these historical commands against the current checkout.
+> [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md)
+> supersedes this coordination pipeline. Use the current
+> [offline test harness](../../tests/README.md) instead.
+
 This guide validates coordination assets. It does not deploy Azure resources or prove Terraform
 parity. Commands under `scripts/parity/` become available during implementation.
 

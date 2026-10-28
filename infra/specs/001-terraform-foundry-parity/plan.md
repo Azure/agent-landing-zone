@@ -1,5 +1,10 @@
 # Implementation Plan: Terraform Parity for the Foundry AI Landing Zone
 
+> **Historical plan:** Superseded by
+> [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md).
+> The external assessment/publication pipeline is retired; the plan and its
+> sibling records are not active implementation instructions.
+
 **Branch**: `001-terraform-foundry-parity` | **Date**: 2026-08-21 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/001-terraform-foundry-parity/spec.md`

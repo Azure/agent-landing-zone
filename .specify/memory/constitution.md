@@ -1,26 +1,21 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 -> 2.0.0 (MAJOR: redefines infrastructure ownership,
-  the App Configuration label contract, and sources of truth)
-- Rationale: Agent Landing Zone rebrand (specs/002-agent-landing-zone-rebrand);
-  decisions in docs/adr/ADR-0014 through ADR-0018. Approver: Paulo.
-- Title: "GPT-RAG Constitution" -> "Agent Landing Zone Constitution"
+- Version change: 2.0.0 -> 2.1.0 (MINOR: adds bidirectional infrastructure
+  parity as a governing principle)
+- Rationale: maintainer-requested co-maintenance of the integrated Bicep and
+  Terraform implementations; docs/adr/ADR-0028.
 - Modified principles:
-  - I. Preserve Repository and Provisioning Boundaries: `infra/` is now
-    repository-owned source instead of a populated submodule
-  - II. Keep Cross-Repository Contracts Explicit and Compatible: App
-    Configuration label `gpt-rag` -> `agent-lz`, with dual-read of both labels
-    during the transition (research R14)
-- Modified sections: Sources of Truth and Documentation (`manifest.json`
-  `infra.source` {repo, tag, commit} replaces the `.gitmodules` consistency
-  rule; product docs move from the `docs` branch to the central AI Landing
-  Zones documentation site)
-- Added/removed sections: none
-- Migration impact: new deployments only (ADR-0018); components must read both
-  labels before the umbrella switches; rollback runs in reverse (R14)
-- Dependent files updated: AGENTS.md; .github/copilot-instructions.md;
-  .github/instructions/release.instructions.md;
-  .github/instructions/lifecycle-hooks.instructions.md
+  - I. Preserve Repository and Provisioning Boundaries: distinguish Bicep
+    upstream provenance from the product-owned Terraform composition
+- Added principle: VI. Maintain Bidirectional Infrastructure Parity
+- Modified sections: Sources of Truth and Documentation; Decision and
+  Delivery Gates
+- Removed sections: none
+- Compatibility/recovery impact: no resource, runtime contract or state
+  conversion; provider-specific recovery remains within the selected provider
+- Dependent templates/commands: unchanged; they read this constitution at runtime
+- Related guidance updated in the coordinated change: AGENTS.md; infra/AGENTS.md;
+  Copilot instructions; lifecycle/release instructions; engineering references
 - Follow-up TODOs: none
 -->
 # Agent Landing Zone Constitution
@@ -36,10 +31,11 @@ here. Configuration modules MUST remain focused on their service area, and
 lifecycle scripts MUST coordinate rather than absorb unrelated configuration
 behavior. Changes MUST reuse existing patterns before introducing new abstractions.
 
-The in-repository `infra/` directory is repository-owned source, incorporated
-from the AI Landing Zone release recorded in `manifest.json` `infra.source`.
-Infrastructure changes MUST be made in `infra/` through reviewed changes that
-keep that provenance accurate; `infra/` MUST provision the foundation only, and
+The in-repository `infra/` directory is repository-owned foundation source.
+`manifest.json` `infra.source` records the incorporated Bicep source; it MUST
+NOT be used as provenance for the product-owned `infra/terraform` composition
+(ADR-0028). Infrastructure changes MUST be reviewed and keep that provenance
+accurate; `infra/` MUST provision the foundation only, and
 application deployment MUST stay outside it (ADR-0016). Search and Foundry IQ
 provisioning MUST remain template-driven: changes extend templates and typed
 inputs rather than hardcoding resource payloads in Python. These boundaries
@@ -106,15 +102,46 @@ in place. Unavailable validation MUST be reported with the missing prerequisite
 and residual risk; it MUST NOT be presented as a passing result. Generic template
 language making tests optional MUST NOT waive these requirements.
 
+### VI. Maintain Bidirectional Infrastructure Parity
+
+Bicep and Terraform MUST implement the same supported Agent Landing Zone
+capabilities and observable contracts. Every infrastructure change MUST assess
+its impact in both directions: Bicep to Terraform and Terraform to Bicep,
+including fixes, defaults, feature flags, dependencies, and shared lifecycle
+changes, not only new features or major/minor releases.
+
+An affected capability MUST be implemented in both providers in the same
+coordinated change. The assessment MUST cover inputs and allowed values,
+effective defaults, resource ownership, outputs and consumers, identity and
+RBAC, networking, App Configuration, foundation/application separation, and
+provision/deploy/reprovision/teardown behavior. A provider-only implementation
+change MUST state why the counterpart needs no change and provide evidence
+that the common behavior remains intact.
+
+Parity MUST mean equivalent supported behavior, not identical implementation,
+generated resource names, or provider-specific state mechanics. A necessary
+difference MUST identify its scope, operator impact, rationale, tests, and
+maintainer approval; hard-to-reverse differences MUST follow the architectural
+decision gate. An unimplemented option, silent fallback, or missing validation
+MUST NOT be presented as parity.
+
+Behavior changes MUST run the relevant Bicep and Terraform checks, shared
+contract regressions, and affected PowerShell/shell hook tests. Terraform
+checks MUST preserve the committed provider lock and explicit module pins.
+Compilation, mocked tests, and plan previews MUST NOT be presented as deployed
+Azure equivalence; missing live evidence and residual risk MUST remain explicit.
+
 ## Sources of Truth and Documentation
 
 `manifest.json` MUST remain the authority for runtime component versions and the
 validated release combination. `manifest.json` `infra.source` (`repo`, `tag`,
-`commit`) MUST record the upstream AI Landing Zone release that the in-repository
-`infra/` was incorporated from, and MUST be updated whenever `infra/` is
-re-synchronized. Deployment topology and defaults MUST come from executable
-configuration and the in-repository infrastructure, not copied version tables
-or agent assumptions.
+`commit`) MUST record the upstream AI Landing Zone release incorporated into
+the Bicep foundation and MUST be updated when that source is re-synchronized.
+The local Terraform composition MUST keep its provider lock and module pins
+in `infra/terraform`, not overload `infra.source`. Deployment topology and
+defaults MUST come from `main.parameters.json`, the shared typed resolver and
+both executable infrastructure implementations, not copied version tables or
+agent assumptions.
 
 User and operator documentation MUST describe the currently shipped behavior.
 User-visible changes, including changes in pinned runtime components, MUST update
@@ -131,6 +158,11 @@ repositories, affected contracts and trust boundaries, compatibility impact, and
 required evidence. Broad or high-risk changes to boundaries, contracts, data,
 identity, deployment topology, or other hard-to-reverse characteristics MUST have
 an architectural decision recorded before implementation.
+
+Infrastructure plans and pull requests MUST identify the Bicep and Terraform
+counterparts, the parity changes or justified non-impact, the checks run for
+each provider, and any unverified scenarios. A one-provider change MUST NOT
+bypass this assessment by deferring its counterpart to an unspecified follow-up.
 
 Plans and reviews MUST check these principles and record any unresolved conflict;
 a justification alone MUST NOT waive a governing requirement. Branching,
@@ -161,4 +193,4 @@ Every implementation plan and review MUST evaluate compliance against the curren
 constitution. Version 1.0.0 is the initial adoption of the existing repository
 principles, not a new product or release-policy decision.
 
-**Version**: 2.0.0 | **Ratified**: 2026-09-06 | **Last Amended**: 2026-10-01
+**Version**: 2.1.0 | **Ratified**: 2026-09-06 | **Last Amended**: 2026-10-27

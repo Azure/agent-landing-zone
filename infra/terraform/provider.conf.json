@@ -1,0 +1,11 @@
+{
+  "resource_group_name": "${TF_STATE_RESOURCE_GROUP}",
+  "storage_account_name": "${TF_STATE_STORAGE_ACCOUNT}",
+  "container_name": "${TF_STATE_CONTAINER}",
+  "subscription_id": "${TF_STATE_SUBSCRIPTION_ID}",
+  "environment": "${ARM_ENVIRONMENT}",
+  "key": "agent-landing-zone/${AZURE_ENV_NAME}.tfstate",
+  "use_azuread_auth": true,
+  "use_cli": true,
+  "lookup_blob_endpoint": true
+}

@@ -7,24 +7,48 @@ $ErrorActionPreference = 'Stop'
 function Invoke-PythonModule {
     param(
         [Parameter(Mandatory = $true)][string]$ModuleName,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [AllowEmptyString()][string]$StandardInput
     )
-    & python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['$ModuleName'] + sys.argv[1:]; runpy.run_module('$ModuleName', run_name='__main__')" @Arguments
+    $pythonArguments = @('-c', "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['$ModuleName'] + sys.argv[1:]; runpy.run_module('$ModuleName', run_name='__main__')") + $Arguments
+    if ($PSBoundParameters.ContainsKey('StandardInput')) {
+        $StandardInput | & python @pythonArguments
+    } else {
+        & python @pythonArguments
+    }
 }
 
-#-------------------------------------------------------------------------------
-# Mirror azd environment variables into process environment
-# This avoids persisting secrets in the User environment (registry), and makes
-# any previously-persisted Agent Landing Zone topology markers (AZURE_RESOURCE_GROUP,
-# APP_CONFIG_ENDPOINT, DEPLOYMENT_TOPOLOGY, ...) visible to the topology
-# resolution step below on a second/subsequent 'azd provision' run.
-#-------------------------------------------------------------------------------
-& azd env get-values | ForEach-Object {
-  if ($_ -match '^([^=]+)=(.*)$') {
-    $k = $matches[1]
-    $v = $matches[2] -replace '^"|"$'
-    Set-Item -Path Env:$k -Value $v
-  }
+function Get-AzdEnvironmentJson {
+    $arguments = @('env', 'get-values', '--output', 'json')
+    if ($env:AZURE_ENV_NAME) { $arguments += @('--environment', $env:AZURE_ENV_NAME) }
+    $values = & azd @arguments
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($values -join "`n"))) {
+        throw 'Cannot load the selected azd environment; provisioning has not started.'
+    }
+    return ($values -join "`n")
+}
+
+function Import-AzdEnvironment {
+    try {
+        $azdEnvironment = Get-AzdEnvironmentJson | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-Error "Cannot read valid JSON from the selected azd environment; provisioning has not started."
+        exit 1
+    }
+    if ($azdEnvironment -isnot [pscustomobject] -or @($azdEnvironment.PSObject.Properties).Count -eq 0) {
+        Write-Error "The selected azd environment must be a nonempty object."
+        exit 1
+    }
+    foreach ($property in $azdEnvironment.PSObject.Properties) {
+        if ($property.Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or
+            $property.Value -isnot [string] -or $property.Value.Contains([char]0)) {
+            Write-Error "Invalid azd environment key or value; provisioning has not started."
+            exit 1
+        }
+    }
+    foreach ($property in $azdEnvironment.PSObject.Properties) {
+        Set-Item -Path "Env:$($property.Name)" -Value $property.Value
+    }
 }
 
 # Locate the repository root by its markers (manifest.json plus azure.yaml),
@@ -47,6 +71,32 @@ $env:AGENTLZ_REPO_ROOT = $projectRoot
 $infraDir = Join-Path $projectRoot "infra"
 $mainBicep = Join-Path $infraDir "main.bicep"
 $manifestSource = Join-Path $projectRoot "manifest.json"
+
+# BEGIN azd environment import
+Import-AzdEnvironment
+# END azd environment import
+
+# BEGIN infrastructure provider validation
+$providerOutput = Invoke-PythonModule -ModuleName 'config.deployment.provider' -Arguments @('--repo-root', $projectRoot)
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Infrastructure provider validation failed; provisioning has not started."
+    exit $LASTEXITCODE
+}
+try {
+    $providerConfiguration = ($providerOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    Write-Error "Infrastructure provider validation returned invalid JSON."
+    exit 1
+}
+$providerProperty = if ($providerConfiguration -is [pscustomobject]) {
+    $providerConfiguration.PSObject.Properties['provider']
+} else { $null }
+if ($null -eq $providerProperty -or $providerProperty.Value -notin @('bicep', 'terraform')) {
+    Write-Error "Infrastructure provider validation returned an unsupported provider."
+    exit 1
+}
+$infrastructureProvider = $providerProperty.Value
+# END infrastructure provider validation
 
 #-------------------------------------------------------------------------------
 # Application definition: validate and bind before any Azure change.
@@ -78,13 +128,19 @@ if ($appDefinitionExitCode -ne 0) {
     exit $appDefinitionExitCode
 }
 
-# Validate and bind destinations before bootstrap; azd still owns root creation.
+# Terraform records ownership without creating groups; Bicep retains its bootstrap.
 Write-Host "Preparing workload resource-group destinations..." -ForegroundColor Cyan
 $resourceGroupArguments = @('--azure-dir', (Join-Path $projectRoot '.azure'))
 if ($env:AZURE_ENV_NAME) { $resourceGroupArguments += @('--env-name', $env:AZURE_ENV_NAME) }
 Push-Location $projectRoot
 try {
-    $resourceGroupOutput = Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments $resourceGroupArguments
+    if ($infrastructureProvider -eq 'terraform') {
+        $resourceGroupArguments += @('--environment', '-')
+        $environmentJson = Get-AzdEnvironmentJson
+        $resourceGroupOutput = Invoke-PythonModule -ModuleName 'config.deployment.terraform_groups' -Arguments $resourceGroupArguments -StandardInput $environmentJson
+    } else {
+        $resourceGroupOutput = Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments $resourceGroupArguments
+    }
     $resourceGroupExitCode = $LASTEXITCODE
 } finally {
     Pop-Location
@@ -112,7 +168,7 @@ if (-not (Test-Path -LiteralPath $manifestSource)) {
     Write-Host "Error: manifest.json is required to resolve release pins." -ForegroundColor Red
     exit 1
 }
-if (-not (Test-Path -LiteralPath $mainBicep -PathType Leaf)) {
+if ($infrastructureProvider -eq 'bicep' -and -not (Test-Path -LiteralPath $mainBicep -PathType Leaf)) {
     Write-Host "Error: infra/main.bicep was not found. The infrastructure is part of this repository; restore infra/ from source control." -ForegroundColor Red
     exit 1
 }
@@ -167,18 +223,31 @@ try {
     ).components |
         Where-Object { $_.name -like '*-orchestrator' } |
         Select-Object -ExpandProperty commit -First 1
-    Invoke-PythonModule -ModuleName 'config.deployment.composition' -Arguments @(
-        '--input',
-        $parameterSource,
-        '--output',
-        $parameterDestination,
-        '--hosted-source-commit',
-        $hostedSourceCommit
-    )
+    if ($infrastructureProvider -eq 'terraform') {
+        $terraformDirectory = Join-Path $projectRoot $providerConfiguration.path
+        $terraformParameterDestination = Join-Path $terraformDirectory "$($providerConfiguration.module).tfvars.json"
+        $environmentJson = Get-AzdEnvironmentJson
+        $null = Invoke-PythonModule -ModuleName 'config.deployment.terraform_inputs' -Arguments @(
+            '--input', $parameterSource,
+            '--environment', '-',
+            '--app-definition', $appDefinitionPath,
+            '--output', $terraformParameterDestination,
+            '--diagnostic-output', $parameterDestination,
+            '--resource-group-ownership', $resourceGroups.ownershipFile,
+            '--hosted-source-commit', $hostedSourceCommit
+        ) -StandardInput $environmentJson
+    } else {
+        Invoke-PythonModule -ModuleName 'config.deployment.composition' -Arguments @(
+            '--input', $parameterSource,
+            '--output', $parameterDestination,
+            '--hosted-source-commit', $hostedSourceCommit
+        )
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Agent Landing Zone deployment mode composition failed." -ForegroundColor Red
         exit $LASTEXITCODE
     }
+    if ($infrastructureProvider -eq 'terraform') { Import-AzdEnvironment }
 } finally {
     Pop-Location
 }

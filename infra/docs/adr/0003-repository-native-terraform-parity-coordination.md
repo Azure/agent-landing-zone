@@ -1,6 +1,6 @@
 # ADR-0003: Coordinate Terraform parity with a repository-native ledger
 
-- Status: proposed
+- Status: superseded by [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md)
 - Date: 2026-08-21
 - Owners: AI Landing Zone maintainers and Terraform pattern-module maintainers
 - Related context: issue #136 (not review or approval evidence)
@@ -8,6 +8,9 @@
   dispatch payload's commit roles and artifact-location contract
 
 ## Context
+
+> Historical decision: the external ledger, assessment and handoff automation is
+> retired. The original proposal below is retained for audit, not operator use.
 
 The Bicep repository is the functional reference for the Foundry AI Landing Zone, while Terraform
 source and release ownership remain in a separate AVM pattern-module repository. Maintainers need
