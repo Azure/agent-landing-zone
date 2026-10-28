@@ -129,6 +129,31 @@ preserving documents and operator customizations. Already enabled indexes are
 no-ops. Incompatible permission annotations fail before dependent cleanup
 instead of silently retaining an unprotected schema.
 
+### Authorize citation downloads again at redemption
+
+Native hosted citations use the authenticated UI `/api/download/{grant_token}`
+route, not Blob SAS or the legacy container-only reader. Signed selectors bind
+the current principal and UI session, but do not grant source permission by
+themselves. Every redemption requires fresh authorization.
+
+Shared Blob/ADLS downloads use OBO for `https://storage.azure.com/.default`
+from the current UI API assertion. The UI registration requires delegated
+Storage `user_impersonation` consent, and the user still needs source RBAC/ACLs.
+There is no workload fallback on this path.
+
+Conversation uploads are different: the UI verifies the exact document URL,
+conversation and authenticated uploader against a fresh native Search query,
+using the current user's Search token for source authorization. Only then may
+its workload identity read that upload from Blob. The bundled UI therefore
+uses the existing `retrieval-reader` capability profile and receives
+`SearchIndexDataReader` for Search transport. Preserve its existing Blob grants;
+neither transport grant replaces user authorization.
+
+Restrict downloads to configured storage accounts/containers and stream within
+bounded size/time limits. Unverifiable upload targets, oversized query results,
+expired sessions and changed permissions fail closed. Embedded sessions use
+their own validated principal/session, not classic Cosmos conversation owners.
+
 ### Fail explicitly and protect credentials
 
 Missing required delegated credentials fail before retrieval/streaming.
@@ -144,6 +169,12 @@ input. Token-bearing requests must not enter that persistence/recovery path.
 Credentials are forbidden in prompts, conversations, checkpoints, logs,
 exceptions, model tool arguments and response metadata. Redact custom headers
 as well as Authorization.
+
+Initial UI MSAL acquisition classifies consent and authentication failures.
+The current direct adapters do not relay downstream Search
+`WWW-Authenticate` challenges or implement a downstream claims round trip:
+those failures terminate safely without replay. Do not equate initial token
+acquisition tests with end-to-end Conditional Access recovery evidence.
 
 ## Consequences
 

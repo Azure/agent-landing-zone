@@ -8,6 +8,9 @@
   `agent-lz`, retaining user-delegated Foundry invocation. The discovered
   hosted runtime receives Search Index Data Reader on the exact Search
   service for transport, independently of end-user source permissions.
+- Include `retrieval-reader` in the bundled UI capabilities for fresh native
+  Search authorization before conversation-upload downloads. Preserve existing
+  Blob grants; transport roles never replace the user's document permissions.
 - Native Work IQ app authentication and secretless indexed SharePoint source
   registration, with typed nonsecret identity inputs. Advanced source
   configuration requires its compatible August preview API; the default Blob
