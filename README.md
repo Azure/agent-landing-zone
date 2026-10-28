@@ -33,7 +33,7 @@ selection and reuse depend on deployment settings. Select the image to open the
 full-resolution PNG. For Platform Hub and AI Gateway combinations, see the
 [reference architectures](https://azure.github.io/AI-Landing-Zones/#reference-architectures).
 
-[![Standalone Agent Landing Zone architecture](media/AI-Landing-Zone-without-platform.png?v=c0098084b441)](media/AI-Landing-Zone-without-platform.png?v=c0098084b441)
+[![Standalone Agent Landing Zone architecture](media/AI-Landing-Zone-without-platform.png?v=aa651551c880)](media/AI-Landing-Zone-without-platform.png?v=aa651551c880)
 
 ## Deploy
 
