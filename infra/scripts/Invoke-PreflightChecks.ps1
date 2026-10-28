@@ -330,6 +330,9 @@ function Test-BooleanParameterValues {
         deployApplicationPeSubnet  = 'DEPLOY_APPLICATION_PE_SUBNET'
         deployAzureBastionSubnet   = 'DEPLOY_AZURE_BASTION_SUBNET'
         deployAzureFirewallSubnet  = 'DEPLOY_AZURE_FIREWALL_SUBNET'
+        deployAzureFirewallManagementSubnet = 'DEPLOY_AZURE_FIREWALL_MANAGEMENT_SUBNET'
+        deployAzureFirewall        = 'DEPLOY_AZURE_FIREWALL'
+        enableFirewallDnsProxy     = 'ENABLE_FIREWALL_DNS_PROXY'
         deployGatewaySubnet        = 'DEPLOY_GATEWAY_SUBNET'
         deployAppGatewaySubnet     = 'DEPLOY_APP_GATEWAY_SUBNET'
         deployJumpboxSubnet        = 'DEPLOY_JUMPBOX_SUBNET'
@@ -348,6 +351,8 @@ function Test-BooleanParameterValues {
         if ($value -is [bool]) { continue }
 
         $normalized = (Get-StringValue $value).Trim().ToLowerInvariant()
+        if ($entry.Key -in 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet' -and
+            ($null -eq $value -or $normalized -eq 'null')) { continue }
         if ($normalized -notin 'true', 'false') {
             Add-Finding -Severity FAIL -Code 'BOOL_VALUE_INVALID' `
                 -Message "Parameter '$($entry.Key)' from $($entry.Value) must be 'true' or 'false'; received '$value'." `
@@ -428,11 +433,29 @@ function Test-Topology {
     }
 
     # Local firewall + external egress
-    $deployFw = ConvertTo-Bool $P['deployAzureFirewall']
-    if ($deployFw -and -not [string]::IsNullOrEmpty($egressIp)) {
-        Add-Finding -Severity WARN -Code 'FW_AND_EXTERNAL_EGRESS' `
-            -Message "deployAzureFirewall=true with hubIntegrationEgressNextHopIp set: a local spoke firewall AND an external egress IP are both configured." `
-            -Hint "In ailz-integrated topologies the hub firewall is typically the only egress point — consider deployAzureFirewall=false."
+    $deployFw = Resolve-DeployFlag -P $P -Key 'deployAzureFirewall' -Default $true
+    $isolated = ConvertTo-Bool $P['networkIsolation']
+    if ($isolated -and $deployFw -and ($egressIp -or $existingRt)) {
+        Add-Finding -Severity FAIL -Code 'FW_AND_EXTERNAL_EGRESS' `
+            -Message 'A local firewall and external next-hop/route-table ownership are mutually exclusive.' `
+            -Hint 'Select local egress or set deployAzureFirewall=false and configure exactly one external routing option.'
+    }
+    if ($isolated -and -not $deployFw -and -not $egressIp -and -not $existingRt) {
+        Add-Finding -Severity FAIL -Code 'EXTERNAL_EGRESS_REQUIRED' `
+            -Message 'Network isolation with deployAzureFirewall=false requires an explicit external next-hop IP or existing route table. A hub VNet or deployment mode alone does not configure egress.'
+    }
+    $sku = if ($P.ContainsKey('azureFirewallSku')) { Get-StringValue $P['azureFirewallSku'] } else { 'Basic' }
+    if ($sku -cnotin 'Basic', 'Standard') {
+        Add-Finding -Severity FAIL -Code 'FIREWALL_SKU_INVALID' -Message 'azureFirewallSku must be Basic or Standard.'
+    }
+    if ($sku -ceq 'Basic' -and (Resolve-DeployFlag -P $P -Key 'enableFirewallDnsProxy' -Default $false)) {
+        Add-Finding -Severity FAIL -Code 'BASIC_FIREWALL_DNS_PROXY_UNSUPPORTED' `
+            -Message 'Azure Firewall Basic does not support DNS proxy. Select Standard explicitly or disable enableFirewallDnsProxy.'
+    }
+    if ($isolated -and $deployFw -and $sku -ceq 'Basic' -and
+        $P.ContainsKey('deploymentMode') -and $P['deploymentMode'] -cne 'standalone') {
+        Add-Finding -Severity FAIL -Code 'BASIC_FIREWALL_STANDALONE_REQUIRED' `
+            -Message 'Local Azure Firewall Basic is supported only in standalone mode. Integrated deployments must use external egress or explicitly select Standard.'
     }
 
     # deploymentMode = ailz-integrated declared but no hub integration
@@ -728,10 +751,12 @@ function Test-AllowedIpRanges {
 }
 
 function Resolve-SubnetCreationFlag {
-    # Unlike nullable service switches, creation switches default only when
-    # absent. Test-BooleanParameterValues rejects explicit empty/null/aliases.
-    param([hashtable]$P, [string]$Key)
-    if (-not $P.ContainsKey($Key)) { return $true }
+    # Ordinary creation switches default only when absent. Only the two
+    # firewall creation switches accept null as auto; empty/aliases fail.
+    param([hashtable]$P, [string]$Key, [bool]$Default = $true)
+    if (-not $P.ContainsKey($Key)) { return $Default }
+    if ($Key -in 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet' -and
+        ($null -eq $P[$Key] -or (Get-StringValue $P[$Key]).Trim() -ieq 'null')) { return $Default }
     return (Get-StringValue $P[$Key]).Trim() -ieq 'true'
 }
 
@@ -740,6 +765,10 @@ function Get-SubnetSelection {
 
     $isolated = ConvertTo-Bool $P['networkIsolation']
     $create = $isolated -and (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets')
+    $localFirewall = $isolated -and (Resolve-DeployFlag -P $P -Key 'deployAzureFirewall' -Default $true)
+    $sku = if ($P.ContainsKey('azureFirewallSku')) { Get-StringValue $P['azureFirewallSku'] } else { 'Basic' }
+    $standalone = -not $P.ContainsKey('deploymentMode') -or $P['deploymentMode'] -ceq 'standalone'
+    $basicManagement = $localFirewall -and $standalone -and $sku -ceq 'Basic'
     $foundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
     $cosmos = Resolve-DeployFlag -P $P -Key 'deployCosmosDb' -Default $false
     $envEnabled = Resolve-DeployFlag -P $P -Key 'deployContainerEnv' -Default $true
@@ -790,7 +819,8 @@ function Get-SubnetSelection {
         @('deployPeSubnet', 'peSubnet', 'pe-subnet', '192.168.2.0/26', '', 28, $foundryPe),
         @('deployApplicationPeSubnet', 'applicationPeSubnet', 'application-pe-subnet', '192.168.3.128/26', '', 28, $applicationPe),
         @('deployAzureBastionSubnet', 'azureBastionSubnet', 'AzureBastionSubnet', '192.168.2.64/26', '', 26, $bastion),
-        @('deployAzureFirewallSubnet', 'azureFirewallSubnet', 'AzureFirewallSubnet', '192.168.2.128/26', '', 26, (Resolve-DeployFlag -P $P -Key 'deployAzureFirewall' -Default $true)),
+        @('deployAzureFirewallSubnet', 'azureFirewallSubnet', 'AzureFirewallSubnet', '192.168.2.128/26', '', 26, $localFirewall),
+        @('deployAzureFirewallManagementSubnet', 'azureFirewallManagementSubnet', 'AzureFirewallManagementSubnet', '192.168.3.192/26', '', 26, $basicManagement),
         @('deployGatewaySubnet', 'gatewaySubnet', 'GatewaySubnet', '192.168.2.192/26', '', 29, $false),
         @('deployAppGatewaySubnet', 'azureAppGatewaySubnet', 'AppGatewaySubnet', '192.168.3.0/27', '', 29, $appGateway),
         @('deployJumpboxSubnet', 'jumpboxSubnet', 'jumpbox-subnet', '192.168.3.64/27', '', 29, $jump),
@@ -807,7 +837,12 @@ function Get-SubnetSelection {
             Name = if ($P.ContainsKey($nameKey)) { Get-StringValue $P[$nameKey] } else { $d[2] }
             Cidr = if ($P.ContainsKey($prefixKey)) { Get-StringValue $P[$prefixKey] } else { $d[3] }
             Delegation = $d[4]; MaxPrefix = $d[5]
-            Managed = $create -and (Resolve-SubnetCreationFlag -P $P -Key $d[0])
+            Managed = $create -and $(switch ($d[0]) {
+                'deployAzureFirewallSubnet' { Resolve-SubnetCreationFlag -P $P -Key $d[0] -Default $localFirewall }
+                'deployAzureFirewallManagementSubnet' { $basicManagement -and (Resolve-SubnetCreationFlag -P $P -Key $d[0]) }
+                'deployGatewaySubnet' { Resolve-SubnetCreationFlag -P $P -Key $d[0] -Default $false }
+                default { Resolve-SubnetCreationFlag -P $P -Key $d[0] }
+            })
             Required = $isolated -and $d[6]
         }
     }
@@ -890,6 +925,7 @@ function Test-LocalCidrSanity {
             'deployGatewaySubnet' { 'GatewaySubnet' }
             'deployAzureBastionSubnet' { 'AzureBastionSubnet' }
             'deployAzureFirewallSubnet' { 'AzureFirewallSubnet' }
+            'deployAzureFirewallManagementSubnet' { 'AzureFirewallManagementSubnet' }
         }
         if (($reservedName -and $s.Name -cne $reservedName) -or
             (-not $reservedName -and $s.Name -in 'GatewaySubnet', 'AzureBastionSubnet', 'AzureFirewallSubnet', 'AzureFirewallManagementSubnet', 'RouteServerSubnet')) {
@@ -1123,9 +1159,30 @@ function Test-ReusedSubnetProperties {
         Add-Finding -Severity WARN -Code 'ACA_SUBNET_HAS_SE' -Message "Reused ACA subnet '$($Definition.Name)' has service endpoints. Review their effect on private endpoint routing."
     }
     $gateway = $Definition.Flag -eq 'deployGatewaySubnet'
+    $management = $Definition.Flag -eq 'deployAzureFirewallManagementSubnet'
     $aiGateway = $Definition.Flag -eq 'deployAiGatewaySubnet'
     if ($gateway -and $properties.networkSecurityGroup.id) {
         Add-Finding -Severity FAIL -Code 'GATEWAY_SUBNET_NSG_FORBIDDEN' -Message 'GatewaySubnet must never have an NSG attached.'
+    }
+    if ($management) {
+        if ($properties.networkSecurityGroup.id -or $properties.natGateway.id -or
+            @($properties.serviceEndpoints | Where-Object { $null -ne $_ }).Count -or
+            @($properties.privateEndpoints | Where-Object { $null -ne $_ }).Count) {
+            Add-Finding -Severity FAIL -Code 'FIREWALL_MANAGEMENT_ATTACHMENTS_FORBIDDEN' `
+                -Message 'AzureFirewallManagementSubnet must not have an NSG, NAT gateway, service endpoints or private endpoints. Do not rewrite network-team-owned associations.'
+        }
+        if ($properties.routeTable.id) {
+            $routeTable = Invoke-AzCli -Arguments @('network', 'route-table', 'show', '--ids', $properties.routeTable.id, '-o', 'json')
+            $routes = if ($routeTable) { Get-AzureProperties $routeTable } else { $null }
+            if (-not $routes -or $null -eq $routes.routes) {
+                Add-Finding -Severity FAIL -Code 'BYO_SUBNET_ROUTES_NOT_VERIFIED' -Message 'Could not verify firewall management routing. Read the management route table before provisioning.'
+            } elseif ($routes.disableBgpRoutePropagation -ne $true -or
+                @($routes.routes | Where-Object { (Get-AzureProperties $_).nextHopType -ine 'Internet' }).Count -or
+                -not @($routes.routes | Where-Object { (Get-AzureProperties $_).addressPrefix -eq '0.0.0.0/0' -and (Get-AzureProperties $_).nextHopType -ieq 'Internet' }).Count) {
+                Add-Finding -Severity FAIL -Code 'FIREWALL_MANAGEMENT_ROUTES_INVALID' `
+                    -Message 'A BYO management route table must disable BGP propagation, route 0.0.0.0/0 directly to Internet and contain no redirecting/blocking routes. Workload forced tunneling is unsupported.'
+            }
+        }
     }
     if ($aiGateway) {
         $nsgId = Get-StringValue $properties.networkSecurityGroup.id
@@ -1186,6 +1243,20 @@ function Test-ExistingVnetSubnets {
     foreach ($s in @($selection | Where-Object Managed)) {
         Test-SubnetRange -Subnet $s -Cidr $s.Cidr -VnetPrefixes $prefixes -P $P
         $ranges.Add([pscustomobject]@{ Name = $s.Name; Cidr = $s.Cidr })
+        if ($s.Flag -eq 'deployAzureFirewallManagementSubnet' -and
+            @($properties.subnets | Where-Object { $_.name -ieq $s.Name }).Count) {
+            # A managed PUT must not silently erase pre-existing management
+            # associations. Require explicit network-owner remediation instead.
+            $current = Invoke-AzCli -Arguments @('network', 'vnet', 'subnet', 'show', '--ids', "$vnetId/subnets/$($s.Name)", '-o', 'json')
+            if (-not $current) {
+                Add-Finding -Severity FAIL -Code 'BYO_SUBNET_LOOKUP_FAILED' -Message "Could not verify current management subnet '$($s.Name)' before a managed write."
+            } else {
+                Test-ReusedSubnetProperties -Definition $s -Subnet $current
+                if ((Get-AzureProperties $current).routeTable.id) {
+                    Add-Finding -Severity FAIL -Code 'FIREWALL_MANAGEMENT_ASSOCIATION_REWRITE' -Message 'Managed management-subnet creation would remove an existing route table. Disable its creation and validate reuse, or have the network owner remediate the association.'
+                }
+            }
+        }
     }
     # Managed names use the requested range; required reused names use the
     # explicit lookup below. All other retained ranges use the VNet listing,

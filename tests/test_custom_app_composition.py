@@ -68,7 +68,7 @@ class CustomAppCompositionTests(unittest.TestCase):
         self.assertEqual(expected, apps)
 
     def test_custom_hosted_prepares_foundation_without_bundled_deployment(self) -> None:
-        baseline = compose_parameters(source_parameters(), CLASSIC)
+        baseline = compose_parameters(source_parameters(), {**CLASSIC, "NETWORK_ISOLATION": "true"})
         for selection in (
             "samples/custom-app/hosted",
             "samples/custom-app/hosted/app-definition.json",

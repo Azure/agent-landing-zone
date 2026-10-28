@@ -284,6 +284,15 @@ variable "azureFirewallSubnetName" {
   default  = "AzureFirewallSubnet"
   nullable = false
 }
+variable "azureFirewallManagementSubnetName" {
+  type     = string
+  default  = "AzureFirewallManagementSubnet"
+  nullable = false
+  validation {
+    condition     = var.azureFirewallManagementSubnetName == "AzureFirewallManagementSubnet"
+    error_message = "azureFirewallManagementSubnetName must be exactly AzureFirewallManagementSubnet."
+  }
+}
 variable "azureAppGatewaySubnetName" {
   type     = string
   default  = "AppGatewaySubnet"
@@ -345,13 +354,18 @@ variable "deployAzureBastionSubnet" {
   nullable = false
 }
 variable "deployAzureFirewallSubnet" {
-  type     = bool
-  default  = true
-  nullable = false
+  description = "Null follows the local isolated firewall requirement; true reserves the data subnet; false requires BYO when needed."
+  type        = bool
+  default     = null
+}
+variable "deployAzureFirewallManagementSubnet" {
+  description = "Null creates the subnet for standalone isolated Basic only; false requires a compatible BYO management subnet."
+  type        = bool
+  default     = null
 }
 variable "deployGatewaySubnet" {
   type     = bool
-  default  = true
+  default  = false
   nullable = false
 }
 variable "deployAppGatewaySubnet" {
@@ -422,6 +436,20 @@ variable "azureFirewallSubnetPrefix" {
   type     = string
   default  = "192.168.2.128/26"
   nullable = false
+}
+variable "azureFirewallManagementSubnetPrefix" {
+  type     = string
+  default  = "192.168.3.192/26"
+  nullable = false
+  validation {
+    condition = try(
+      cidrhost(var.azureFirewallManagementSubnetPrefix, 0) == split("/", var.azureFirewallManagementSubnetPrefix)[0] &&
+      length(split(".", cidrhost(var.azureFirewallManagementSubnetPrefix, 0))) == 4 &&
+      tonumber(split("/", var.azureFirewallManagementSubnetPrefix)[1]) <= 26,
+      false
+    )
+    error_message = "azureFirewallManagementSubnetPrefix must be an aligned IPv4 CIDR of /26 or larger."
+  }
 }
 variable "gatewaySubnetPrefix" {
   type     = string
@@ -648,6 +676,15 @@ variable "deployAzureFirewall" {
   type     = bool
   default  = true
   nullable = false
+}
+variable "azureFirewallSku" {
+  type     = string
+  default  = "Basic"
+  nullable = false
+  validation {
+    condition     = contains(["Basic", "Standard"], var.azureFirewallSku)
+    error_message = "azureFirewallSku must be Basic or Standard."
+  }
 }
 variable "enableFirewallDnsProxy" {
   type     = bool

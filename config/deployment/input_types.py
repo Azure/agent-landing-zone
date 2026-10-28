@@ -17,6 +17,7 @@ _GROUPS: dict[InputKind, str] = {
         networkIsolation policyManagedPrivateDns useExistingVNet
         deployAgentSubnet deployPeSubnet deployApplicationPeSubnet
         deployAzureBastionSubnet deployAzureFirewallSubnet deployGatewaySubnet
+        deployAzureFirewallManagementSubnet
         deployAppGatewaySubnet deployJumpboxSubnet deployAcaEnvironmentSubnet
         deployDevopsBuildAgentsSubnet deployPowerPlatformSubnet deployAiGatewaySubnet
         deployGroundingWithBing deployAiFoundry deployAiFoundrySubnet deployAppConfig
@@ -50,7 +51,8 @@ _GROUPS: dict[InputKind, str] = {
         principalId principalType appConfigLabel deploymentMode privateEndpointLocation
         privateEndpointResourceGroupName existingVnetResourceId agentSubnetName peSubnetName
         applicationPeSubnetName applicationPeSubnetPrefix gatewaySubnetName azureBastionSubnetName
-        azureFirewallSubnetName azureAppGatewaySubnetName jumpboxSubnetName acaEnvironmentSubnetName
+        azureFirewallSubnetName azureFirewallSku azureFirewallManagementSubnetName
+        azureFirewallManagementSubnetPrefix azureAppGatewaySubnetName jumpboxSubnetName acaEnvironmentSubnetName
         devopsBuildAgentsSubnetName powerPlatformSubnetName aiGatewaySubnetName powerPlatformSubnetPrefix
         aiGatewaySubnetPrefix dnsZoneLinkSuffix agentSubnetPrefix acaEnvironmentSubnetPrefix
         peSubnetPrefix azureBastionSubnetPrefix azureFirewallSubnetPrefix gatewaySubnetPrefix
@@ -90,4 +92,7 @@ _GROUPS: dict[InputKind, str] = {
 INPUT_TYPES: dict[str, InputKind] = {
     name: kind for kind, names in _GROUPS.items() for name in names.split()
 }
-NULLABLE_BOOLEANS = frozenset({"deployJumpbox", "deployBastion", "deployNatGateway", "deployVM"})
+NULLABLE_BOOLEANS = frozenset({
+    "deployJumpbox", "deployBastion", "deployNatGateway", "deployVM",
+    "deployAzureFirewallSubnet", "deployAzureFirewallManagementSubnet",
+})

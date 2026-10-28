@@ -13,6 +13,11 @@ param deployNsgs bool = true
 param prefix string = 'nsg-'
 param virtualNetworkResourceId string
 
+// Defense at this module boundary as well as the orchestrator projection.
+// Never silently strip explicit associations from a network-team-owned subnet.
+var managementAttachmentsAreSafe = empty(filter(subnets, subnet => subnet.name == 'AzureFirewallManagementSubnet' && (!empty(subnet.?networkSecurityGroupResourceId ?? '') || !empty(subnet.?routeTableResourceId ?? '') || !empty(subnet.?natGatewayResourceId ?? '') || !empty(subnet.?delegation ?? '') || !empty(subnet.?serviceEndpoints ?? []))))
+var validatedSubnets = managementAttachmentsAreSafe ? subnets : fail('AzureFirewallManagementSubnet must not have an NSG, route table, NAT gateway, delegation or service endpoints.')
+
 module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (!useExistingVNet && deploySubnets) {
   name: 'virtualNetworkDeployment'
   scope: resourceGroup(subscriptionId, resourceGroupName)
@@ -21,7 +26,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (!u
     name: vnetName
     location: location
     tags: tags
-    subnets: subnets
+    subnets: validatedSubnets
   }
 }
 
@@ -37,7 +42,7 @@ module nsgsM 'network-security-group.bicep' = [
 ]
 
 // Reserved subnets must not inherit a generic NSG; explicit service NSGs still win.
-var invalidNsgSubnets = ['AzureFirewallSubnet','AppGatewaySubnet','AzureBastionSubnet','GatewaySubnet']
+var invalidNsgSubnets = ['AzureFirewallSubnet','AppGatewaySubnet','AzureBastionSubnet','GatewaySubnet','AzureFirewallManagementSubnet']
 
 @batchSize(1)
 module subnetsM 'subnet.bicep' = [
@@ -46,7 +51,7 @@ module subnetsM 'subnet.bicep' = [
       scope: resourceGroup(subscriptionId, resourceGroupName)
       params: {
         name: '${vnetName}/${subnets[i].name}'
-        addressPrefix: subnets[i].addressPrefix
+        addressPrefix: managementAttachmentsAreSafe ? subnets[i].addressPrefix : fail('AzureFirewallManagementSubnet must not have an NSG, route table, NAT gateway, delegation or service endpoints.')
         delegations: empty(subnets[i].delegation) ? [] : [
           {
             name: subnets[i].delegation

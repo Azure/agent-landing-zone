@@ -202,7 +202,13 @@ if [ $TOPOLOGY_EXIT -ne 0 ]; then
     echo "${YELLOW}Error: Agent Landing Zone deployment topology resolution failed.${NC}"
     exit $TOPOLOGY_EXIT
 fi
-TOPOLOGY_OUTPUT="$(printf '%s' "$TOPOLOGY_OUTPUT" | tr -d '\r')"
+FIREWALL_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.firewall --input "$PROJECT_ROOT/main.parameters.json")"
+FIREWALL_EXIT=$?
+if [ $FIREWALL_EXIT -ne 0 ]; then
+    echo "${YELLOW}Error: Firewall input resolution failed; provisioning has not started.${NC}" >&2
+    exit $FIREWALL_EXIT
+fi
+TOPOLOGY_OUTPUT="$(printf '%s\n%s' "$TOPOLOGY_OUTPUT" "$FIREWALL_OUTPUT" | tr -d '\r')"
 
 eval "$(printf '%s\n' "$TOPOLOGY_OUTPUT" | sed 's/^\([^=]*\)=\(.*\)$/export \1="\2"/')"
 

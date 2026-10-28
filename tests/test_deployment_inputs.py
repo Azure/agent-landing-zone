@@ -194,10 +194,10 @@ def test_native_types_context_collections_and_no_arm_envelope():
     assert result["createNetworkResourceGroup"] is False
 
 
-def test_all_213_declared_inputs_are_accepted_with_native_types():
+def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/main.bicep").read_text(), re.M)
-    assert len(declarations) == 213
+    assert len(declarations) == 217
     original = values()
     for name, kind in declarations:
         if name in original:
@@ -212,6 +212,29 @@ def test_all_213_declared_inputs_are_accepted_with_native_types():
             original[name] = "fixture"
     result = compose_inputs(original, ENVIRONMENT)
     assert {name for name, _ in declarations} <= result.keys()
+
+
+@pytest.mark.parametrize("sku", ["Basic", "Standard"])
+@pytest.mark.parametrize("isolation,local", [(False, True), (True, True), (True, False)])
+def test_firewall_selection_is_identical_in_provider_transports(sku, isolation, local):
+    environment = {
+        **ENVIRONMENT,
+        "NETWORK_ISOLATION": str(isolation).lower(),
+        "DEPLOY_AZURE_FIREWALL": str(local).lower(),
+        "AZURE_FIREWALL_SKU": sku,
+        "DEPLOYMENT_MODE": "standalone" if local else "ailz-integrated",
+    }
+    bicep = compose_parameters(source(), environment)["parameters"]
+    terraform = compose_inputs(values(), environment)
+    expected = {
+        "azureFirewallSku": sku,
+        "deployAzureFirewallSubnet": isolation and local,
+        "deployAzureFirewallManagementSubnet": isolation and local and sku == "Basic",
+        "deployGatewaySubnet": False,
+    }
+    for name, value in expected.items():
+        assert bicep[name]["value"] == value
+        assert terraform[name] == value
 
 
 def test_json_transport_round_trips_arbitrary_values_without_native_substitution():

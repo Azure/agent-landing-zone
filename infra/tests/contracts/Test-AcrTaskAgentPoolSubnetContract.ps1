@@ -324,8 +324,8 @@ try {
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))]"
     )
     $excluded = @($subnets.properties.template.variables.invalidNsgSubnets)
-    Test-Equal 'Generic NSG exclusions retain Bastion and exclude GatewaySubnet' `
-        $excluded @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet', 'GatewaySubnet')
+    Test-Equal 'Generic NSG exclusions retain reserved service subnets including Basic management' `
+        $excluded @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet', 'GatewaySubnet', 'AzureFirewallManagementSubnet')
     $selection = @'
 [if(not(empty(coalesce(tryGet(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]], 'networkSecurityGroupResourceId'), ''))), createObject('value', string(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].networkSecurityGroupResourceId)), if(and(parameters('deployNsgs'), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name)), '2025-04-01').outputs.id.value), createObject('value', '')))]
 '@
@@ -348,6 +348,7 @@ try {
             @{ Name = 'Firewall exclusion'; Subnet = 'AzureFirewallSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
             @{ Name = 'Gateway exclusion'; Subnet = 'AppGatewaySubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
             @{ Name = 'VPN gateway exclusion'; Subnet = 'GatewaySubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'Basic management exclusion'; Subnet = 'AzureFirewallManagementSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
             @{ Name = 'Build subnet'; Subnet = 'devops-build-agents-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
             @{ Name = 'Custom idle subnet'; Subnet = 'unused-bastion-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
             @{ Name = 'Ordinary explicit NSG'; Subnet = 'workload'; Explicit = 'operator-nsg'; Nsgs = $true; Expected = 'operator-nsg' }
