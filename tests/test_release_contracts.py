@@ -34,7 +34,7 @@ class IntegrationPinTests(unittest.TestCase):
             manifest["infra"]["source"],
         )
         self.assertEqual(
-            ("v5.2.2", "243e61191a7fdc5f1cf92f2ac47b779d58be3fa3"),
+            ("v5.3.0", "2c0579ef29a15bc862b150c1a6a8387f74de398e"),
             (
                 components["agent-app-orchestrator"]["tag"],
                 components["agent-app-orchestrator"]["commit"],
@@ -48,7 +48,7 @@ class IntegrationPinTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            ("v3.3.1", "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554"),
+            ("v3.4.0", "605323634381d190f3e872eb137443d0bc28f3ca"),
             (
                 components["agent-app-ui"]["tag"],
                 components["agent-app-ui"]["commit"],
