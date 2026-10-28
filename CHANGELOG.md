@@ -1,5 +1,36 @@
 # Changelog
 
+## [v5.5.1] - 2026-10-28
+
+### Changed
+- Default application Cosmos DB to disabled in Bicep, Terraform and parameter
+  seeds. Shared deployment composition enables it for classic orchestration,
+  panel metadata, preserved classic runtime and custom conversation-store
+  consumers; incompatible explicit disables fail before provisioning.
+- Omit application-specific Cosmos identities, resources and container settings
+  when disabled. Foundry Agent Service backing storage and shared private DNS
+  remain independent.
+- Keep preflight and lifecycle recovery aligned with the effective application
+  selection. Review existing-environment previews and retain
+  `DEPLOY_COSMOS_DB=true` until existing data and consumers have been reviewed.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Targeted deployment and lifecycle regressions pass; Terraform validation and
+  all 90 mocked tests pass. Preflight coverage passes 394 checks.
+- Bicep compiles with the pinned compiler; PowerShell parsing and shell syntax
+  checks pass. Both providers retain the same application selection contract.
+- Central configuration documentation is published. Validation is local and
+  offline; no live Azure deployment, data migration or resource cleanup was
+  performed. Extended local suites were stopped and are not claimed as passing.
+
 ## [v5.5.0] - 2026-10-28
 
 ### Added
