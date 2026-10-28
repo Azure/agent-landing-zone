@@ -82,7 +82,7 @@ exact provisioned resource; it must not gain elevated-read permission.
 | --- | --- |
 | Blob / ADLS | Ingest native RBAC/ACL permission metadata and send the delegated Search token. Empty permission ingestion is not protected access. |
 | `searchIndex` / ALZ-ingested files | Native permission filtering over correctly populated Entra user/group/RBAC fields. Permission freshness remains an ingestion responsibility. |
-| Conversation uploads | Native document authorization plus existing conversation/uploader restrictions. A conversation ID or platform partition key is not an uploader oid. Missing required scope must not silently omit a bound source. |
+| Conversation uploads | Native `userIds` authorization to the authenticated uploader plus a mandatory conversation filter. A conversation ID or platform partition key is not an uploader oid. Missing required scope must not silently omit a bound source. |
 | Fabric ontology / Data Agent | Documented Search-token mediation to Fabric, with compatible API/source configuration and the user's Fabric permissions. |
 | Work IQ | A distinct app-audience user assertion in `x-ms-query-work-iq-source-authorization`; never substitute the Search token. The matching Entra app authentication/consent is a source-specific requirement. |
 | Indexed SharePoint | Permission ingestion must be enabled. App-only indexing access alone proves no user trimming. Site groups need the documented connector app registration and site-URL metadata. |
@@ -93,6 +93,19 @@ platform capability by this change. Public web or intentionally shared content
 does not relax the authorization of other members of a mixed knowledge base.
 Configured protected sources must not disappear to make a request pass.
 `knowledgeSourceParams` is not assumed to be an exclusion allowlist.
+
+For solution-produced conversation uploads, the trusted UI passes exactly the
+authenticated uploader's object ID to ingestion. Ingestion stamps
+`metadata_security_user_ids` with that ID, an empty
+`metadata_security_group_ids` array, an empty `metadata_security_rbac_scope`
+and the conversation ID on every chunk. Native permission filtering therefore
+enforces uploader ownership from the delegated Search token; it does not need
+a second application-side oid filter or a new forwarded identity assertion.
+The UI must reject uploads with a missing or invalid authenticated uploader ID
+before ingestion, and retrieval must retain the conversation filter. Never
+infer ownership by decoding the Search token or trusting an opaque hosted
+partition key. Legacy non-native authorization retains its existing trusted
+principal requirements.
 
 Work IQ registration uses `WORK_IQ_APPLICATION_ID`,
 `WORK_IQ_FEDERATED_CREDENTIAL_ID` (the federated credential object ID), and
