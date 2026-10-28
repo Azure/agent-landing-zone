@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from config.deployment import teardown
+from util.terraform_backend import ensure_backend_binding, resolve_backend
 
 
 @pytest.mark.parametrize(
@@ -154,6 +155,96 @@ def test_corrupt_binding_blocks_cli_before_teardown(tmp_path, caplog):
 def test_environment_mismatch_is_not_a_teardown_authorization(tmp_path):
     with pytest.raises(teardown.TeardownError, match="does not match"):
         teardown.require_safe_teardown({"AZURE_ENV_NAME": "other"}, tmp_path, "selected")
+
+
+def _terraform_binding(tmp_path, *, managed=None):
+    subscription = "11111111-1111-1111-1111-111111111111"
+    environment = {
+        "AZURE_ENV_NAME": "selected", "AZURE_SUBSCRIPTION_ID": subscription,
+        "AZURE_RESOURCE_GROUP": "rg-ai", "AZURE_APP_RESOURCE_GROUP": "rg-app",
+        "AZURE_NETWORK_RESOURCE_GROUP": "rg-net",
+        "TF_STATE_RESOURCE_GROUP": "rg-state", "TF_STATE_STORAGE_ACCOUNT": "examplestate",
+        "TF_STATE_CONTAINER": "tfstate", "TF_STATE_SUBSCRIPTION_ID": subscription,
+        "ARM_ENVIRONMENT": "public",
+    }
+    directory = tmp_path / "selected"
+    directory.mkdir()
+    (directory / "resource-groups.json").write_text(json.dumps({
+        "version": 2, "environment": "selected", "subscription": subscription,
+        "foundry": "rg-ai", "application": "rg-app", "network": "rg-net",
+    }), encoding="utf-8")
+    (directory / "terraform-resource-groups.json").write_text(json.dumps({
+        "managedResourceGroupNames": ["rg-ai", "rg-app", "rg-net"] if managed is None else managed,
+    }), encoding="utf-8")
+    ensure_backend_binding(resolve_backend(environment), tmp_path, allow_create=True)
+    return environment
+
+
+@pytest.mark.parametrize("managed", [[], ["rg-ai"], ["rg-ai", "rg-app", "rg-net"]])
+def test_native_terraform_down_allows_bound_split_and_byo_groups_without_azure_calls(tmp_path, managed):
+    environment = _terraform_binding(tmp_path, managed=managed)
+    with patch.object(teardown.subprocess, "run", side_effect=AssertionError("No Azure calls")):
+        teardown.require_safe_teardown(environment, tmp_path, "selected", provider="terraform")
+
+
+@pytest.mark.parametrize("mutation", [
+    {"AZURE_SUBSCRIPTION_ID": "22222222-2222-2222-2222-222222222222"},
+    {"AZURE_RESOURCE_GROUP": "rg-other"},
+    {"AZURE_APP_RESOURCE_GROUP": "rg-other"},
+    {"AZURE_NETWORK_RESOURCE_GROUP": ""},
+    {"TF_STATE_STORAGE_ACCOUNT": "anotherstate"},
+    {"TF_STATE_CONTAINER": "another-container"},
+    {"TF_STATE_RESOURCE_GROUP": "rg-app"},
+    {"ARM_ENVIRONMENT": "china"},
+    {"ARM_ACCESS_KEY": "not-a-secret"},
+])
+def test_terraform_down_cannot_retarget_recorded_scope_or_state(tmp_path, mutation):
+    environment = _terraform_binding(tmp_path)
+    environment.update(mutation)
+    with pytest.raises(ValueError):
+        teardown.require_safe_teardown(environment, tmp_path, "selected", provider="terraform")
+
+
+@pytest.mark.parametrize("filename", [
+    "resource-groups.json", "terraform-resource-groups.json", "terraform-backend.json",
+])
+def test_terraform_down_requires_original_private_records(tmp_path, filename):
+    environment = _terraform_binding(tmp_path)
+    (tmp_path / "selected" / filename).unlink()
+    with pytest.raises(ValueError):
+        teardown.require_safe_teardown(environment, tmp_path, "selected", provider="terraform")
+    assert not (tmp_path / "selected" / filename).exists()
+
+
+@pytest.mark.parametrize("document", [
+    {}, [], {"managedResourceGroupNames": ["rg-foreign"]},
+    {"managedResourceGroupNames": ["rg-ai", "RG-AI"]},
+])
+def test_terraform_down_rejects_malformed_or_foreign_ownership(tmp_path, document):
+    environment = _terraform_binding(tmp_path)
+    (tmp_path / "selected" / "terraform-resource-groups.json").write_text(
+        json.dumps(document), encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        teardown.require_safe_teardown(environment, tmp_path, "selected", provider="terraform")
+
+
+def test_bicep_selection_cannot_delete_a_terraform_owned_environment(tmp_path):
+    environment = _terraform_binding(tmp_path)
+    with pytest.raises(teardown.TeardownError, match="Terraform ownership"):
+        teardown.require_safe_teardown(environment, tmp_path, "selected")
+
+
+def test_backend_binding_is_stable_and_never_implicitly_retargeted(tmp_path):
+    environment = _terraform_binding(tmp_path)
+    path = tmp_path / "selected" / "terraform-backend.json"
+    original = path.read_bytes()
+    ensure_backend_binding(resolve_backend(environment), tmp_path, allow_create=True)
+    assert path.read_bytes() == original
+    environment["TF_STATE_STORAGE_ACCOUNT"] = "anotherstate"
+    with pytest.raises(ValueError, match="recorded state address"):
+        ensure_backend_binding(resolve_backend(environment), tmp_path, allow_create=True)
+    assert path.read_bytes() == original
 
 
 def test_both_hooks_use_the_same_guard():

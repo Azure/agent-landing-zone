@@ -10,7 +10,8 @@ on:
       - 'manifest.json'
       - 'CHANGELOG.md'
       - 'scripts/ReleaseMetadata.ps1'
-      - 'scripts/parity/Parity.WorkflowYaml.ps1'
+      - 'scripts/WorkflowYaml.ps1'
+      - 'tests/scripts/WorkflowYaml.Tests.ps1'
       - 'scripts/Measure-MainJsonSize.ps1'
       - 'scripts/Invoke-PreflightChecks.ps1'
       - 'tests/contracts/**'
@@ -36,7 +37,8 @@ on:
       - 'manifest.json'
       - 'CHANGELOG.md'
       - 'scripts/ReleaseMetadata.ps1'
-      - 'scripts/parity/Parity.WorkflowYaml.ps1'
+      - 'scripts/WorkflowYaml.ps1'
+      - 'tests/scripts/WorkflowYaml.Tests.ps1'
       - 'scripts/Measure-MainJsonSize.ps1'
       - 'scripts/Invoke-PreflightChecks.ps1'
       - 'tests/contracts/**'
@@ -102,6 +104,10 @@ jobs:
       - name: Validate release metadata and trigger coverage
         shell: pwsh
         run: pwsh ./tests/contracts/Test-ReleaseMetadataContract.ps1
+
+      - name: Test workflow YAML reader
+        shell: pwsh
+        run: pwsh ./tests/scripts/WorkflowYaml.Tests.ps1
 
       - name: Validate hosted-agent resource contract
         shell: pwsh

@@ -65,18 +65,20 @@ pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
 # Focused umbrella bootstrap/bindings/composition regressions.
 python -m unittest tests.test_resource_groups
 
-# Separate parity/schema/provenance suite; requires Node.js and pinned packages.
-npm --prefix infra ci --no-audit --no-fund
-npm --prefix infra run test:parity
+# Focused external-sync retirement and shared workflow/release checks.
+pwsh -NoProfile -File infra/tests/contracts/Test-ExternalParityRetirementContract.ps1
+pwsh -NoProfile -File infra/tests/contracts/Test-ReleaseMetadataContract.ps1
+pwsh -NoProfile -File infra/tests/scripts/WorkflowYaml.Tests.ps1
 ```
 
 The offline runner executes every `contracts/Test-*Contract.ps1` and
 `scripts/*.Tests.ps1`, reports each exit code and elapsed time, and fails if any
 gate fails. Compiler scratch files and native runtime extraction stay in a
 unique directory under `infra/tests/`, removed in `finally`. It does not execute
-the live hub/spoke scripts or make Azure writes. The parity suite remains
-separate: a historical source/approval/provenance failure must be reported, not
-resolved by changing source pins or waiving a gate. The copied
+the live hub/spoke scripts or make Azure writes. The external parity npm suite
+and its provenance gates are retired under
+[ADR-0028](../../docs/adr/ADR-0028-integrated-terraform-composition.md); they
+are not prerequisites for local foundation validation. The copied
 `infra/.github/workflows/` are not active umbrella workflows; active CI must
 invoke these commands explicitly.
 
@@ -92,27 +94,19 @@ replacing the standalone resource-group-contract invocation so it is not run
 twice. Keep the existing build/lint steps and install the fixture compiler with
 `az bicep install --version v0.42.1`. Active CI also installs the PowerShell
 module above. The measured offline run fits the current 30-minute build job;
-parity is a separate command with the provenance limitations below.
+external-sync retirement and generic workflow parsing are now included in the
+same runner.
 
-### Historical parity provenance
+### External parity retirement
 
-The full 17-entrypoint parity verification in this umbrella checkout has
-12 passing entrypoints and five pre-existing provenance failures, separate from
-the compiled foundation contracts:
-
-| Entrypoint | Existing failure |
-| --- | --- |
-| `Test-InventoryCoverage.Tests.ps1` | Historical commit `64195c01b70974fa7256c2f54a0035fb06804139` does not contain root `main.bicep` in the umbrella repository. |
-| `Invoke-ParityWorkflow.Tests.ps1` | Historical commit `54d18f53273082dd12f0cab0689ec7968e845950` does not contain root `parity/inventory.json`. |
-| `Test-ParityPerformance.Tests.ps1` | Aggregate validation and Markdown export stop at that missing committed inventory. |
-| `Test-NewTerraformHandoff.Tests.ps1` | Its historical `5dd04b6e…` inventory digest differs from the current committed inventory's `37ee758c…` digest. |
-| `Test-ParityPublication.Tests.ps1` | The historical approved handoff has a stale/mismatched inventory digest. |
-
-The parity data, scripts, tests, source pins and approval records are unchanged
-by the resource-group work. These tests must not be made green by inventing
-source history, replacing approved digests or changing the release's component
-or foundation pins. No upstream release or infrastructure-submodule change is
-required: `infra/` is repository-owned source.
+The [retirement record](../docs/external-terraform-parity-retirement.md) lists
+removed source assets and coordinator-reported remote cleanup evidence. The retirement
+contract checks operational source for external dispatch targets and dedicated
+environment/credential references, rejects legacy mutations, and guards against
+reintroducing exclusive retired assets. It does not scan historical ADRs,
+specifications or changelogs. No historical pins or approvals are rewritten.
+The generic workflow reader and release metadata guard remain tested. This
+does not establish deployed Bicep/Terraform parity.
 
 The hosted-agent contract test compiles with the Bicep version recorded in its
 fixture and proves that the default-disabled feature preserves every symbolic
@@ -236,8 +230,8 @@ template bytes. No Defender resource, plan, role or exception is inferred.
 
 The [proposed release guard](../docs/adr/0006-release-metadata-and-comparison-baselines.md)
 checks exact equal manifest tags and the latest unique versioned changelog
-heading, separately from historical parity tag/SHA pins. Its offline tests
-include metadata mutations and both workflows' path coverage.
+heading. Its offline tests include metadata mutations and the retained Bicep
+workflow's path coverage, using the generic workflow reader.
 The Storage graph guard verifies that `_manifest` retains its Bicep 0.42.1
 binding to `$fxv#0`. Before compatibility projection, the loaded object must
 match the actual umbrella manifest, its `infra.source.tag` must match the

@@ -1,5 +1,10 @@
 # ADR-0006: Separate release metadata from historical parity comparisons
 
+> The external parity ledger and publication portions are superseded by
+> [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md).
+> The release metadata guard remains in use; the comparison and handoff details
+> below are historical and do not require restoring the retired tooling.
+
 - Status: accepted for implementation; integrated into develop by #165
 - Date: 2026-09-18
 - Owners: AI Landing Zone maintainers and parity reviewers

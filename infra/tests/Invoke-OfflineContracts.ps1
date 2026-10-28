@@ -3,7 +3,7 @@
     Runs all compiled foundation contracts and deterministic script tests.
 .DESCRIPTION
     No Azure credentials or writes. Requires PowerShell 7 and the pinned Azure
-    CLI Bicep compiler. Parity has its own npm runner and provenance gates.
+    CLI Bicep compiler. Includes workflow parsing and external-sync retirement guards.
 #>
 [CmdletBinding()]
 param()

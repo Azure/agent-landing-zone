@@ -9,18 +9,6 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 ###############################################################################
-# Mirror azd environment variables into process environment
-# This avoids persisting secrets in the User environment, and makes any
-# previously-persisted Agent Landing Zone topology markers (AZURE_RESOURCE_GROUP,
-# APP_CONFIG_ENDPOINT, DEPLOYMENT_TOPOLOGY, ...) visible to the topology
-# resolution step below on a second/subsequent 'azd provision' run.
-# 'azd env get-values' already emits POSIX-shell-safe KEY="value" lines, so
-# eval'ing them directly (rather than piping into a subshell 'while read'
-# loop, whose exports would not survive the pipe under POSIX sh) is safe.
-###############################################################################
-eval "$(azd env get-values 2>/dev/null | sed 's/^/export /')" || true
-
-###############################################################################
 # Locate the repository root by its markers (manifest.json plus azure.yaml),
 # not by folder name.
 ###############################################################################
@@ -55,6 +43,60 @@ else
     exit 1
 fi
 
+load_azd_environment_json() {
+    if [ -n "${AZURE_ENV_NAME:-}" ]; then
+        azd env get-values --output json --environment "$AZURE_ENV_NAME"
+    else
+        azd env get-values --output json
+    fi
+}
+
+import_azd_environment() {
+AZD_ENVIRONMENT_JSON="$(load_azd_environment_json)" || {
+    echo "Cannot load the selected azd environment; provisioning has not started." >&2
+    exit 1
+}
+AZD_ENVIRONMENT_EXPORTS="$(printf '%s' "$AZD_ENVIRONMENT_JSON" | "$PYTHON_CMD" -c '
+import json, shlex, sys
+import re
+try:
+    values = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit("Cannot read valid JSON from the selected azd environment; provisioning has not started.")
+if not isinstance(values, dict) or not values:
+    sys.exit("The selected azd environment must be a nonempty object.")
+if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or not isinstance(value, str) or "\0" in value for key, value in values.items()):
+    sys.exit("Invalid azd environment key or value; provisioning has not started.")
+for key, value in values.items():
+    print("export " + key + "=" + shlex.quote(value))
+')" || exit 1
+eval "$AZD_ENVIRONMENT_EXPORTS"
+}
+
+# BEGIN azd environment import
+import_azd_environment
+# END azd environment import
+
+# BEGIN infrastructure provider validation
+PROVIDER_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.provider --repo-root "$PROJECT_ROOT")"
+PROVIDER_EXIT=$?
+if [ "$PROVIDER_EXIT" -ne 0 ]; then
+    echo "Infrastructure provider validation failed; provisioning has not started." >&2
+    exit "$PROVIDER_EXIT"
+fi
+INFRA_PROVIDER="$(printf '%s' "$PROVIDER_OUTPUT" | "$PYTHON_CMD" -c '
+import json, sys
+configuration = json.load(sys.stdin)
+if not isinstance(configuration, dict) or configuration.get("provider") not in ("bicep", "terraform"):
+    sys.exit("Infrastructure provider validation returned an unsupported provider.")
+print(configuration["provider"])
+')"
+if [ $? -ne 0 ]; then
+    echo "Infrastructure provider validation returned invalid configuration." >&2
+    exit 1
+fi
+# END infrastructure provider validation
+
 ###############################################################################
 # Application definition: validate and bind before any Azure change.
 ###############################################################################
@@ -87,12 +129,25 @@ if [ $APPDEF_EXIT -ne 0 ]; then
     exit $APPDEF_EXIT
 fi
 
-# Validate and bind destinations before bootstrap; azd still owns root creation.
+# Terraform records ownership without creating groups; Bicep retains its bootstrap.
 echo "${CYAN}Preparing workload resource-group destinations...${NC}"
-if [ -n "${AZURE_ENV_NAME:-}" ]; then
-    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --env-name "$AZURE_ENV_NAME")"
+RESOURCE_GROUP_MODULE="config.deployment.resource_groups"
+if [ "$INFRA_PROVIDER" = "terraform" ]; then
+    RESOURCE_GROUP_MODULE="config.deployment.terraform_groups"
+    AZD_ENVIRONMENT_JSON="$(load_azd_environment_json)" || {
+        echo "Cannot load the selected azd environment; provisioning has not started." >&2
+        exit 1
+    }
+    prepare_terraform_groups() {
+        set -- --environment - --azure-dir "$PROJECT_ROOT/.azure"
+        if [ -n "${AZURE_ENV_NAME:-}" ]; then set -- "$@" --env-name "$AZURE_ENV_NAME"; fi
+        cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m "$RESOURCE_GROUP_MODULE" "$@"
+    }
+    RESOURCE_GROUP_OUTPUT="$(printf '%s' "$AZD_ENVIRONMENT_JSON" | prepare_terraform_groups)"
+elif [ -n "${AZURE_ENV_NAME:-}" ]; then
+    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m "$RESOURCE_GROUP_MODULE" --azure-dir "$PROJECT_ROOT/.azure" --env-name "$AZURE_ENV_NAME")"
 else
-    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure")"
+    RESOURCE_GROUP_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m "$RESOURCE_GROUP_MODULE" --azure-dir "$PROJECT_ROOT/.azure")"
 fi
 RESOURCE_GROUP_EXIT=$?
 if [ $RESOURCE_GROUP_EXIT -ne 0 ]; then
@@ -124,7 +179,7 @@ if [ ! -f "$PROJECT_ROOT/manifest.json" ]; then
     echo "${YELLOW}Error: manifest.json is required to resolve release pins.${NC}"
     exit 1
 fi
-if [ ! -f "$MAIN_BICEP" ]; then
+if [ "$INFRA_PROVIDER" = "bicep" ] && [ ! -f "$MAIN_BICEP" ]; then
     echo "${YELLOW}Error: infra/main.bicep was not found. The infrastructure is part of this repository; restore infra/ from source control.${NC}"
     exit 1
 fi
@@ -147,6 +202,7 @@ if [ $TOPOLOGY_EXIT -ne 0 ]; then
     echo "${YELLOW}Error: Agent Landing Zone deployment topology resolution failed.${NC}"
     exit $TOPOLOGY_EXIT
 fi
+TOPOLOGY_OUTPUT="$(printf '%s' "$TOPOLOGY_OUTPUT" | tr -d '\r')"
 
 eval "$(printf '%s\n' "$TOPOLOGY_OUTPUT" | sed 's/^\([^=]*\)=\(.*\)$/export \1="\2"/')"
 
@@ -174,18 +230,44 @@ fi
 
 echo "${CYAN}Composing Agent Landing Zone deployment mode...${NC}"
 HOSTED_SOURCE_COMMIT="$("$PYTHON_CMD" -c 'import json,sys; print(next(c["commit"] for c in json.load(open(sys.argv[1], encoding="utf-8"))["components"] if c["name"].endswith("-orchestrator")))' "$PROJECT_ROOT/manifest.json")"
-(
-    cd "$PROJECT_ROOT" &&
-    "$PYTHON_CMD" -m config.deployment.composition \
-        --input "$PROJECT_ROOT/main.parameters.json" \
-        --output "$INFRA_DIR/main.parameters.json" \
-        --hosted-source-commit "$HOSTED_SOURCE_COMMIT"
-)
+if [ "$INFRA_PROVIDER" = "terraform" ]; then
+    AZD_ENVIRONMENT_JSON="$(load_azd_environment_json)" || {
+        echo "Cannot reload the selected azd environment before input composition." >&2
+        exit 1
+    }
+    TERRAFORM_PARAMETER_DESTINATION="$(printf '%s' "$PROVIDER_OUTPUT" | "$PYTHON_CMD" -c '
+import json, sys
+from pathlib import Path
+provider = json.load(sys.stdin)
+print(Path(sys.argv[1]) / provider["path"] / (provider["module"] + ".tfvars.json"))
+' "$PROJECT_ROOT")" || exit 1
+    TERRAFORM_OWNERSHIP_FILE="$(printf '%s' "$RESOURCE_GROUP_OUTPUT" | "$PYTHON_CMD" -c 'import json,sys; print(json.load(sys.stdin)["ownershipFile"])')" || exit 1
+    printf '%s' "$AZD_ENVIRONMENT_JSON" | (
+        cd "$PROJECT_ROOT" &&
+        "$PYTHON_CMD" -m config.deployment.terraform_inputs \
+            --input "$PROJECT_ROOT/main.parameters.json" \
+            --environment - \
+            --app-definition "$APP_DEFINITION_PATH" \
+            --output "$TERRAFORM_PARAMETER_DESTINATION" \
+            --diagnostic-output "$INFRA_DIR/main.parameters.json" \
+            --resource-group-ownership "$TERRAFORM_OWNERSHIP_FILE" \
+            --hosted-source-commit "$HOSTED_SOURCE_COMMIT"
+    ) >/dev/null
+else
+    (
+        cd "$PROJECT_ROOT" &&
+        "$PYTHON_CMD" -m config.deployment.composition \
+            --input "$PROJECT_ROOT/main.parameters.json" \
+            --output "$INFRA_DIR/main.parameters.json" \
+            --hosted-source-commit "$HOSTED_SOURCE_COMMIT"
+    )
+fi
 COMPOSE_EXIT=$?
 if [ $COMPOSE_EXIT -ne 0 ]; then
     echo "${YELLOW}Error: Agent Landing Zone deployment mode composition failed.${NC}"
     exit $COMPOSE_EXIT
 fi
+if [ "$INFRA_PROVIDER" = "terraform" ]; then import_azd_environment; fi
 
 # BEGIN component runtime egress
 (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.egress --plan --save) || {
