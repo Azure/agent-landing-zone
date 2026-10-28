@@ -220,6 +220,14 @@ class CapabilityProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             expand_profiles(["owner"])
 
+    def test_bundled_ui_can_check_native_download_permissions_without_search_write(self) -> None:
+        definition = load_definition(ROOT / "app-definition.json", repo_root=ROOT)
+        ui = next(component for component in definition.document["components"] if component["name"] == "ui")
+        roles = set(role_names(ui["profiles"]))
+        self.assertIn("SearchIndexDataReader", roles)
+        self.assertNotIn("SearchIndexDataContributor", roles)
+        self.assertNotIn("SearchServiceContributor", roles)
+
     def test_trio_profiles_reproduce_current_role_assignments(self) -> None:
         """T099 parity checklist: profiles == containerAppsList roles per app."""
         parameters = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))

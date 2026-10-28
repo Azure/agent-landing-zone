@@ -9,7 +9,7 @@
       "kind": "containerapp",
       "path": "ui",
       "source": { "commit": "b54f44db1a4e38389ecc901ebd7a9ecacf3f5554" },
-      "profiles": ["blob-delegator"],
+      "profiles": ["blob-delegator", "retrieval-reader"],
       "egress": [],
       "ingress": "external"
     },
