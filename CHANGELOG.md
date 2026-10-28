@@ -1,5 +1,47 @@
 # Changelog
 
+## [v5.4.0] - 2026-10-27
+
+### Added
+- Add an integrated Terraform foundation under `infra/terraform`, using a flat
+  AVM-based composition, pinned modules and a committed Linux/Windows provider
+  lock. Bicep remains the default; both providers use the shared azd application
+  lifecycle, typed configuration and complete deployment-output contract.
+- Add Terraform contract checks on Linux and Windows alongside the existing
+  Bicep, Python and cross-platform lifecycle checks.
+
+### Changed
+- Preserve foundation/application ownership, deployed runtime images, App
+  Configuration labels and Key Vault references across provisioning. Bind
+  Terraform backend and resource-group ownership for state-scoped teardown,
+  with the documented single-writer model for shared state.
+- Require bidirectional Bicep/Terraform parity for every infrastructure change
+  in AGENTS, Copilot instructions and constitution v2.1.0.
+- Organize central deployment runbooks by infrastructure-only/full-stack outcome,
+  with separate Bicep and Terraform paths and a Terraform composition overview.
+
+### Removed
+- Retire the external Terraform parity assessment/publication automation and
+  its dedicated operational assets, retaining historical decision records.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes Terraform contracts on Linux and Windows, Bicep build/lint,
+  offline foundation contracts and the full deployment/hook suite:
+  1,095 tests, 873 subtests and 7 skips.
+- The complete local Terraform suite passes 89 tests. A public-foundation
+  Azure-authenticated plan in `swedencentral` passes without applying resources;
+  no full-stack Azure deployment was executed for this release.
+- Central documentation builds in strict MkDocs mode; navigation, links and the
+  Terraform diagram are validated. Runtime component pins are unchanged.
+
 ## [v5.3.0] - 2026-10-27
 
 ### Added
