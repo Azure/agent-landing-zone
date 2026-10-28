@@ -28,16 +28,12 @@ Secure, enterprise-ready landing zone for deploying AI agent applications on Mic
 
 ## Architecture
 
-Reference architectures for private-network deployments. Resource selection and
-reuse depend on deployment settings. Select an image to open the full-resolution PNG.
+Standalone reference architecture for private-network deployments. Resource
+selection and reuse depend on deployment settings. Select the image to open the
+full-resolution PNG. For Platform Hub and AI Gateway combinations, see the
+[reference architectures](https://azure.github.io/AI-Landing-Zones/#reference-architectures).
 
-### Standalone
-
-[![Standalone Agent Landing Zone architecture](media/AI-Landing-Zone-without-platform.png)](media/AI-Landing-Zone-without-platform.png)
-
-### With Platform Hub
-
-[![Agent Landing Zone with Platform Hub architecture](media/AI-Landing-Zone-with-platform.png)](media/AI-Landing-Zone-with-platform.png)
+[![Standalone Agent Landing Zone architecture](media/AI-Landing-Zone-without-platform.png?v=3e5b69b5e8eb)](media/AI-Landing-Zone-without-platform.png?v=3e5b69b5e8eb)
 
 ## Deploy
 
