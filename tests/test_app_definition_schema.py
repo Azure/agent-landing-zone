@@ -256,10 +256,15 @@ class BundledDefinitionTests(unittest.TestCase):
             self.assertEqual(pins[component["name"]], component["source"]["commit"])
 
     def test_bundled_source_drift_from_manifest_fails(self) -> None:
-        document = copy.deepcopy(self.trio.document)
-        document["components"][0]["source"]["commit"] = "c" * 40
-        drifted = AppDefinition(self.trio.path, document, bundled=True)
-        self.assertIn("/components/0/source/commit", {i.pointer for i in collect_issues(drifted, ROOT)})
+        for index in (0, 1):
+            with self.subTest(component=index):
+                document = copy.deepcopy(self.trio.document)
+                document["components"][index]["source"]["commit"] = "c" * 40
+                drifted = AppDefinition(self.trio.path, document, bundled=True)
+                self.assertIn(
+                    f"/components/{index}/source/commit",
+                    {i.pointer for i in collect_issues(drifted, ROOT)},
+                )
 
     def test_hosted_mode_turns_orchestrator_into_hosted_agent(self) -> None:
         classic = {c["name"]: c for c in effective_components(self.trio, hosted_orchestration=False)}
