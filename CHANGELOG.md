@@ -1,5 +1,34 @@
 # Changelog
 
+## [v5.5.2] - 2026-10-28
+
+### Fixed
+- Align the bundled application definition with the published UI and
+  orchestrator commits already pinned in the manifest, restoring definition
+  validation and deployment composition. Application Cosmos remains optional;
+  no runtime version or infrastructure provenance changes.
+- Validate the real bundled definition in the release pin regression so a
+  manifest-only update cannot silently leave the deployment contract stale.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Targeted definition, CLI, role, egress, composition, release and Terraform
+  interface coverage passes 180 tests and 70 subtests, with one skipped test.
+- Release and actual bundled-definition checks repeated on the integration
+  branch pass 64 tests and 54 subtests.
+- Hosted-agent and exact graph-normalization contracts pass, retaining the
+  original fingerprints and rejecting 45 graph mutations and 39 subnet deltas,
+  including drift in either embedded component source commit.
+- Validation is local and offline. No live Azure deployment, resource cleanup
+  or data migration was performed; previously published tags remain unchanged.
+
 ## [v5.5.1] - 2026-10-28
 
 ### Changed

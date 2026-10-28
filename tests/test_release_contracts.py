@@ -6,6 +6,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from config.appdefinition import load_definition, validate_definition
 from config.deployment.composition import (
     DeploymentMode,
     compose_parameters,
@@ -19,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class IntegrationPinTests(unittest.TestCase):
     def test_manifest_contains_exact_integration_pins(self) -> None:
+        validate_definition(
+            load_definition(ROOT / "app-definition.json", repo_root=ROOT),
+            ROOT,
+        )
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         components = {item["name"]: item for item in manifest["components"]}
 
@@ -53,6 +58,17 @@ class IntegrationPinTests(unittest.TestCase):
                 components["agent-app-ui"]["tag"],
                 components["agent-app-ui"]["commit"],
             ),
+        )
+        fixture = json.loads(
+            (ROOT / "infra" / "tests" / "contracts" / "fixtures"
+             / "incorporated-foundation-normalization.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            manifest["components"],
+            fixture["projection"]["changes"]["variables"]["changes"]["$fxv#0"]
+            ["changes"]["components"]["after"],
         )
 
     def test_infra_is_in_repository_source_without_submodule_pin(self) -> None:
