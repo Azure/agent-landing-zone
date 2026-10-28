@@ -4,7 +4,11 @@
 
 **Created**: 2026-08-21
 
-**Status**: Draft
+**Status**: Historical — superseded by [ADR-0028](../../../docs/adr/ADR-0028-integrated-terraform-composition.md)
+
+> This specification and its sibling contracts, plans, tasks and validation
+> records describe retired external coordination. They are retained for audit,
+> not as active instructions or a requirement to restore the removed pipeline.
 
 **Input**: User description: "let's specify https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/136 — Establish Terraform parity for the Foundry AI Landing Zone"
 

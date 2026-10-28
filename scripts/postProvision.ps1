@@ -783,26 +783,36 @@ function Set-AgentLzAppConfiguration {
     $tempFile = Join-Path $repoRoot ".azure\agentlz-appconfig-$([Guid]::NewGuid().ToString('N')).json"
     try {
         $flatSettings | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $tempFile -Encoding UTF8
-        $importOutput = Invoke-NativeCommand {
-            az appconfig kv import `
-                --endpoint $Endpoint `
-                --source file `
-                --format json `
-                --path $tempFile `
-                --label $Label `
-                --content-type 'text/plain' `
-                --auth-mode login `
-                --yes 2>&1
-        }
+        $seedOutput = Invoke-PythonModule -ModuleName 'config.deployment.appconfig_seed' -Arguments @(
+            '--input', $tempFile, '--endpoint', $Endpoint
+        )
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to import Agent Landing Zone App Configuration settings: $importOutput"
-            exit 1
+            Write-Error "Failed to prepare App Configuration defaults; no defaults were imported."
+            exit $LASTEXITCODE
+        }
+        $seedCount = (($seedOutput -join "`n") | ConvertFrom-Json).seedCount
+        if ($seedCount -gt 0) {
+            $importOutput = Invoke-NativeCommand {
+                az appconfig kv import `
+                    --endpoint $Endpoint `
+                    --source file `
+                    --format json `
+                    --path $tempFile `
+                    --label $Label `
+                    --content-type 'text/plain' `
+                    --auth-mode login `
+                    --yes 2>&1
+            }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Failed to import Agent Landing Zone App Configuration settings: $importOutput"
+                exit 1
+            }
         }
     } finally {
         Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "✅ Agent Landing Zone App Configuration populated ($($flatSettings.Count) keys)."
+    Write-Host "✅ Agent Landing Zone App Configuration defaults populated ($seedCount new keys)."
 }
 
 Set-AgentLzAppConfiguration -Endpoint (Get-RequiredEnvValue 'APP_CONFIG_ENDPOINT') -Label 'agent-lz'

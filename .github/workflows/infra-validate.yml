@@ -11,6 +11,7 @@ on:
     paths:
       - 'infra/**'
       - 'config/**'
+      - 'util/**'
       - 'scripts/**'
       - 'tests/**'
       - 'main.parameters.json'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'infra/**'
       - 'config/**'
+      - 'util/**'
       - 'scripts/**'
       - 'tests/**'
       - 'main.parameters.json'
@@ -40,6 +42,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  terraform-contracts:
+    name: terraform contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.13.0
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize without Azure state
+        run: terraform init -backend=false -lockfile=readonly
+
+      - name: Validate composition
+        run: terraform validate
+
+      - name: Test deployment contracts
+        run: terraform test
+
   deployment-contracts:
     name: deployment and hook contracts
     runs-on: ubuntu-latest
