@@ -200,6 +200,8 @@ param applicationPeSubnetPrefix string = '192.168.3.128/26'
 param gatewaySubnetName string = 'GatewaySubnet'
 param azureBastionSubnetName string = 'AzureBastionSubnet'
 param azureFirewallSubnetName string = 'AzureFirewallSubnet'
+@allowed(['AzureFirewallManagementSubnet'])
+param azureFirewallManagementSubnetName string = 'AzureFirewallManagementSubnet'
 param azureAppGatewaySubnetName string = 'AppGatewaySubnet'
 param jumpboxSubnetName string = 'jumpbox-subnet'
 param acaEnvironmentSubnetName string = 'aca-environment-subnet'
@@ -222,10 +224,12 @@ param deployPeSubnet bool = true
 param deployApplicationPeSubnet bool = true
 @description('Create/manage AzureBastionSubnet without deploying Bastion.')
 param deployAzureBastionSubnet bool = true
-@description('Create/manage AzureFirewallSubnet without deploying a firewall.')
-param deployAzureFirewallSubnet bool = true
+@description('Create/manage AzureFirewallSubnet. Null follows the local isolated firewall requirement; true can reserve it without a firewall; false requires BYO when needed.')
+param deployAzureFirewallSubnet bool?
+@description('Create/manage the management subnet only for active standalone isolated Basic. Null creates it; false requires a verified BYO subnet.')
+param deployAzureFirewallManagementSubnet bool?
 @description('Create/manage GatewaySubnet without deploying a VPN/ExpressRoute gateway.')
-param deployGatewaySubnet bool = true
+param deployGatewaySubnet bool = false
 @description('Create/manage the Application Gateway subnet without deploying a gateway.')
 param deployAppGatewaySubnet bool = true
 @description('Create/manage the jumpbox subnet without deploying a VM.')
@@ -266,6 +270,9 @@ param azureBastionSubnetPrefix string = '192.168.2.64/26' // 192.168.2.64–192.
 
 @description('Azure Firewall subnet — /26 (64 IPs, CIDR-aligned)')
 param azureFirewallSubnetPrefix string = '192.168.2.128/26' // 192.168.2.128–192.168.2.191
+
+@description('Basic firewall management subnet — aligned IPv4 /26 or larger, without workload NSG, UDR, NAT, delegation or service endpoints.')
+param azureFirewallManagementSubnetPrefix string = '192.168.3.192/26'
 
 @description('Gateway subnet — Required /26 (64 IPs, CIDR-aligned)')
 param gatewaySubnetPrefix string = '192.168.2.192/26' // 192.168.2.192–192.168.2.255
@@ -438,6 +445,10 @@ param deployNsgs bool = true
 
 @description('Deploy Azure Firewall with UDR for egress traffic control. Defaults to true when networkIsolation is enabled.')
 param deployAzureFirewall bool = true
+
+@description('SKU for the deployment-owned firewall and policy. Basic requires standalone management networking and does not support DNS proxy.')
+@allowed(['Basic', 'Standard'])
+param azureFirewallSku string = 'Basic'
 
 @description('Enable DNS proxy on the spoke-local Azure Firewall policy. Defaults to false. Only effective when deployAzureFirewall and networkIsolation are true; does not change VNet or VPN client DNS settings or create a DNS resolver.')
 param enableFirewallDnsProxy bool = false
@@ -1240,6 +1251,20 @@ var _hasEffectiveAI           = _hasExistingAI || _createAppInsights
 // Any other combination is invalid and surfaced by the pre-flight script (Gap 9).
 var _hasExistingRouteTable = !empty(hubIntegrationExistingRouteTableResourceId ?? '')
 var _hasExternalEgress     = !empty(hubIntegrationEgressNextHopIp ?? '')
+var _localFirewall = _networkIsolation && deployAzureFirewall
+// Native callers must make the same explicit ownership/DNS choices as azd.
+// This value feeds subnet selection and the firewall deployment, so invalid
+// intent cannot turn into partial management networking or a fallback SKU.
+var _validatedAzureFirewallSku = azureFirewallSku == 'Basic' && enableFirewallDnsProxy
+  ? fail('Azure Firewall Basic does not support DNS proxy. Select Standard explicitly or disable enableFirewallDnsProxy.')
+  : _localFirewall && deploymentMode != 'standalone' && azureFirewallSku == 'Basic'
+    ? fail('Local Azure Firewall Basic is supported only in standalone mode. Use external hub egress with deployAzureFirewall=false or explicitly select Standard.')
+    : _networkIsolation && ((_hasExternalEgress && _hasExistingRouteTable) || (deployAzureFirewall && (_hasExternalEgress || _hasExistingRouteTable)))
+      ? fail('Select exactly one egress owner: local firewall, external next-hop IP, or existing route table. Local firewall and external routing are mutually exclusive.')
+      : _networkIsolation && !deployAzureFirewall && !_hasExternalEgress && !_hasExistingRouteTable
+        ? fail('Network isolation with deployAzureFirewall=false requires an explicit external next-hop IP or existing route table. A hub VNet or deployment mode alone does not configure egress.')
+        : azureFirewallSku
+var _basicFirewallManagement = _localFirewall && deploymentMode == 'standalone' && _validatedAzureFirewallSku == 'Basic'
 var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
 #disable-next-line BCP318
 var _effectiveRouteTableId = _hasExistingRouteTable
@@ -1505,8 +1530,8 @@ var subnetDefinitions = [
       }
       {
         purpose: 'firewall'
-        create: deployAzureFirewallSubnet
-        required: deployAzureFirewall
+        create: deployAzureFirewallSubnet ?? _localFirewall
+        required: _localFirewall
         name: azureFirewallSubnetName
         addressPrefix: azureFirewallSubnetPrefix 
         delegation: ''
@@ -1578,6 +1603,15 @@ var subnetDefinitions = [
         name: aiGatewaySubnetName
         addressPrefix: aiGatewaySubnetPrefix
         delegation: 'Microsoft.Web/serverFarms'
+        serviceEndpoints: []
+      }
+      {
+        purpose: 'firewallManagement'
+        create: _basicFirewallManagement && (deployAzureFirewallManagementSubnet ?? true)
+        required: _basicFirewallManagement
+        name: azureFirewallManagementSubnetName
+        addressPrefix: azureFirewallManagementSubnetPrefix
+        delegation: ''
         serviceEndpoints: []
       }
 ]
@@ -1701,6 +1735,8 @@ module firewall 'modules/networking/azure-firewall.bicep' = {
   name: 'firewall'
   params: {
     deployAzureFirewall: deployAzureFirewall
+    azureFirewallSku: _validatedAzureFirewallSku
+    deploymentMode: deploymentMode
     enableFirewallDnsProxy: enableFirewallDnsProxy
     networkIsolation: _networkIsolation
     enableAcsMediaEgress: enableAcsMediaEgress
@@ -1714,6 +1750,7 @@ module firewall 'modules/networking/azure-firewall.bicep' = {
     tags: _tags
     virtualNetworkResourceId: virtualNetworkResourceId
     azureFirewallSubnetName: azureFirewallSubnetName
+    azureFirewallManagementSubnetName: azureFirewallManagementSubnetName
     jumpboxSubnetPrefix: jumpboxSubnetPrefix
     devopsBuildAgentsSubnetPrefix: devopsBuildAgentsSubnetPrefix
     acaEnvironmentSubnetPrefix: acaEnvironmentSubnetPrefix
@@ -1722,6 +1759,7 @@ module firewall 'modules/networking/azure-firewall.bicep' = {
     lawResourceId: _lawResourceId
   }
   dependsOn: [
+    networkLayoutValidation
     #disable-next-line BCP321
     !useExistingVNet ? virtualNetwork : null
     #disable-next-line BCP321

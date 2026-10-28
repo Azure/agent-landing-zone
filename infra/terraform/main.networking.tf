@@ -3,23 +3,24 @@
 # Keep producer dependencies out of subnet_ids: endpoints consume service IDs,
 # never the reverse. All for_each keys below are derived from deployment intent.
 locals {
-  network_abbreviations = jsondecode(file("${path.module}/../constants/abbreviations.json"))
-  network_rg_id         = local.deployment_context.network_rg_id
-  network_byo_parts     = split("/", var.existingVnetResourceId)
-  network_vnet_id       = var.networkIsolation ? (var.useExistingVNet ? var.existingVnetResourceId : module.network_vnet[0].resource_id) : ""
-  network_vnet_sub      = var.useExistingVNet ? try(local.network_byo_parts[2], "") : var.subscriptionId
-  network_vnet_rg       = var.useExistingVNet ? try(local.network_byo_parts[4], "") : local.deployment_context.network_rg
-  network_vnet_name     = var.useExistingVNet ? try(local.network_byo_parts[8], "") : local.resource_names.vnetName
-  network_byo_placement = var.useExistingVNet && !var.sideBySideDeploy
-  network_pe_sub        = var.privateEndpointResourceGroupName != "" ? var.subscriptionId : (local.network_byo_placement ? local.network_vnet_sub : var.subscriptionId)
-  network_pe_rg         = var.privateEndpointResourceGroupName != "" ? var.privateEndpointResourceGroupName : (local.network_byo_placement ? local.network_vnet_rg : local.deployment_context.network_rg)
-  network_dns_sub       = local.network_byo_placement ? local.network_vnet_sub : var.subscriptionId
-  network_dns_rg        = local.network_byo_placement ? local.network_vnet_rg : local.deployment_context.network_rg
-  network_firewall      = var.networkIsolation && var.deployAzureFirewall
-  network_route_table   = var.networkIsolation && coalesce(var.hubIntegrationExistingRouteTableResourceId, " ") == " "
-  network_route_id      = local.network_route_table ? module.network_route_table[0].resource_id : coalesce(var.hubIntegrationExistingRouteTableResourceId, " ")
-  network_nat_id        = local.effective_flags.nat ? module.network_nat[0].resource_id : (var.existingNatGatewayResourceId == null ? "" : var.existingNatGatewayResourceId)
-  network_ingress_live  = var.publicIngress.sslCertSecretId != "" && var.publicIngress.frontendHostName != ""
+  network_abbreviations    = jsondecode(file("${path.module}/../constants/abbreviations.json"))
+  network_rg_id            = local.deployment_context.network_rg_id
+  network_byo_parts        = split("/", var.existingVnetResourceId)
+  network_vnet_id          = var.networkIsolation ? (var.useExistingVNet ? var.existingVnetResourceId : module.network_vnet[0].resource_id) : ""
+  network_vnet_sub         = var.useExistingVNet ? try(local.network_byo_parts[2], "") : var.subscriptionId
+  network_vnet_rg          = var.useExistingVNet ? try(local.network_byo_parts[4], "") : local.deployment_context.network_rg
+  network_vnet_name        = var.useExistingVNet ? try(local.network_byo_parts[8], "") : local.resource_names.vnetName
+  network_byo_placement    = var.useExistingVNet && !var.sideBySideDeploy
+  network_pe_sub           = var.privateEndpointResourceGroupName != "" ? var.subscriptionId : (local.network_byo_placement ? local.network_vnet_sub : var.subscriptionId)
+  network_pe_rg            = var.privateEndpointResourceGroupName != "" ? var.privateEndpointResourceGroupName : (local.network_byo_placement ? local.network_vnet_rg : local.deployment_context.network_rg)
+  network_dns_sub          = local.network_byo_placement ? local.network_vnet_sub : var.subscriptionId
+  network_dns_rg           = local.network_byo_placement ? local.network_vnet_rg : local.deployment_context.network_rg
+  network_firewall         = var.networkIsolation && var.deployAzureFirewall
+  network_basic_management = local.network_firewall && var.deploymentMode == "standalone" && var.azureFirewallSku == "Basic"
+  network_route_table      = var.networkIsolation && coalesce(var.hubIntegrationExistingRouteTableResourceId, " ") == " "
+  network_route_id         = local.network_route_table ? module.network_route_table[0].resource_id : coalesce(var.hubIntegrationExistingRouteTableResourceId, " ")
+  network_nat_id           = local.effective_flags.nat ? module.network_nat[0].resource_id : (var.existingNatGatewayResourceId == null ? "" : var.existingNatGatewayResourceId)
+  network_ingress_live     = var.publicIngress.sslCertSecretId != "" && var.publicIngress.frontendHostName != ""
 
   public_access = {
     apply_ip_rules        = length(var.allowedIpRanges) > 0
@@ -52,8 +53,13 @@ locals {
       required = local.effective_flags.bastion, delegation = "", service_endpoints = []
     }
     firewall = {
-      name     = var.azureFirewallSubnetName, address_prefix = var.azureFirewallSubnetPrefix, create = var.deployAzureFirewallSubnet
-      required = var.deployAzureFirewall, delegation = "", service_endpoints = []
+      name     = var.azureFirewallSubnetName, address_prefix = var.azureFirewallSubnetPrefix, create = coalesce(var.deployAzureFirewallSubnet, local.network_firewall)
+      required = local.network_firewall, delegation = "", service_endpoints = []
+    }
+    firewallManagement = {
+      name     = var.azureFirewallManagementSubnetName, address_prefix = var.azureFirewallManagementSubnetPrefix
+      create   = local.network_basic_management && coalesce(var.deployAzureFirewallManagementSubnet, true)
+      required = local.network_basic_management, delegation = "", service_endpoints = []
     }
     appGateway = {
       name     = var.azureAppGatewaySubnetName, address_prefix = var.azureAppGatewaySubnetPrefix, create = var.deployAppGatewaySubnet
@@ -125,6 +131,29 @@ locals {
       valid = try(cidrhost(cidr, 0) == split("/", cidr)[0] && length(split(".", cidrhost(cidr, 0))) == 4, false)
     }
   ]
+  network_management_vnet_ranges = [
+    for cidr in try(data.azapi_resource.network_existing_management_vnet[0].output.properties.addressSpace.addressPrefixes, []) : {
+      start = try(sum([for i, octet in split(".", cidrhost(cidr, 0)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+      end   = try(sum([for i, octet in split(".", cidrhost(cidr, -1)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+    }
+  ]
+  network_management_peer_ranges = flatten([
+    for subnet in try(data.azapi_resource.network_existing_management_vnet[0].output.properties.subnets, []) : [
+      for cidr in try(subnet.properties.addressPrefixes, [subnet.properties.addressPrefix]) : {
+        start = try(sum([for i, octet in split(".", cidrhost(cidr, 0)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+        end   = try(sum([for i, octet in split(".", cidrhost(cidr, -1)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+      }
+    ] if subnet.name != var.azureFirewallManagementSubnetName
+  ])
+  network_existing_firewall_ranges = {
+    for purpose, subnet in data.azapi_resource.network_existing_subnet : purpose => [
+      for cidr in try(subnet.output.properties.addressPrefixes, [subnet.output.properties.addressPrefix], []) : {
+        start = try(sum([for i, octet in split(".", cidrhost(cidr, 0)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+        end   = try(sum([for i, octet in split(".", cidrhost(cidr, -1)) : tonumber(octet) * pow(256, 3 - i)]), -1)
+        valid = try(length(split(".", cidrhost(cidr, 0))) == 4 && cidrhost(cidr, 0) == split("/", cidr)[0] && tonumber(split("/", cidr)[1]) <= 26, false)
+      }
+    ] if contains(["firewall", "firewallManagement"], purpose)
+  }
 }
 
 # Preconditions fail the plan (unlike advisory check blocks). This resource has
@@ -153,10 +182,25 @@ resource "terraform_data" "network_contract" {
     }
     precondition {
       condition = alltrue([
-        for purpose, name in { gateway = "GatewaySubnet", bastion = "AzureBastionSubnet", firewall = "AzureFirewallSubnet" } :
+        for purpose, name in { gateway = "GatewaySubnet", bastion = "AzureBastionSubnet", firewall = "AzureFirewallSubnet", firewallManagement = "AzureFirewallManagementSubnet" } :
         !contains(keys(local.network_relevant_subnets), purpose) || local.network_subnet_inputs[purpose].name == name
       ])
-      error_message = "Gateway, Bastion and Firewall subnet names must match Azure's reserved names exactly."
+      error_message = "Gateway, Bastion and Firewall data/management subnet names must match Azure's reserved names exactly."
+    }
+    precondition {
+      condition     = !local.network_firewall || var.azureFirewallSku != "Basic" || var.deploymentMode == "standalone"
+      error_message = "Local Basic firewall is supported only in standalone mode; integrated deployments must select Standard or external egress."
+    }
+    precondition {
+      condition     = var.azureFirewallSku != "Basic" || !var.enableFirewallDnsProxy
+      error_message = "Basic firewall does not support DNS proxy; explicitly select Standard to enable it."
+    }
+    precondition {
+      condition = alltrue([
+        for purpose, r in local.network_cidr_ranges : r.valid && r.prefix >= 0 && r.prefix <= 26
+        if contains(["firewall", "firewallManagement"], purpose) && var.deploySubnets && local.network_subnet_inputs[purpose].create
+      ])
+      error_message = "Managed firewall data and management subnets require aligned IPv4 prefixes of /26 or larger."
     }
     precondition {
       condition = alltrue([
@@ -182,6 +226,28 @@ resource "terraform_data" "network_contract" {
       error_message = "Every managed subnet must be contained in an aligned IPv4 VNet address prefix."
     }
     precondition {
+      condition = !local.network_basic_management || !var.useExistingVNet || !(var.deploySubnets && local.network_subnet_inputs.firewallManagement.create) || try(
+        anytrue([for v in local.network_management_vnet_ranges : local.network_cidr_ranges.firewallManagement.start >= v.start && local.network_cidr_ranges.firewallManagement.end <= v.end]) &&
+        alltrue([
+          for r in local.network_management_peer_ranges : local.network_cidr_ranges.firewallManagement.end < r.start || r.end < local.network_cidr_ranges.firewallManagement.start
+        ]),
+        false
+      )
+      error_message = "A managed Basic management subnet must fit the actual BYO VNet address space without overlapping its other subnets."
+    }
+    precondition {
+      condition = !local.network_basic_management || !var.useExistingVNet || !(var.deploySubnets && local.network_subnet_inputs.firewallManagement.create) || try(alltrue([
+        for subnet in data.azapi_resource.network_existing_management_vnet[0].output.properties.subnets :
+        try(subnet.properties.routeTable.id, "") == "" &&
+        try(subnet.properties.networkSecurityGroup.id, "") == "" &&
+        try(subnet.properties.natGateway.id, "") == "" &&
+        length(try(subnet.properties.delegations, [])) == 0 &&
+        length(try(subnet.properties.serviceEndpoints, [])) == 0
+        if subnet.name == var.azureFirewallManagementSubnetName
+      ]), false)
+      error_message = "Managed management-subnet creation must not remove existing shared associations; disable creation and validate BYO reuse instead."
+    }
+    precondition {
       condition     = !var.networkIsolation || !var.deploySubnets || !var.deployAiGatewaySubnet || (var.deployNsgs && try(local.network_cidr_ranges.aiGateway.prefix <= 27, false))
       error_message = "The managed AI Gateway subnet requires deployNsgs and a /27 or larger prefix."
     }
@@ -204,6 +270,14 @@ resource "terraform_data" "network_contract" {
       error_message = "sslPolicy must be an ARM SSL policy object; unsupported fields cannot be silently discarded."
     }
   }
+}
+
+# Inspect BYO address space rather than assuming the new-VNet defaults apply.
+data "azapi_resource" "network_existing_management_vnet" {
+  count                  = local.network_basic_management && var.useExistingVNet && var.existingVnetResourceId != "" ? 1 : 0
+  type                   = "Microsoft.Network/virtualNetworks@2024-07-01"
+  resource_id            = var.existingVnetResourceId
+  response_export_values = ["properties.addressSpace", "properties.subnets"]
 }
 
 module "network_vnet" {
@@ -256,10 +330,61 @@ data "azapi_resource" "network_existing_subnet" {
   response_export_values = ["properties"]
 }
 
+# A BYO management table is read-only and must preserve direct Internet egress.
+data "azapi_resource" "network_existing_management_routes" {
+  count                  = trimspace(coalesce(try(data.azapi_resource.network_existing_subnet["firewallManagement"].output.properties.routeTable.id, null), " ")) != "" ? 1 : 0
+  type                   = "Microsoft.Network/routeTables@2024-07-01"
+  resource_id            = data.azapi_resource.network_existing_subnet["firewallManagement"].output.properties.routeTable.id
+  response_export_values = ["properties"]
+}
+
 resource "terraform_data" "network_existing_subnet_contract" {
   for_each = data.azapi_resource.network_existing_subnet
   input    = each.value.id
   lifecycle {
+    precondition {
+      condition = !contains(["firewall", "firewallManagement"], each.key) || try(
+        lower(each.value.id) == lower("${var.existingVnetResourceId}/subnets/${local.network_subnet_inputs[each.key].name}") &&
+        alltrue([for r in local.network_existing_firewall_ranges[each.key] : r.valid]) &&
+        length(local.network_existing_firewall_ranges[each.key]) > 0,
+        false
+      )
+      error_message = "A reused firewall subnet must belong to the selected VNet and have aligned IPv4 prefixes of /26 or larger."
+    }
+    precondition {
+      condition = each.key != "firewallManagement" || try(
+        alltrue([
+          for r in local.network_existing_firewall_ranges[each.key] :
+          anytrue([for v in local.network_management_vnet_ranges : r.start >= v.start && r.end <= v.end]) &&
+          alltrue([for peer in local.network_management_peer_ranges : r.end < peer.start || peer.end < r.start]) &&
+          alltrue([
+            for purpose, managed in local.network_cidr_ranges : r.end < managed.start || managed.end < r.start
+            if purpose != each.key && var.deploySubnets && local.network_subnet_inputs[purpose].create
+          ])
+        ]) &&
+        try(each.value.output.properties.networkSecurityGroup.id, "") == "" &&
+        try(each.value.output.properties.natGateway.id, "") == "" &&
+        length(try(each.value.output.properties.privateEndpoints, [])) == 0 &&
+        length(try(each.value.output.properties.serviceEndpoints, [])) == 0,
+        false
+      )
+      error_message = "A reused management subnet must fit the actual VNet without overlap and have no NSG, NAT or service endpoints; shared associations are never rewritten."
+    }
+    precondition {
+      condition = each.key != "firewallManagement" || try(each.value.output.properties.routeTable.id, "") == "" || try(
+        data.azapi_resource.network_existing_management_routes[0].output.properties.disableBgpRoutePropagation &&
+        anytrue([
+          for route in data.azapi_resource.network_existing_management_routes[0].output.properties.routes :
+          route.properties.addressPrefix == "0.0.0.0/0" && route.properties.nextHopType == "Internet"
+        ]) &&
+        alltrue([
+          for route in data.azapi_resource.network_existing_management_routes[0].output.properties.routes :
+          route.properties.nextHopType == "Internet"
+        ]),
+        false
+      )
+      error_message = "A BYO management route table must disable BGP propagation, route 0.0.0.0/0 directly to Internet and contain no redirecting/blocking routes."
+    }
     precondition {
       condition = local.network_subnet_inputs[each.key].delegation == "" ? (
         length(try(each.value.output.properties.delegations, [])) == 0
@@ -335,6 +460,7 @@ module "network_public_ip" {
   version = "0.2.0"
   for_each = merge(
     local.network_firewall ? { firewall = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.firewall}${local.resource_token}" } : {},
+    local.network_basic_management ? { firewallManagement = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.firewall}management-${local.resource_token}" } : {},
     local.effective_flags.bastion ? { bastion = "${local.network_abbreviations.networking.publicIPAddress}bastion-${local.resource_token}" } : {},
     local.effective_flags.public_ingress ? { ingress = "${local.network_ingress_prefix}-pip" } : {}
   )
@@ -344,7 +470,7 @@ module "network_public_ip" {
   allocation_method   = "Static"
   ip_version          = "IPv4"
   sku                 = "Standard"
-  zones               = each.key != "firewall" && var.useZoneRedundancy ? [1, 2, 3] : []
+  zones               = !contains(["firewall", "firewallManagement"], each.key) && var.useZoneRedundancy ? [1, 2, 3] : []
   tags                = local.deployment_context.tags
   enable_telemetry    = false
   depends_on          = [terraform_data.network_contract]
@@ -377,9 +503,9 @@ module "network_firewall_policy" {
   name                                     = "${local.network_abbreviations.networking.firewallPolicy}${local.resource_token}"
   location                                 = local.effective_locations.main
   resource_group_name                      = local.deployment_context.network_rg
-  firewall_policy_sku                      = "Standard"
+  firewall_policy_sku                      = var.azureFirewallSku
   firewall_policy_threat_intelligence_mode = "Alert"
-  firewall_policy_dns                      = { proxy_enabled = var.enableFirewallDnsProxy }
+  firewall_policy_dns                      = var.azureFirewallSku == "Basic" ? null : { proxy_enabled = var.enableFirewallDnsProxy }
   tags                                     = local.deployment_context.tags
   enable_telemetry                         = false
   depends_on                               = [terraform_data.network_contract]
@@ -393,7 +519,7 @@ module "network_firewall" {
   location            = local.effective_locations.main
   resource_group_name = local.deployment_context.network_rg
   firewall_sku_name   = "AZFW_VNet"
-  firewall_sku_tier   = "Standard"
+  firewall_sku_tier   = var.azureFirewallSku
   firewall_zones      = []
   firewall_policy_id  = module.network_firewall_policy[0].resource_id
   ip_configurations = {
@@ -403,6 +529,11 @@ module "network_firewall" {
       subnet_id            = local.subnet_ids.firewall
     }
   }
+  firewall_management_ip_configuration = local.network_basic_management ? {
+    name                 = "managementIpconfig"
+    public_ip_address_id = module.network_public_ip["firewallManagement"].resource_id
+    subnet_id            = local.subnet_ids.firewallManagement
+  } : null
   tags             = local.deployment_context.tags
   enable_telemetry = false
 }

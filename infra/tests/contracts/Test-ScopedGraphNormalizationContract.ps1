@@ -115,7 +115,7 @@ try {
             }
         }
     }
-    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection))
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) + @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection))
     if ($subnetPaths.Count -eq 0) { throw 'Subnet normalization has no exact deploying delta assertions.' }
     foreach ($path in $subnetPaths) {
         $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100
@@ -137,7 +137,7 @@ try {
         }
         if (-not $caught) { throw "Subnet normalizer swallowed mutation at /$($path -join '/')." }
     }
-    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) graph and $($subnetPaths.Count) subnet-delta mutations rejected; original fingerprints unchanged."
+    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) graph and $($subnetPaths.Count) subnet/Basic-delta mutations rejected; original fingerprints unchanged."
 }
 finally {
     if (Test-Path $compiled) { Remove-Item -LiteralPath $compiled -Force }

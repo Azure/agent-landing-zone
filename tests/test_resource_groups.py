@@ -1003,6 +1003,7 @@ class HookTests(ScratchTest):
             ("Pe", "PE", "pe", "192.168.2.0/26"),
             ("AzureBastion", "BASTION", "azureBastion", "192.168.2.64/26"),
             ("AzureFirewall", "FIREWALL", "azureFirewall", "192.168.2.128/26"),
+            ("AzureFirewallManagement", "FIREWALL_MANAGEMENT", "azureFirewallManagement", "192.168.3.192/26"),
             ("Gateway", "GATEWAY", "gateway", "192.168.2.192/26"),
             ("AppGateway", "APP_GATEWAY", "azureAppGateway", "192.168.3.0/27"),
             ("Jumpbox", "JUMPBOX", "jumpbox", "192.168.3.64/27"),
@@ -1018,9 +1019,13 @@ class HookTests(ScratchTest):
                 flag_environment = {
                     "AzureBastion": "AZURE_BASTION",
                     "AzureFirewall": "AZURE_FIREWALL",
+                    "AzureFirewallManagement": "AZURE_FIREWALL_MANAGEMENT",
                 }.get(flag, environment)
+                default = {
+                    "AzureFirewall": "null", "AzureFirewallManagement": "null", "Gateway": "false",
+                }.get(flag, "true")
                 self.assertEqual(
-                    {"value": f"${{DEPLOY_{flag_environment}_SUBNET=true}}"},
+                    {"value": f"${{DEPLOY_{flag_environment}_SUBNET={default}}}"},
                     parameters[f"deploy{flag}Subnet"],
                 )
                 self.assertEqual(
@@ -1041,7 +1046,7 @@ class HookTests(ScratchTest):
         prefix_names = sorted(
             name for name in source["parameters"] if name.endswith("SubnetPrefix")
         )
-        self.assertEqual(12, len(prefix_names))
+        self.assertEqual(13, len(prefix_names))
         custom = {
             name: {"value": f"10.30.{index}.0/24"}
             for index, name in enumerate(prefix_names)

@@ -120,7 +120,7 @@ def compose_inputs(
 ) -> dict[str, object]:
     """Accept plain product values; emit native camelCase values and context.
 
-    All 213 foundation inputs are accepted, including open collection fields.
+    All foundation inputs are accepted, including open collection fields.
     Pure composition defaults cloud context to Public; actual CLI preparation
     qualifies ARM_ENVIRONMENT before calling this boundary.
     Omitted inputs remain omitted so Terraform owns its declared defaults.

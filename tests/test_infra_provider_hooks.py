@@ -264,6 +264,15 @@ elif module == "config.deployment.topology":
     assert os.environ["CREATE_RESOURCE_GROUPS"] == "true"
     print("DEPLOYMENT_TOPOLOGY=classic")
     print("USE_FOUNDRY_HOSTED_AGENTS=false")
+elif module == "config.deployment.firewall":
+    record("firewall")
+    assert Path(argument("--input")) == root / "main.parameters.json"
+    if failure == "firewall":
+        sys.exit(19)
+    print("AZURE_FIREWALL_SKU=Basic")
+    print("DEPLOY_AZURE_FIREWALL_SUBNET=true")
+    print("DEPLOY_AZURE_FIREWALL_MANAGEMENT_SUBNET=true")
+    print("DEPLOY_GATEWAY_SUBNET=false")
 elif module == "config.deployment.terraform_inputs":
     record("inputs")
     assert argument("--environment") == "-"
@@ -271,6 +280,9 @@ elif module == "config.deployment.terraform_inputs":
     incoming = json.load(sys.stdin)
     assert incoming["DEPLOYMENT_TOPOLOGY"] == "classic"
     assert incoming["USE_FOUNDRY_HOSTED_AGENTS"] == "false"
+    assert incoming["AZURE_FIREWALL_SKU"] == "Basic"
+    assert incoming["DEPLOY_AZURE_FIREWALL_MANAGEMENT_SUBNET"] == "true"
+    assert incoming["DEPLOY_GATEWAY_SUBNET"] == "false"
     assert incoming["HOOK_LITERAL"] == values["HOOK_LITERAL"]
     assert Path(argument("--input")) == root / "main.parameters.json"
     assert Path(argument("--resource-group-ownership")).is_file()
@@ -305,7 +317,7 @@ else:
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
-@pytest.mark.parametrize("failure", ["none", "inputs", "reload", "egress"])
+@pytest.mark.parametrize("failure", ["none", "firewall", "inputs", "reload", "egress"])
 def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, shell, failure):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -373,8 +385,10 @@ def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, s
         command, cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=120
     )
     output = result.stdout + result.stderr
-    expected = ["appdefinition", "terraform_groups", "topology", "inputs"]
-    if failure != "inputs":
+    expected = ["appdefinition", "terraform_groups", "topology", "firewall"]
+    if failure != "firewall":
+        expected.append("inputs")
+    if failure not in ("firewall", "inputs"):
         expected.append("environment-reload")
         if failure != "reload":
             expected.append("egress")

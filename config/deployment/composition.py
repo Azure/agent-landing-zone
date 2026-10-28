@@ -23,6 +23,7 @@ from config.deployment.existing_images import (
     discover_existing_images,
 )
 from config.deployment.resource_groups import resource_group_for
+from config.deployment.firewall import resolve_firewall_inputs
 from config.panel.settings import (
     FEEDBACK_CONTAINER_CONFIG_KEY,
     FEEDBACK_CONTAINER_NAME,
@@ -772,6 +773,10 @@ def compose_parameters(
             values, environment,
             expected_hosted_source_commit=expected_hosted_source_commit,
         ).items()
+    })
+    parameters.update({
+        name: {"value": value}
+        for name, value in resolve_firewall_inputs(values, environment).items()
     })
     return result
 
