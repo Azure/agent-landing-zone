@@ -56,6 +56,31 @@ Examples:
 
 ---
 
+## Infrastructure Parity (Mandatory)
+
+Bicep and Terraform are co-maintained implementations of the same Agent Landing
+Zone capabilities. Every infrastructure change MUST check parity in both
+directions, including bug fixes, defaults, feature flags, dependencies and shared
+lifecycle behavior, not only new features or major/minor releases.
+
+- Update both affected providers in the same coordinated change. A provider-only
+  internal change MUST explain the counterpart's non-impact and include
+  regression evidence.
+- Compare inputs/defaults, resource ownership, outputs and consumers,
+  identity/RBAC, networking, App Configuration and azd lifecycle behavior.
+  Equivalent behavior does not require identical generated names or state
+  mechanics.
+- Run the relevant Bicep, Terraform, shared contract and PowerShell/shell checks.
+  Preserve the provider lock file and explicit module pins.
+- PRs MUST report counterpart changes or justified non-impact, checks for each
+  provider, approved differences and unverified scenarios. Never silently omit
+  an option or equate compilation/mocks with deployed Azure parity.
+
+See [AGENTS.md](../AGENTS.md) and principle VI of the
+[constitution](../.specify/memory/constitution.md) for the governing contract.
+
+---
+
 ## Release Workflow
 
 ### Release Branch Creation
