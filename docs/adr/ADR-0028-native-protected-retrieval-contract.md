@@ -171,10 +171,32 @@ exceptions, model tool arguments and response metadata. Redact custom headers
 as well as Authorization.
 
 Initial UI MSAL acquisition classifies consent and authentication failures.
-The current direct adapters do not relay downstream Search
-`WWW-Authenticate` challenges or implement a downstream claims round trip:
-those failures terminate safely without replay. Do not equate initial token
-acquisition tests with end-to-end Conditional Access recovery evidence.
+Downstream Search 401/403 failures must retain a typed, safe authentication
+outcome instead of becoming generic retrieval errors. Accept only bounded,
+unambiguous Bearer claims challenges from the configured Search response;
+ignore provider bodies, authorization URLs, resource hints and arbitrary
+destinations. An ordinary 403 remains source denial, not an instruction to
+request broader permissions.
+
+Carry the validated challenge only in authenticated transport error metadata,
+never model text, history, telemetry or runtime recovery checkpoints. Both hosted
+adapters must expose the same outcome. The UI offers explicit interactive
+recovery; it never replays the failed turn, including partial output.
+
+For standalone OAuth, reuse the configured tenant, UI scopes and normal
+Chainlit OAuth state/callback controls. Protect temporary recovery context
+with the existing signing-secret boundary, encryption, short expiry and
+principal/session binding; do not expose claims in links or introduce a
+token store. Keep refreshed assertions current for subsequent resource-specific
+OBO. Embedded Entra recovery stays with the portal's MSAL/bootstrap identity
+boundary rather than silently switching to standalone OAuth. Anonymous
+embedding cannot use recovery to acquire a delegated identity.
+
+Manual sign-out alone was rejected because it can lose the required claims.
+Transparent re-execution was rejected because tool/model work might already
+have run. Local HTTP, SDK, MSAL and UI-boundary regressions must prove the
+round trip without contacting Azure; they do not certify a tenant's live
+Conditional Access policy.
 
 ## Consequences
 
@@ -200,6 +222,11 @@ The user explicitly selected local validation now and deferred Azure testing.
 That is not two-user authorization evidence or release approval. No production
 deployment, package/image publication or release is authorized by this ADR.
 
+Updating `develop` must not deploy the orchestrator to Azure automatically.
+Its dev deployment workflow is manually dispatched only. Maintainer-authorized
+protected-contract adoption preserves behavioral checks and does not authorize
+a deployment or permanently weaken the quality gate.
+
 Rollback restores the compatible UI/runtime/configuration combination without
 removing ACLs or granting app-only source access. Since the baseline contains
 the gap, rollback suspends protected hosted retrieval rather than claiming
@@ -213,6 +240,8 @@ the old combination supports it.
 - Concurrent/alternating callers cannot share credentials or results.
 - Native index permissions and existing conversation restrictions remain active.
 - Responses persistence, telemetry and error paths retain no token values.
+- Downstream authentication challenges reach explicit UI recovery without
+  becoming model content, anonymous retries or automatic turn replay.
 - Existing classic, streaming, citations and download authorization regressions
   pass; template and lifecycle contracts remain cross-platform equivalent.
 - Before release, two independently signed-in users prove allow/deny per
