@@ -293,7 +293,7 @@ function Set-AgentLzAppConfiguration {
     $hostedMode = $runtimeTopology -ne 'classic'
     $administrativePanel = $runtimeTopology -eq 'hosted-panel'
     $deployIngestion = [bool]$topologyInfo.deploy_ingestion_container_app
-    $cosmosEnabled = (-not $hostedMode) -or $administrativePanel
+    $cosmosEnabled = [bool]$topologyInfo.deploy_cosmos_db
 
     $appConfigName = Get-AppConfigResourceName -Endpoint $Endpoint
     $nameSuffix = $resourceToken

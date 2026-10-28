@@ -31,6 +31,11 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'application Cosmos default restored'; Change = { param($t) $t.parameters.deployCosmosDb.defaultValue = $true } },
+        @{ Name = 'disabled Cosmos creates an identity'; Change = { param($t) $t.resources.cosmosUAI.condition = "[variables('_useUAI')]" } },
+        @{ Name = 'phantom Cosmos database bootstrap'; Change = { param($t) ($t.variables._containerRuntimeEnv | Where-Object name -CEQ 'DATABASE_NAME').value = "[variables('resourceNames').dbDatabaseName]" } },
+        @{ Name = 'phantom Cosmos container settings'; Change = { param($t) ($t.variables.copy | Where-Object name -CEQ '_databaseContainerNamesSettings').count = "[length(parameters('databaseContainersList'))]" } },
+        @{ Name = 'phantom Cosmos App Configuration name'; Change = { param($t) $t.resources.appConfigPopulate.properties.parameters.keyValues.value = $t.resources.appConfigPopulate.properties.parameters.keyValues.value.Replace("if(parameters('deployCosmosDb'), variables('resourceNames').dbAccountName, '')", "variables('resourceNames').dbAccountName") } },
         @{ Name = 'egress external policy adoption'; Change = { param($t) $t.resources.firewall.properties.template.outputs.policyResourceId.value = '/external/policy' } },
         @{ Name = 'egress source wildcard'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.subnets.containerapp = '*' } },
         @{ Name = 'egress isolation gate removed'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.workloadEgress.networkIsolation = $true } },

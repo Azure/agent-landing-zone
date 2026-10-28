@@ -377,8 +377,8 @@ param storageAccountResourceAccessRules storageTypes.storageAccountResourceAcces
 @description('Allow Shared Key authorization for the solution Storage account. Defaults to true for compatibility. Set false only after migrating affected key-based clients and SAS tokens; this does not remove the pinned AVM management-plane key-listing outputs.')
 param storageAccountAllowSharedKeyAccess bool = true
 
-@description('Deploy an Azure Cosmos DB account for globally distributed NoSQL data storage.')
-param deployCosmosDb bool = true
+@description('Deploy the optional application Cosmos DB account. Enable for application consumers such as classic conversation storage or panel metadata. Does not control Foundry Agent Service backing storage.')
+param deployCosmosDb bool = false
 
 @description('Deploy Azure Container Apps for running your microservices in a serverless Kubernetes environment.')
 param deployContainerApps bool = true
@@ -2889,8 +2889,8 @@ var _containerRuntimeEnv = [
   { name: 'CONTAINER_ENV_NAME',        value: resourceNames.containerEnvName }
   { name: 'CONTAINER_REGISTRY_NAME',   value: resourceNames.containerRegistryName }
   { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${resourceNames.containerRegistryName}.azurecr.io' }
-  { name: 'DATABASE_ACCOUNT_NAME',     value: resourceNames.dbAccountName }
-  { name: 'DATABASE_NAME',             value: resourceNames.dbDatabaseName }
+  { name: 'DATABASE_ACCOUNT_NAME',     value: deployCosmosDb ? resourceNames.dbAccountName : '' }
+  { name: 'DATABASE_NAME',             value: deployCosmosDb ? resourceNames.dbDatabaseName : '' }
   { name: 'SEARCH_SERVICE_NAME',       value: resourceNames.searchServiceName }
   { name: 'STORAGE_ACCOUNT_NAME',      value: resourceNames.storageAccountName }
   { name: 'KEY_VAULT_NAME',            value: resourceNames.keyVaultName }
@@ -3044,7 +3044,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
 //////////////////////////////////////////////////////////////////////////
 
 //Cosmos User Managed Identity
-module cosmosUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
+module cosmosUAI 'modules/security/managed-identity.bicep' = if (_useUAI && deployCosmosDb) {
   scope: resourceGroup(_applicationResourceGroupName)
   name: 'cosmosIdentity'
   params: {
@@ -3868,7 +3868,7 @@ var _modelDeploymentNamesSettings = [
 
 // prepare the database container names for the app configuration store
 var _databaseContainerNamesSettings = [
-  for databaseContainer in databaseContainersList: {
+  for databaseContainer in (deployCosmosDb ? databaseContainersList : []): {
     name: databaseContainer.canonical_name
     value: databaseContainer.name
     label: appConfigLabel
@@ -4037,8 +4037,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'CONTAINER_ENV_NAME', value: resourceNames.containerEnvName, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'CONTAINER_REGISTRY_NAME', value: resourceNames.containerRegistryName, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${resourceNames.containerRegistryName}.azurecr.io', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'DATABASE_ACCOUNT_NAME', value: resourceNames.dbAccountName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'DATABASE_NAME', value: resourceNames.dbDatabaseName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DATABASE_ACCOUNT_NAME', value: deployCosmosDb ? resourceNames.dbAccountName : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DATABASE_NAME', value: deployCosmosDb ? resourceNames.dbDatabaseName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SEARCH_SERVICE_NAME', value: resourceNames.searchServiceName, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AZURE_SPEECH_RESOURCE_NAME', value: deploySpeechService ? resourceNames.speechServiceName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AZURE_SPEECH_REGION', value: deploySpeechService ? _speechServiceLocation : '', label: appConfigLabel, contentType: 'text/plain' }

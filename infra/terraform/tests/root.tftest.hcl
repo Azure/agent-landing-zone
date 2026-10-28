@@ -41,7 +41,7 @@ run "product_defaults" {
 
   assert {
     condition = (
-      var.appConfigLabel == "agent-lz" && !var.networkIsolation &&
+      var.appConfigLabel == "agent-lz" && !var.networkIsolation && !var.deployCosmosDb &&
       !var.deployGroundingWithBing && !var.useZoneRedundancy &&
       var.vmSize == "Standard_D2s_v3" && !var.foundryIqFilterAddOnEnabled &&
       var.retrievalBackend == "foundry_iq"

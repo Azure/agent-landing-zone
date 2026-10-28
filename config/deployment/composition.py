@@ -34,6 +34,7 @@ from config.panel.settings import (
 
 APP_CONFIG_LABEL = "agent-lz"
 DEPLOY_INGESTION_CONTAINER_APP = "DEPLOY_INGESTION_CONTAINER_APP"
+DEPLOY_COSMOS_DB = "DEPLOY_COSMOS_DB"
 # Default hosted agent name and image repository (new deployments only, ADR-0018).
 HOSTED_AGENT_NAME_DEFAULT = "agent-app-orchestrator"
 PRESERVE_CLASSIC_RUNTIME = "PRESERVE_CLASSIC_RUNTIME"
@@ -520,6 +521,7 @@ def resolve_database_containers(
     existing_containers: list[dict[str, object]],
     *,
     preserving_classic_runtime: bool = False,
+    custom_cosmos: bool = False,
 ) -> list[dict[str, object]]:
     """Return the exact ``databaseContainersList`` value for ``mode``.
 
@@ -530,16 +532,28 @@ def resolve_database_containers(
 
     - Classic (or a migrating hosted deployment still preserving the classic
       runtime): the static classic list is unchanged.
-    - Hosted/no-panel: no Cosmos containers at all (ADR-0001/0004).
-    - Hosted/panel: *only* the two panel metadata containers (owner index,
-      feedback) -- never the classic ``conversations``/``datasources``/
-      ``prompts``/``mcp`` list -- so panel Cosmos never mixes protected chat
-      content with metadata in the shared account/database.
+    - Hosted/no-panel: no Cosmos containers unless a custom consumer needs them.
+    - Hosted/panel: only the two panel metadata containers (owner index,
+      feedback), plus configured containers required by custom consumers.
+      Panel metadata stays in its own containers with container-scoped grants.
     """
     if preserving_classic_runtime or mode is DeploymentMode.CLASSIC:
         return existing_containers
     if mode is DeploymentMode.HOSTED_PANEL:
-        return panel_database_containers()
+        panel_containers = panel_database_containers()
+        if custom_cosmos:
+            return [
+                *[
+                    container for container in existing_containers
+                    if container.get("name") not in {
+                        item["name"] for item in panel_containers
+                    }
+                ],
+                *panel_containers,
+            ]
+        return panel_containers
+    if custom_cosmos:
+        return existing_containers
     return []
 
 
@@ -631,6 +645,47 @@ def requires_hosted_foundation(
             definition, hosted_orchestration=hosted_orchestration
         )
     )
+
+
+def requires_custom_cosmos(environment: Mapping[str, str]) -> bool:
+    """Include explicit Cosmos capabilities of custom Container Apps and agents."""
+    from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
+    from config.appdefinition.profiles import SCOPE_COSMOS, expand_profiles
+
+    if not (environment.get(DEFINITION_ENV) or "").strip():
+        return False
+    definition = load_selected_definition(environment)
+    return not definition.bundled and any(
+        assignment.scope == SCOPE_COSMOS
+        for component in definition.document.get("components", [])
+        for assignment in expand_profiles(component.get("profiles") or ())
+    )
+
+
+def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
+    """Resolve application storage without changing Foundry backing services."""
+    mode = resolve_mode(environment)
+    required = (
+        mode in {DeploymentMode.CLASSIC, DeploymentMode.HOSTED_PANEL}
+        or resolve_runtime_mode(mode, environment) is DeploymentMode.CLASSIC
+        or requires_custom_cosmos(environment)
+    )
+    raw = environment.get(DEPLOY_COSMOS_DB)
+    if raw is None:
+        return required
+    normalized = raw.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise DeploymentTopologyError(
+            f"{DEPLOY_COSMOS_DB} must be 'true' or 'false'."
+        )
+    enabled = normalized == "true"
+    if required and not enabled:
+        raise DeploymentTopologyError(
+            f"{DEPLOY_COSMOS_DB}=false conflicts with application Cosmos DB "
+            "required by the classic runtime, administrative panel, or a custom "
+            "conversation-store capability. Set it to true or remove the consumer."
+        )
+    return enabled
 
 
 def custom_container_apps(
@@ -741,7 +796,6 @@ def _resolve_application_overrides(
     prepare_hosted = requires_hosted_foundation(
         environment, hosted_orchestration=hosted
     )
-    panel = mode is DeploymentMode.HOSTED_PANEL
     preserve_classic_runtime = hosted and is_truthy(
         environment.get(PRESERVE_CLASSIC_RUNTIME)
     )
@@ -789,11 +843,7 @@ def _resolve_application_overrides(
         # operator privilege. Bundled/foundation callers retain their default.
         parameters["grantHostedAgentProjectManager"] = False
     parameters["deployHostedAgent"] = deploy_hosted
-    parameters["deployCosmosDb"] = (
-        mode is DeploymentMode.CLASSIC
-        or panel
-        or preserving_classic_runtime
-    )
+    parameters["deployCosmosDb"] = resolve_cosmos_selection(environment)
     if hosted and is_truthy(environment.get("NETWORK_ISOLATION")):
         parameters["deployAcrTaskAgentPool"] = True
 
@@ -846,6 +896,7 @@ def _resolve_application_overrides(
         mode,
         existing_containers if isinstance(existing_containers, list) else [],
         preserving_classic_runtime=preserving_classic_runtime,
+        custom_cosmos=requires_custom_cosmos(environment),
     )
 
     generated_settings = [

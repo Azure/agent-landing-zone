@@ -62,6 +62,7 @@ variables {
   deployBastion           = false
   deployNatGateway        = false
   deployGroundingWithBing = false
+  deployCosmosDb          = true
   databaseContainersList = [{
     name           = "history"
     canonical_name = "HISTORY_CONTAINER"
@@ -156,6 +157,40 @@ run "serverless_data_and_keyless_defaults" {
       azapi_resource.account_connection["search"].name == local.services_connection_names.search
     )
     error_message = "Generated CAF connection names must honor the independent 33-character connection API limit."
+  }
+}
+
+run "disabled_application_cosmos_preserves_foundry_storage" {
+  command = plan
+  variables {
+    deployCosmosDb   = false
+    useUAI           = true
+    networkIsolation = true
+  }
+  assert {
+    condition = (
+      length(azapi_resource.application_cosmos) == 0 &&
+      length(azapi_resource.application_database) == 0 &&
+      length(azapi_resource.application_container) == 0 &&
+      length(azurerm_cosmosdb_sql_role_assignment.application) == 0 &&
+      !contains(keys(azurerm_user_assigned_identity.service), "cosmos") &&
+      !contains(keys(local.private_endpoints), "cosmos") &&
+      local.services_foundation_plain_settings.DATABASE_ACCOUNT_NAME == "" &&
+      local.services_foundation_plain_settings.DATABASE_NAME == "" &&
+      !contains(keys(local.services_foundation_plain_settings), "COSMOS_DB_ENDPOINT") &&
+      !contains(keys(local.services_foundation_plain_settings), "HISTORY_CONTAINER")
+    )
+    error_message = "Disabled application Cosmos must not create dedicated artifacts or publish phantom database settings."
+  }
+  assert {
+    condition = (
+      length(azapi_resource.foundry_cosmos) == 1 &&
+      length(azapi_resource.project_cosmos_connection) == 1 &&
+      length(azapi_resource.project_capability_host) == 1 &&
+      contains(keys(local.network_foundry_private_endpoints), "foundryCosmos") &&
+      contains(keys(local.network_managed_dns), "Cosmos")
+    )
+    error_message = "Application Cosmos selection must not remove Foundry storage, its capability host, endpoint or shared DNS."
   }
 }
 

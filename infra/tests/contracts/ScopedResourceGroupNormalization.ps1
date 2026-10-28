@@ -119,6 +119,48 @@ function Get-ArchitectureSubnetProjection {
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0030: restore only the reviewed optional-application-Cosmos delta.
+    # Remaining mutations still reach the original exact graph fingerprints.
+    Assert-ScopedValue $copy.parameters.deployCosmosDb.defaultValue $false '/parameters/deployCosmosDb/defaultValue'
+    $copy.parameters.deployCosmosDb.defaultValue = $true
+    Assert-ScopedValue $copy.parameters.deployCosmosDb.metadata.description `
+        'Deploy the optional application Cosmos DB account. Enable for application consumers such as classic conversation storage or panel metadata. Does not control Foundry Agent Service backing storage.' `
+        '/parameters/deployCosmosDb/metadata/description'
+    $copy.parameters.deployCosmosDb.metadata.description = 'Deploy an Azure Cosmos DB account for globally distributed NoSQL data storage.'
+    Assert-ScopedValue $copy.resources.cosmosUAI.condition `
+        "[and(variables('_useUAI'), parameters('deployCosmosDb'))]" '/resources/cosmosUAI/condition'
+    $copy.resources.cosmosUAI.condition = "[variables('_useUAI')]"
+    $databaseSettings = @($copy.variables.copy | Where-Object name -CEQ '_databaseContainerNamesSettings')
+    if ($databaseSettings.Count -ne 1) { throw 'SCOPED: application Cosmos settings loop membership changed.' }
+    $expectedSettings = @{
+        name = '_databaseContainerNamesSettings'
+        count = "[length(if(parameters('deployCosmosDb'), parameters('databaseContainersList'), createArray()))]"
+        input = @{
+            name = "[if(parameters('deployCosmosDb'), parameters('databaseContainersList'), createArray())[copyIndex('_databaseContainerNamesSettings')].canonical_name]"
+            value = "[if(parameters('deployCosmosDb'), parameters('databaseContainersList'), createArray())[copyIndex('_databaseContainerNamesSettings')].name]"
+            label = "[parameters('appConfigLabel')]"
+            contentType = 'text/plain'
+        }
+    }
+    Assert-ScopedValue $databaseSettings[0] $expectedSettings '/variables/copy/applicationCosmosSettings'
+    $databaseSettings[0].count = "[length(parameters('databaseContainersList'))]"
+    $databaseSettings[0].input.name = "[parameters('databaseContainersList')[copyIndex('_databaseContainerNamesSettings')].canonical_name]"
+    $databaseSettings[0].input.value = "[parameters('databaseContainersList')[copyIndex('_databaseContainerNamesSettings')].name]"
+    $databaseNames = @{ DATABASE_ACCOUNT_NAME = 'dbAccountName'; DATABASE_NAME = 'dbDatabaseName' }
+    foreach ($name in $databaseNames.Keys) {
+        $property = $databaseNames[$name]
+        $selected = @($copy.variables._containerRuntimeEnv | Where-Object name -CEQ $name)
+        if ($selected.Count -ne 1) { throw "SCOPED: application Cosmos bootstrap membership changed for $name." }
+        $after = "if(parameters('deployCosmosDb'), variables('resourceNames').$property, '')"
+        $before = "variables('resourceNames').$property"
+        Assert-ScopedValue $selected[0].value "[$after]" "/variables/_containerRuntimeEnv/$name/value"
+        $selected[0].value = "[$before]"
+        $settings = $copy.resources.appConfigPopulate.properties.parameters.keyValues.value
+        if ([regex]::Matches($settings, [regex]::Escape($after)).Count -ne 1) {
+            throw "SCOPED: application Cosmos App Configuration gate changed for $name."
+        }
+        $copy.resources.appConfigPopulate.properties.parameters.keyValues.value = $settings.Replace($after, $before)
+    }
     # ADR-0027: validate the complete reviewed subnet delta before restoring the
     # previous composition. Never substitute hashes or discard unchecked fields.
     # The existing adapters then protect all unchanged graph membership/values.

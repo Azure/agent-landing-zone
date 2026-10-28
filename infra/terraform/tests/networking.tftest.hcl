@@ -79,6 +79,7 @@ run "isolated_has_exact_subnet_purposes_and_dedicated_application_pe" {
   command = plan
   variables {
     networkIsolation = true
+    deployCosmosDb   = true
   }
   assert {
     condition = toset(keys(local.managed_subnets)) == toset([
