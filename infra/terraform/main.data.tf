@@ -493,8 +493,8 @@ locals {
       CONTAINER_ENV_NAME                          = local.resource_names.containerEnvName
       CONTAINER_REGISTRY_NAME                     = local.resource_names.containerRegistryName
       CONTAINER_REGISTRY_LOGIN_SERVER             = "${local.resource_names.containerRegistryName}.${var.acrDnsSuffix}"
-      DATABASE_ACCOUNT_NAME                       = local.resource_names.dbAccountName
-      DATABASE_NAME                               = local.resource_names.dbDatabaseName
+      DATABASE_ACCOUNT_NAME                       = local.data_context.cosmos.name
+      DATABASE_NAME                               = local.data_context.cosmos.database_name
       SEARCH_SERVICE_NAME                         = local.resource_names.searchServiceName
       AZURE_SPEECH_RESOURCE_NAME                  = local.data_context.speech.name
       AZURE_SPEECH_REGION                         = local.data_context.speech.location
@@ -528,7 +528,7 @@ locals {
       COSMOS_DB_ENDPOINT            = local.data_context.cosmos.endpoint
     } : {},
     { for deployment in local.services_model_deployments : deployment.canonical_name => deployment.name },
-    { for container in var.databaseContainersList : container.canonical_name => container.name },
+    { for container in var.databaseContainersList : container.canonical_name => container.name if var.deployCosmosDb },
     { for container in var.storageAccountContainersList : container.canonical_name => container.name }
   )
   services_foundation_json_settings = {

@@ -586,9 +586,10 @@ variable "storageAccountAllowSharedKeyAccess" {
   nullable = false
 }
 variable "deployCosmosDb" {
-  type     = bool
-  default  = true
-  nullable = false
+  type        = bool
+  default     = false
+  nullable    = false
+  description = "Deploy application Cosmos DB for selected consumers; does not control Foundry Agent Service backing storage."
 }
 variable "deployContainerApps" {
   type     = bool

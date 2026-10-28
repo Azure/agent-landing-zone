@@ -741,7 +741,7 @@ function Get-SubnetSelection {
     $isolated = ConvertTo-Bool $P['networkIsolation']
     $create = $isolated -and (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets')
     $foundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
-    $cosmos = Resolve-DeployFlag -P $P -Key 'deployCosmosDb' -Default $true
+    $cosmos = Resolve-DeployFlag -P $P -Key 'deployCosmosDb' -Default $false
     $envEnabled = Resolve-DeployFlag -P $P -Key 'deployContainerEnv' -Default $true
     $registry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
     $jump = Resolve-DeployJumpbox $P
@@ -1430,7 +1430,7 @@ function Get-RequiredResourceProviders {
     # this map default to optional ($false) so unknown discoveries never hard-fail.
     $deployAiFoundry         = Resolve-DeployFlag -P $P -Key 'deployAiFoundry'         -Default $true
     $deploySpeech            = Resolve-DeployFlag -P $P -Key 'deploySpeechService'     -Default $false
-    $deployCosmos            = Resolve-DeployFlag -P $P -Key 'deployCosmosDb'          -Default $true
+    $deployCosmos            = Resolve-DeployFlag -P $P -Key 'deployCosmosDb'          -Default $false
     $deploySearch            = Resolve-DeployFlag -P $P -Key 'deploySearchService'     -Default $true
     $deployBing              = Resolve-DeployFlag -P $P -Key 'deployGroundingWithBing' -Default $false
     $deployKeyVault          = Resolve-DeployFlag -P $P -Key 'deployKeyVault'          -Default $true
@@ -1937,7 +1937,7 @@ function Test-CosmosAnalyticalStorageRegionSupport {
     $enableAnalytical = ConvertTo-Bool $P['enableCosmosAnalyticalStorage']
     if (-not $enableAnalytical) { return }
 
-    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $false })
     if (-not $deployCosmos) { return }
 
     $location = Get-StringValue $P['location']
@@ -2002,14 +2002,15 @@ function Test-RegionalReadiness {
     }
 
     # Feature-flag resolution. Default-on flags follow main.parameters.json:
-    # deployAiFoundry/deployCosmosDb/deployContainerApps/deployContainerEnv default true.
+    # deployAiFoundry/deployContainerApps/deployContainerEnv default true.
+    # Application Cosmos is optional and defaults false.
     # deploySearchService is gated by an env var; treat empty as true (matches the file default).
     # Note: PowerShell does not accept `if` as an expression inside `(...)` when
     # used as a command/function argument — the parser treats `if` as a command
     # name and fails with "The term 'if' is not recognized...". Wrap with the
     # subexpression operator `$(...)` so the if-expression is evaluated first.
     $deployAiFoundry = ConvertTo-Bool $(if ($null -ne $P['deployAiFoundry']) { $P['deployAiFoundry'] } else { $true })
-    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $false })
     $deployContainerApps = ConvertTo-Bool $(if ($null -ne $P['deployContainerApps']) { $P['deployContainerApps'] } else { $true })
     $deployContainerEnv = ConvertTo-Bool $(if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
     $searchRaw = Get-StringValue $P['deploySearchService']
@@ -2017,6 +2018,14 @@ function Test-RegionalReadiness {
     $deployFoundrySearch = $deployAiFoundry -and
         (Resolve-DeployFlag -P $P -Key 'deployAAfAgentSvc' -Default $true) -and
         [string]::IsNullOrWhiteSpace((Get-StringValue $P['aiSearchResourceId']))
+    $cosmosLocations = @(
+        if ($deployCosmos) { $cosmosLocation }
+        if (
+            $deployAiFoundry -and
+            (Resolve-DeployFlag -P $P -Key 'deployAAfAgentSvc' -Default $true) -and
+            [string]::IsNullOrWhiteSpace((Get-StringValue $P['aiFoundryCosmosDBAccountResourceId']))
+        ) { $aiFoundryLocation }
+    ) | Select-Object -Unique
     $searchServiceCount = [int]$deploySearch + [int]$deployFoundrySearch
     $deployKeyVault = ConvertTo-Bool $(if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
     $deployStorage = ConvertTo-Bool $(if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
@@ -2028,9 +2037,9 @@ function Test-RegionalReadiness {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
             -Location $searchLocation -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
     }
-    if ($deployCosmos) {
+    foreach ($selectedCosmosLocation in $cosmosLocations) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
-            -Location $cosmosLocation -DisplayName 'Azure Cosmos DB' -CodePrefix 'COSMOS'
+            -Location $selectedCosmosLocation -DisplayName 'Azure Cosmos DB' -CodePrefix 'COSMOS'
     }
     if ($deployContainerApps -or $deployContainerEnv) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.App' -ResourceType 'managedEnvironments' `
@@ -2117,8 +2126,8 @@ function Test-RegionalReadiness {
         }
     }
 
-    if ($deployCosmos) {
-        Test-CosmosAvailabilityZone -Location $cosmosLocation
+    foreach ($selectedCosmosLocation in $cosmosLocations) {
+        Test-CosmosAvailabilityZone -Location $selectedCosmosLocation
     }
 }
 

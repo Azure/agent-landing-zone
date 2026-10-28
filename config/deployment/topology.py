@@ -37,6 +37,7 @@ from config.deployment.composition import (
     materialized_settings,
     resolve_explicit_topology,
     resolve_mode,
+    resolve_cosmos_selection,
     resolve_ingestion_selection,
     resolve_runtime_mode,
     resolve_topology,
@@ -412,16 +413,14 @@ def _print_description(mode: DeploymentMode) -> None:
     )
     enabled = resolve_ingestion_selection(os.environ)
     validate_ingestion_selection(os.environ, enabled)
-    print(
-        json.dumps(
-            describe_mode(
-                mode,
-                preserve_classic_runtime=preserve_classic_runtime,
-                runtime_mode=resolve_runtime_mode(mode, os.environ),
-                deploy_ingestion=enabled,
-            )
-        )
+    description = describe_mode(
+        mode,
+        preserve_classic_runtime=preserve_classic_runtime,
+        runtime_mode=resolve_runtime_mode(mode, os.environ),
+        deploy_ingestion=enabled,
     )
+    description["deploy_cosmos_db"] = resolve_cosmos_selection(os.environ)
+    print(json.dumps(description))
 
 
 def main() -> int:

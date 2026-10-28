@@ -136,8 +136,8 @@ locals {
     CONTAINER_ENV_NAME                          = local.resource_names.containerEnvName
     CONTAINER_REGISTRY_NAME                     = local.resource_names.containerRegistryName
     CONTAINER_REGISTRY_LOGIN_SERVER             = "${local.resource_names.containerRegistryName}.${var.acrDnsSuffix}"
-    DATABASE_ACCOUNT_NAME                       = local.resource_names.dbAccountName
-    DATABASE_NAME                               = local.resource_names.dbDatabaseName
+    DATABASE_ACCOUNT_NAME                       = local.data_context.cosmos.name
+    DATABASE_NAME                               = local.data_context.cosmos.database_name
     SEARCH_SERVICE_NAME                         = local.resource_names.searchServiceName
     STORAGE_ACCOUNT_NAME                        = local.resource_names.storageAccountName
     KEY_VAULT_NAME                              = local.resource_names.keyVaultName
