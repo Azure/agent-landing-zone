@@ -2506,7 +2506,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
             }
             name: 'text-embedding-3-large'
             sku: {
-              name: 'Standard'
+              name: 'GlobalStandard'
               capacity: 10
             }
           }

@@ -153,6 +153,34 @@ class RegionalModelQuotaTests(unittest.TestCase):
         self.assertEqual(0, result["failures"], output)
         self.assertIn("verified existing credit 100, additional allocation 0", output)
 
+    def test_global_embedding_uses_its_own_quota_not_standard_credit(self) -> None:
+        for gate in ("regional", "foundation"):
+            for global_available in (None, 99, 100):
+                with self.subTest(gate=gate, global_available=global_available):
+                    data = fixture()
+                    data["desired"][0]["sku"]["name"] = "GlobalStandard"
+                    # The existing deployment is Standard. Neither its allocation
+                    # nor abundant Standard quota can pay for GlobalStandard.
+                    data["usage"][0]["limit"] = 10000
+                    if global_available is not None:
+                        data["usage"].append({
+                            "name": {"value": "OpenAI.GlobalStandard.text-embedding-3-large"},
+                            "limit": global_available, "currentValue": 0,
+                        })
+                    result, output = self.run_check(data, gate=gate)
+                    if global_available is None:
+                        # Preserve the gates' existing missing-entry policy:
+                        # regional warns, foundation fails; neither substitutes
+                        # the available Standard quota or allocation.
+                        self.assertEqual(int(gate == "foundation"), result["failures"], output)
+                        self.assertEqual(int(gate == "regional"), result["warnings"], output)
+                        self.assertIn("OpenAI.GlobalStandard.text-embedding-3-large", output)
+                        self.assertNotIn("verified existing credit 100", output)
+                    else:
+                        self.assertEqual(int(global_available < 100), result["failures"], output)
+                        self.assertIn("verified existing credit 0", output)
+                        self.assertIn("additional allocation 100", output)
+
     def test_fresh_allocation_still_requires_full_capacity(self) -> None:
         for available, failures in ((50, 1), (100, 0)):
             with self.subTest(available=available):

@@ -45,6 +45,13 @@ actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
 
+`embedding-default-normalization.json` permits only the intentional embedding
+fallback SKU change from `Standard` to `GlobalStandard`. It checks the complete
+native list-selection expression, preserving the explicit-list passthrough,
+model/version and fallback capacity 10 before restoring the historical SKU.
+The scoped graph contract rejects SKU/model/version/capacity and custom-list
+mutations. Existing baseline fixtures and fingerprints remain unchanged.
+
 `historical-foundation-manifest.json` contains exactly the four fields from
 the retired incorporated manifest at `v2.7.3`. It is only a regression fixture,
 not deployment or release configuration. The normalizer first checks the

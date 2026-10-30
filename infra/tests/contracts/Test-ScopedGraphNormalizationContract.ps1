@@ -19,7 +19,24 @@ try {
     $json = Get-Content $compiled -Raw
     $actual = $json | ConvertFrom-Json -AsHashtable -Depth 100
     $actualBefore = ConvertTo-Json -InputObject $actual -Depth 100 -Compress
+    # Pin the complete native empty-list branch and nonempty-list passthrough,
+    # rather than normalizing all occurrences of Standard/GlobalStandard.
+    # This is bounded compiled-expression evidence, not live ARM evaluation.
+    $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
+    $selection = $actual.resources.aiFoundry.properties.parameters.aiModelDeployments
+    Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
+    Assert-ScopedValue $embeddingRule.after `
+        ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `
+        '/embedding/onlyApprovedSkuDelta'
+    if ([regex]::Matches($embeddingRule.before, "'Standard', 'capacity', 10").Count -ne 1) {
+        throw 'SCOPED: embedding SKU projection is not a single exact fallback delta.'
+    }
+    if ($actual.parameters.modelDeploymentList.Contains('defaultValue')) {
+        throw 'SCOPED: direct Bicep model list must remain required; explicit [] selects the native fallback.'
+    }
     $legacy = ConvertTo-HistoricalFoundationGraph (ConvertTo-LegacyResourceGroupGraph $actual) $MainFile
+    Assert-ScopedValue $legacy.resources.aiFoundry.properties.parameters.aiModelDeployments `
+        $embeddingRule.before '/embedding/historicalFallbackStillStandard'
     if ((ConvertTo-Json -InputObject $actual -Depth 100 -Compress) -cne $actualBefore) {
         throw 'Projection mutated the actual deployment graph.'
     }
@@ -31,6 +48,13 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'embedding fallback SKU restored'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'GlobalStandard', 'capacity', 10", "'Standard', 'capacity', 10") } },
+        @{ Name = 'embedding fallback custom SKU drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'GlobalStandard', 'capacity', 10", "'DataZoneStandard', 'capacity', 10") } },
+        @{ Name = 'embedding fallback model drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'text-embedding-3-large'", "'text-embedding-3-small'") } },
+        @{ Name = 'embedding fallback version drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'version', '1'", "'version', '2'") } },
+        @{ Name = 'embedding fallback capacity drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'capacity', 10", "'capacity', 100") } },
+        @{ Name = 'chat fallback SKU drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'GlobalStandard', 'capacity', 40", "'Standard', 'capacity', 40") } },
+        @{ Name = 'explicit custom SKU list rewritten'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("createObject('value', parameters('modelDeploymentList'))", "createObject('value', createArray(createObject('sku', createObject('name', 'GlobalStandard'))))") } },
         @{ Name = 'application Cosmos default restored'; Change = { param($t) $t.parameters.deployCosmosDb.defaultValue = $true } },
         @{ Name = 'disabled Cosmos creates an identity'; Change = { param($t) $t.resources.cosmosUAI.condition = "[variables('_useUAI')]" } },
         @{ Name = 'phantom Cosmos database bootstrap'; Change = { param($t) ($t.variables._containerRuntimeEnv | Where-Object name -CEQ 'DATABASE_NAME').value = "[variables('resourceNames').dbDatabaseName]" } },

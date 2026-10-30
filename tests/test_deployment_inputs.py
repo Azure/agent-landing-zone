@@ -50,6 +50,44 @@ def values() -> dict:
     return {key: entry["value"] for key, entry in source()["parameters"].items()}
 
 
+def test_embedding_defaults_match_tracked_bicep_seed():
+    seed = json.loads(
+        (ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8")
+    )
+    models = values()["modelDeploymentList"]
+    assert models == seed["parameters"]["modelDeploymentList"]["value"]
+    assert models[1] == {
+        "name": "text-embedding",
+        "model": {"format": "OpenAI", "name": "text-embedding-3-large", "version": "1"},
+        "sku": {"name": "GlobalStandard", "capacity": 100},
+        "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",
+        "apiVersion": "2025-01-01-preview",
+    }
+
+
+@pytest.mark.parametrize("selection", ["default", "standard", "empty"])
+def test_embedding_sku_survives_both_provider_input_adapters(selection):
+    template = source()
+    models = template["parameters"]["modelDeploymentList"]["value"]
+    if selection == "standard":
+        models[1]["sku"]["name"] = "Standard"
+    elif selection == "empty":
+        models.clear()
+    before = copy.deepcopy(template)
+    terraform = compose_inputs(
+        {key: entry["value"] for key, entry in template["parameters"].items()},
+        ENVIRONMENT,
+    )
+    bicep = compose_parameters(template, ENVIRONMENT)["parameters"]
+    assert terraform["modelDeploymentList"] == models
+    assert bicep["modelDeploymentList"]["value"] == models
+    assert template == before
+    if selection == "default":
+        assert terraform["modelDeploymentList"][1]["sku"] == {
+            "name": "GlobalStandard", "capacity": 100,
+        }
+
+
 @pytest.mark.parametrize("topology", ["classic", "hosted-panel", "hosted-no-panel"])
 def test_common_resolution_preserves_bicep_composition(topology):
     environment = {
