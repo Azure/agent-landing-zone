@@ -3,24 +3,14 @@
 ## [v5.6.0] - 2026-10-30
 
 ### Changed
-- Separate provider source into `infra/bicep/` and `infra/terraform/`, centralize
-  shared catalogs under `infra/shared/` and infrastructure helpers under
-  `scripts/infra/`, and align azd, lifecycle hooks, CI and native custom paths.
-  The root azd workflow and existing hub-and-spoke support remain available.
-- Remove obsolete inherited repository assets and the manual hub laboratory
-  without adding an archive, reducing tracked infrastructure files from 245
-  to 118. ADR-0032 records the layout and coordinated path rollback.
-- Default `text-embedding-3-large` version `1` to `GlobalStandard` across root
-  inputs, the Bicep seed and both providers' defaults and empty-list fallbacks.
-  Keep explicit `Standard` overrides, declared capacity `100` and fallback
-  capacity `10`. Model versions, dimensions, runtime pins, identity, RBAC,
-  networking and Terraform state bindings are unchanged.
-- Custom Bicep consumers must adopt `infra/bicep/`. Before updating an existing
-  checkout, clear the old parameter seed's skip-worktree flag and preserve
-  private local inputs outside tracked source. ADR-0033 documents global
-  processing, which can occur outside the resource region even with private
-  endpoints. Operators requiring regional processing must explicitly select
-  `Standard` and review availability, quota and any existing SKU transition.
+
+- Reorganized infrastructure into dedicated Bicep and Terraform directories, with shared catalogs in `infra/shared/` and helpers in `scripts/infra/`. Updated deployment scripts, CI and documentation to use the new paths. You can still deploy with the same `azd` commands.
+- Removed unused files, duplicated tooling and the old hub test lab. Existing hub-and-spoke deployments are still supported.
+- Changed the default embedding deployment to `GlobalStandard` for `text-embedding-3-large`, version `1`. Model settings and capacity are unchanged, and you can still choose `Standard` for regional processing.
+
+If you reference Bicep files directly, update those paths to `infra/bicep/`. Before updating an existing checkout, back up local parameters and clear any skip-worktree flag on the old parameter file.
+
+Global Standard can process requests outside the resource region, even when you use private endpoints. If you need regional processing, select `Standard` explicitly and check model availability and quota before deploying.
 
 ### Validation
 
@@ -31,19 +21,13 @@
 | agent-app-ingestion | v3.1.3 |
 | infra / AI Landing Zone | v2.7.3 |
 
-- GitHub CI passes `python -m pytest tests --quiet`: 1230 tests and 1001
-  subtests passed, with 7 skipped.
-- Bicep 0.42.1 build/lint and all 17 offline contract entrypoints pass through
-  `infra/tests/Invoke-OfflineContracts.ps1`, preserving historical graph
-  fingerprints and narrowly checking the intentional embedding SKU change.
-- Terraform formatting, backend-disabled read-only-lock initialization,
-  validation and all 120 mocked tests pass on Ubuntu and Windows. Runtime
-  component pins, infrastructure provenance, module pins and provider lock
-  are unchanged.
-- Validation is offline. No Azure deployment, what-if, live availability or
-  quota qualification, or existing-deployment SKU transition was performed.
-  The Azure what-if gate was skipped because OIDC was not configured.
-  Compilation and mocked checks do not establish deployed provider parity.
+
+- CI passed 1,230 Python tests and 1,001 subtests, with 7 skipped.
+- Bicep build, lint and all 17 offline contract checks passed.
+- Terraform validation and all 120 mocked tests passed on Windows and Linux. Provider and module versions are unchanged.
+- No Azure deployment or what-if was run. Live quota, regional availability and SKU changes on existing deployments were not tested.
+
+[Release checks](https://github.com/Azure/agent-landing-zone/actions/runs/41076483632)
 
 ## [v5.5.3] - 2026-10-28
 
