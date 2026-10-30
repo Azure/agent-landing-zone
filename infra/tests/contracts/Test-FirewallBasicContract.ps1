@@ -7,7 +7,7 @@
     service acceptance, throughput measurement or deployed provider parity.
 #>
 [CmdletBinding()]
-param([string]$MainFile = (Join-Path $PSScriptRoot '..\..\main.bicep'))
+param([string]$MainFile = (Join-Path $PSScriptRoot '..\..\bicep\main.bicep'))
 $ErrorActionPreference = 'Stop'
 $MainFile = (Resolve-Path -LiteralPath $MainFile).Path
 . (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
@@ -43,7 +43,7 @@ try {
     Assert-Equal 'media policy writes serialized' $f.resources.firewallPolicyAcsMediaRuleCollectionGroup.dependsOn @('firewallPolicy', 'firewallPolicyDefaultRuleCollectionGroup')
     Assert-Equal 'build policy writes serialized behind firewall and both groups' $f.resources.firewallPolicyAcrTaskAgentPoolRuleCollectionGroup.dependsOn @('azureFirewall', 'firewallPolicy', 'firewallPolicyAcsMediaRuleCollectionGroup', 'firewallPolicyDefaultRuleCollectionGroup')
     Assert-Equal 'diagnostics preserved on active firewall' $f.resources.firewallDiagnostics.condition "[and(and(parameters('deployAzureFirewall'), parameters('networkIsolation')), parameters('hasEffectiveLaw'))]"
-    $root = Split-Path -Parent (Split-Path -Parent $MainFile)
+    $root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MainFile))
     $bindings = (Get-Content (Join-Path $root 'main.parameters.json') -Raw | ConvertFrom-Json -AsHashtable).parameters
     $seed = (Get-Content (Join-Path (Split-Path -Parent $MainFile) 'main.parameters.json') -Raw | ConvertFrom-Json -AsHashtable).parameters
     foreach ($key in 'azureFirewallSku', 'azureFirewallManagementSubnetName', 'azureFirewallManagementSubnetPrefix', 'deployAzureFirewallSubnet', 'deployAzureFirewallManagementSubnet', 'deployGatewaySubnet') {
@@ -53,7 +53,7 @@ try {
     # Compare production preflight selection with the exact native expressions
     # checked above, using compiled defaults rather than a second default table.
     $script:Findings = [System.Collections.Generic.List[pscustomobject]]::new()
-    $preflightSource = Get-Content (Join-Path $PSScriptRoot '..\..\scripts\Invoke-PreflightChecks.ps1') -Raw
+    $preflightSource = Get-Content (Join-Path $PSScriptRoot '..\..\..\scripts\infra\Invoke-PreflightChecks.ps1') -Raw
     $ast = [System.Management.Automation.Language.Parser]::ParseInput($preflightSource, [ref]$null, [ref]$null)
     foreach ($function in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
         Invoke-Expression $function.Extent.Text

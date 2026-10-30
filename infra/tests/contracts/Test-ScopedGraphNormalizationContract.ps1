@@ -8,7 +8,7 @@
     adapter from swallowing unrelated resource, security or output drift.
 #>
 [CmdletBinding()]
-param([string]$MainFile = (Join-Path $PSScriptRoot '..\..\main.bicep'))
+param([string]$MainFile = (Join-Path $PSScriptRoot '..\..\bicep\main.bicep'))
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')

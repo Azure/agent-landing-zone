@@ -45,7 +45,7 @@ LOGGER = logging.getLogger("config.appdefinition.roles")
 
 RunAz = Callable[..., str]
 
-ROLES_RELATIVE_PATH = Path("infra") / "constants" / "roles.json"
+ROLES_RELATIVE_PATH = Path("infra") / "shared" / "roles.json"
 #: Cosmos DB data-plane roles use SQL role assignments, not Azure RBAC.
 COSMOS_DATA_ROLES = frozenset({"CosmosDBBuiltInDataContributor", "CosmosDBBuiltInDataReader"})
 

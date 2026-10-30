@@ -1,7 +1,7 @@
 # Foundation ownership is per App Configuration name/label, not full-store.
 # Deploy/config owns live app bindings, hosted routing and validation evidence.
 locals {
-  services_abbreviations = jsondecode(file("${path.module}/../constants/abbreviations.json"))
+  services_abbreviations = jsondecode(file("${path.module}/../shared/abbreviations.json"))
   services_foundry_rg_id = local.deployment_context.foundry_rg_id
   services_app_rg_id     = local.deployment_context.application_rg_id
   services_tags          = local.deployment_context.tags
@@ -433,7 +433,7 @@ locals {
     }
   }
 
-  # Executable inventory: infra/main.bicep appConfigPopulate plus the separate
+  # Executable inventory: infra/bicep/main.bicep appConfigPopulate plus the separate
   # Cosmos/canonical-name publishers. Do not copy hook guesses or Search's
   # generated payload defaults. These are foundation intent, not live routing.
   services_foundation_plain_settings = merge(

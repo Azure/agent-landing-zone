@@ -1,360 +1,67 @@
-# AI Landing Zone — Test harness
+# Offline infrastructure contracts
 
-> Scope: deterministic offline contract checks plus the issue #58 (v2.0.0)
-> live integration harness.
-
-This directory contains offline checks used by CI and a purpose-built
-hub-and-spoke fixture for validating v2.0.0 deliverables end-to-end against a
-real Azure subscription. The live fixture is **not** required to use the landing
-zone; it exists to reproduce the two synthetic scenarios in issue #58.
-
-## Conventions
-
-| Concept | Convention |
-|---|---|
-| Test subscription | `9788a92c-2f71-4629-8173-7ad449cb50e1` |
-| Hub resource group | `rg-ailz-hub` (singleton; reused across tests) |
-| Spoke resource group | `rg-ailz-spoke-MMDDYYHHMM` (timestamp; one per `azd provision` run) |
-| Hub location | `eastus2` |
-| Hub address space | `10.100.0.0/16` (non-overlapping with default spoke `192.168.0.0/21`) |
-| Cleanup | Manual — operator inspects and deletes RGs explicitly. Hub is intentionally long-lived to avoid 30-minute re-provision delays |
-
-## Directory layout
-
-```
-tests/
-├── README.md                 (this file)
-├── contracts/
-│   ├── Test-HostedAgentContract.ps1
-│   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
-│   ├── Test-AcrTaskAgentPoolSubnetContract.ps1
-│   ├── Test-ResourceGroupScopesContract.ps1
-│   ├── Test-SubnetLayoutContract.ps1
-│   ├── Test-ScopedGraphNormalizationContract.ps1
-│   ├── Test-SolutionStorageAccessContract.ps1
-│   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
-│   ├── Test-MaintenanceConfigurationWrapperContract.ps1
-│   ├── Test-ComponentDeploymentFlagsContract.ps1
-│   ├── Test-CosmosDeploymentNameContract.ps1
-│   └── fixtures/
-│       ├── hosted-agent-resource-graph.json
-│       └── maintenance-configuration/
-│           └── main.bicep
-├── hub/
-│   ├── main.bicep            (test hub: VNet, Firewall, Bastion, LAW)
-│   ├── main.parameters.json
-│   └── .outputs.json         (gitignored — captured outputs from last deploy)
-└── scripts/
-    ├── Deploy-Hub.ps1        (idempotent hub deployer + output capture)
-    ├── Measure-MainJsonSize.Tests.ps1
-    └── Invoke-PreflightChecks.Tests.ps1
-```
-
-## Offline contract checks
-
-Run from the umbrella repository root (PowerShell 7, Azure CLI Bicep
-**0.42.1**, `powershell-yaml` **0.4.12** or later). The compiler version is
-the historical fixtures' version, not an infrastructure or runtime component pin:
+Run from the repository root with PowerShell 7 and Azure CLI Bicep **0.42.1**
+(the historical fixture compiler, not a runtime dependency pin):
 
 ```pwsh
-az config set bicep.use_binary_from_path=false
-az bicep install --version v0.42.1
-Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
 pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
 
-# Focused umbrella bootstrap/bindings/composition regressions.
-python -m unittest tests.test_resource_groups
-
-# Focused external-sync retirement and shared workflow/release checks.
-pwsh -NoProfile -File infra/tests/contracts/Test-ExternalParityRetirementContract.ps1
-pwsh -NoProfile -File infra/tests/contracts/Test-ReleaseMetadataContract.ps1
-pwsh -NoProfile -File infra/tests/scripts/WorkflowYaml.Tests.ps1
+# Narrow selections before running the full suite:
+pwsh -NoProfile -File infra/tests/contracts/Test-ScopedGraphNormalizationContract.ps1
+pwsh -NoProfile -File infra/tests/contracts/Test-SolutionStorageAccessContract.ps1
+pwsh -NoProfile -File infra/tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
 
-The offline runner executes every `contracts/Test-*Contract.ps1` and
-`scripts/*.Tests.ps1`, reports each exit code and elapsed time, and fails if any
-gate fails. Compiler scratch files and native runtime extraction stay in a
-unique directory under `infra/tests/`, removed in `finally`. It does not execute
-the live hub/spoke scripts or make Azure writes. The external parity npm suite
-and its provenance gates are retired under
-[ADR-0028](../../docs/adr/ADR-0028-integrated-terraform-composition.md); they
-are not prerequisites for local foundation validation. The copied
-`infra/.github/workflows/` are not active umbrella workflows; active CI must
-invoke these commands explicitly.
+The runner executes every `contracts/Test-*Contract.ps1` and
+`scripts/*.Tests.ps1`, reports exit codes and elapsed time, and fails if any
+check fails. Unique compiler/runtime scratch directories are cleaned in
+`finally`. No Azure credentials, evaluation, what-if, deployment or writes are
+required. Bicep registry dependencies must already be available for offline
+compilation. Active CI is root
+[`infra-validate.yml`](../../.github/workflows/infra-validate.yml).
 
-The subnet integration run passed all **17** offline entrypoints in **690.9
-seconds** on Windows with Azure CLI Bicep 0.42.1, including 500 subnet and 156
-scope assertions, 38 targeted graph and 39 subnet-delta mutation rejections,
-the original hosted/Storage fingerprints, and split/wrong-group operator
-authorization. No Azure deployment, what-if, live RBAC or DNS validation was
-performed.
+## What remains covered
 
-The smallest umbrella CI addition is the single offline-runner command above,
-replacing the standalone resource-group-contract invocation so it is not run
-twice. Keep the existing build/lint steps and install the fixture compiler with
-`az bicep install --version v0.42.1`. Active CI also installs the PowerShell
-module above. The measured offline run fits the current 30-minute build job;
-external-sync retirement and generic workflow parsing are now included in the
-same runner.
+- The actual `infra/bicep/main.bicep` compiled resource graph: feature flags,
+  hosted agents, Storage ACL forwarding and typed rejection, resource-group
+  ownership/RBAC, subnet creation and reserved subnet rules, private endpoints,
+  naming, firewall policy and maintenance wrappers.
+- Deterministic preflight and operator-access tests using mocks, plus size-gate
+  defaults and all warning/failure paths in root `scripts/infra/`.
+- The external Terraform automation retirement guard, scanning current
+  operational source and rejecting retired dispatch and credential references.
 
-### External parity retirement
+Terraform's native mocked contracts remain under
+[`infra/terraform/tests/`](../terraform/tests/); shared lifecycle and input
+contracts remain under root [`tests/`](../../tests/). These offline checks do
+not demonstrate deployed provider parity, live DNS, RBAC or resource persistence.
 
-The [retirement record](../docs/external-terraform-parity-retirement.md) lists
-removed source assets and coordinator-reported remote cleanup evidence. The retirement
-contract checks operational source for external dispatch targets and dedicated
-environment/credential references, rejects legacy mutations, and guards against
-reintroducing exclusive retired assets. It does not scan historical ADRs,
-specifications or changelogs. No historical pins or approvals are rewritten.
-The generic workflow reader and release metadata guard remain tested. This
-does not establish deployed Bicep/Terraform parity.
+## Historical graph fixtures
 
-The hosted-agent contract test compiles with the Bicep version recorded in its
-fixture and proves that the default-disabled feature preserves every symbolic
-resource from the merge base except named post-baseline mutations covered by
-focused contracts. It checks that hosted-agent additions remain limited to the
-two centralized RBAC deployment payloads and are gated by
-`prepareHostedAgent || deployHostedAgent`, least privilege, and accompanied by
-the stable Foundry/registry handoff. It also proves both flags default to
-`false`, prepare mode never enables the agent payload or creates a hosted-agent
-resource, deployment remains digest-gated, and private ACR agent-pool topology
-stays independently controlled. The ACR Task agent pool firewall contract test
-(Azure/GPT-RAG#597) asserts that the VNet-injected ACR Tasks dedicated agent
-pool's required outbound platform-bootstrap Network Rules (AzureKeyVault,
-Storage, EventHub, AzureActiveDirectory, AzureMonitor) are present, correctly
-gated, ordered, and scoped to the devops build agents subnet — independent of
-the opaque hash check above. The Foundry shared private-link naming contract
-proves valid legacy child IDs remain unchanged, both long suffix variants stay
-within 60 characters, output is deterministic, and distinct tested long inputs
-do not collide. The Maintenance Configuration wrapper contract compiles default
-and InGuestPatch calls and proves every typed property is forwarded to AVM
-0.3.1, with schedules and reboot settings retaining their required nesting and
-omitted values retaining AVM defaults. The deterministic preflight tests cover
-disabled, prepare-only, valid immutable deployment, mutable/missing image
-digest, private build, missing-prerequisite, strict Boolean, Container Apps
-dependency, API-key prerequisite, and BYO subnet/NSG configurations without
-accessing Azure. The component deployment flag contract proves the matching
-Bicep validation expressions and defensive resource, DNS, secret, and
-configuration gates.
+`contracts/fixtures/` records reviewed exact before/after graph deltas.
+`ScopedResourceGroupNormalization.ps1` checks those deltas before projecting
+the compiled graph to its historical representation; it never mutates the
+actual deployment graph. Mutation tests reject unrelated resource, scope,
+security, subnet, output and manifest drift. **Do not reset fingerprints just
+to make tests pass.**
 
-The resource-group scope contract compiles the actual orchestrator with Azure
-CLI Bicep, checks application/Foundry/network ownership, actual IDs and RBAC
-scopes, and projects one/two/three-RG mappings only after checking their exact
-compiled bindings. It checks dedicated application PE subnet selection,
-BYO and explicit PE/DNS precedence (including subscriptions), nested Foundry
-endpoint destinations and serialization, prerequisite project grants, private
-access with policy-managed DNS, collision-safe deployment names, the ARM
-64-output limit, and minified template size. Subnet creation controls do not
-change resource-group ownership or private DNS/endpoint destination precedence.
-It makes no Azure requests and creates its compiler artifact beside
-the test, deleting it in `finally`.
+`historical-foundation-manifest.json` contains exactly the four fields from
+the retired incorporated manifest at `v2.7.3`. It is only a regression fixture,
+not deployment or release configuration. The normalizer first checks the
+compiled manifest against the actual repository-root manifest and verifies
+`infra.source.tag` against the historical fixture. Existing incorporation
+allowlists continue to protect source/component pins and shape. The Storage
+contract checks the projected manifest against the exact fixture, including
+negative mutations, then normalizes only `tag` and `ailz_tag` to `v2.6.1` for
+the original variable fingerprint. No copied changelog or release helper is
+needed. The original hosted-agent and Storage fingerprints remain unchanged.
 
-The subnet layout contract checks the twelve default definitions, independent
-creation switches, global/isolation precedence, configurable names and CIDRs,
-both VNet paths, dedicated PE routing, reserved GatewaySubnet attachments, and
-validation dependencies. Existing-VNet writes remain serialized subnet PUTs,
-not replacements of the VNet subnet collection. These compiled checks do not
-prove that a reused subnet exists or that Azure accepts its actual properties;
-the mocked preflight tests exercise those checks without live Azure access.
+Contracts accepting `-MainFile` expect the same `infra/bicep/` layout and
+corresponding root manifest and parameters in isolated regression checkouts.
+The maintenance fixture imports the real moved Bicep wrapper.
 
-The scoped refactor intentionally changes the historical symbolic resource
-graph: direct network resources now live in focused deployments, Foundry
-modules acquire destination scopes, and RBAC fans out to actual target RGs.
-The hosted-agent and solution-Storage fingerprint baselines are **not**
-regenerated or waived. `ScopedResourceGroupNormalization.ps1` checks exact
-compiled before/after deltas before projecting the reviewed changes back to
-their historical graph representation. The two explicit allowlists keep the
-ADR-0023 scoped refactor separate from the earlier incorporation/customization
-of repository-owned `infra/` and upstream post-baseline fixes. They preserve
-all original hashes, including nested module properties and definitions.
-Dictionary membership, wrapper contents, scopes, bindings, security settings,
-and new outputs must match the reviewed values; unrelated fields survive
-projection and remain subject to the original fingerprints. Only generated
-compiler hashes and line endings are non-deploying comparison differences.
-`Test-ScopedGraphNormalizationContract.ps1` proves that projection leaves the
-actual deployment graph untouched and rejects wrong scopes, grounding Storage
-ownership changes, default/subnet/output/security drift, extra wrapper
-resources, unrelated resource changes, and manifest spoofing. Behavioral checks
-still inspect the actual compiled template, not the historical projection.
-The ACR subnet and Search shared-link semantic tests follow the new compiled
-composition while retaining ordering, naming, and NSG checks.
-
-The ADR-0027 subnet delta is projected before the existing resource-group
-adapters. Its exact before/after fixture records intentional definitions,
-selection expressions, validation, dedicated PE routing and reserved-subnet NSG
-changes against `origin/develop` commit
-`9ab6ceb0028101f2c85d1fb484eaf89d7de6d5c9`, compiled with Bicep 0.42.1.
-It does not replace any historical fingerprint. Mutation tests must reject
-changes inside the reviewed delta as well as preserve unrelated graph drift
-for the original fingerprint gates; the actual deployment graph is never
-modified by normalization. The fixture reuses four exact pre-change values
-already recorded in the existing reviewed snapshots, and one identical
-subnet-input rule for both VNet paths. The complete projected template was
-compared with a fresh compile of that unchanged `origin/develop` commit, not
-with newly generated hashes.
-
-The Cosmos DB deployment-name contract proves that no top-level deployment
-embeds an environment-derived resource name and that SQL databases and
-containers use direct resources behind a fixed nested deployment name. Long CAF
-environment names therefore cannot exceed ARM's 64-character deployment-name
-limit while configured Azure resource names remain unchanged. The incorporated
-account-only local module must contain exactly one account resource and no SQL
-parameter or SQL children; legacy AVM fixture shapes must retain an empty SQL
-collection.
-The compiled-template size tests prove that the script's default 3.5 MB warning,
-4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
-command and exercise each exit path without compiling or accessing Azure.
-
-The ACR subnet contract (#159) checks the compiled pool dependency on BYO subnet
-creation, the existing registry/new-VNet dependencies, conditional resource and
-output gates, count-zero behavior, the existing NSG guard, cross-scope subnet
-targets, and serialized subnet operations (A1-A9). A live cold-start test must
-still start with an absent build subnet and show subnet completion before pool
-provisioning; a successful retry is not cold-start evidence.
-
-The same compiled subnet contract covers #168: reserved `AzureBastionSubnet`
-does not receive a generic NSG when Bastion is disabled, while explicit NSGs,
-enabled Bastion's dedicated binding, ordinary/custom subnets and disabled-NSG
-paths retain their precedence. The Storage graph guard permits only that
-precise additional exclusion, retaining the historical fingerprints and
-rejecting unrelated exclusion or explicit-NSG selector changes.
-
-The solution Storage access contract (#160) checks typed input/default and
-native JSON parameter values (or omitted inputs using the exact native Bicep
-defaults), exact root-to-AVM-to-resource forwarding, all
-supported bypass values, true/false, zero/one/multiple resource-instance rules,
-invalid typed inputs, and standard/isolated/IP-exception/disabled-account cases
-(S1-S9). It checks nested compiled expressions rather than treating source-token
-presence as proof, and protects unrelated Storage configuration and auxiliary
-accounts. Default equivalence means unchanged effective values, not identical
-template bytes. No Defender resource, plan, role or exception is inferred.
-
-The [proposed release guard](../docs/adr/0006-release-metadata-and-comparison-baselines.md)
-checks exact equal manifest tags and the latest unique versioned changelog
-heading. Its offline tests include metadata mutations and the retained Bicep
-workflow's path coverage, using the generic workflow reader.
-The Storage graph guard verifies that `_manifest` retains its Bicep 0.42.1
-binding to `$fxv#0`. Before compatibility projection, the loaded object must
-match the actual umbrella manifest, its `infra.source.tag` must match the
-incorporated foundation manifest, and source/component pins and manifest shape
-must match the reviewed incorporation allowlist. The projected foundation
-manifest is then checked against its own manifest/changelog; only its `tag` and
-`ailz_tag` are normalized to `v2.6.1` before the original variable fingerprint.
-Release numbers can change; arbitrary repositories, pins, extra fields,
-variables, resources and outputs cannot. No fingerprints are regenerated.
-`-MainFile` fixtures must include the corresponding umbrella manifest and
-foundation manifest/changelog. These checks do not authorize a release.
-
-Both scripts accept `-MainFile` for isolated regression fixtures and remove their
-temporary compiler artifacts. Their offline checks do not prove live subnet
-preservation, ACL persistence, consumer authentication or Defender scanning.
-The [private-deployment validation guide](../specs/002-private-deployment-reliability/quickstart.md)
-separates those approved operational scenarios and their evidence.
-
-## End-to-end test flow
-
-### 1. Deploy the hub (one time per subscription)
-
-```pwsh
-pwsh tests/scripts/Deploy-Hub.ps1
-```
-
-This:
-- Switches `az` to the test subscription if needed.
-- Creates `rg-ailz-hub` if missing.
-- Deploys `tests/hub/main.bicep` — VNet + Firewall (Standard) + Bastion (Standard) + LAW.
-- Writes outputs to `tests/hub/.outputs.json`.
-
-Takes ~25-30 minutes (Azure Firewall + Bastion provisioning).
-
-To preview without applying:
-
-```pwsh
-pwsh tests/scripts/Deploy-Hub.ps1 -WhatIf
-```
-
-### 2. Deploy the spoke (per test)
-
-The spoke is the landing zone itself (`main.bicep` at repo root). You drive
-it via `azd`, passing parameters captured from the hub:
-
-```pwsh
-# Pick a fresh spoke RG name following the convention
-$timestamp = Get-Date -Format 'MMddyyHHmm'
-$spokeRG = "rg-ailz-spoke-$timestamp"
-
-# Load hub outputs
-$hub = Get-Content tests/hub/.outputs.json | ConvertFrom-Json
-
-# Create azd env and inject hub references
-azd env new "ailz-v2-$timestamp"
-azd env set AZURE_SUBSCRIPTION_ID 9788a92c-2f71-4629-8173-7ad449cb50e1
-azd env set AZURE_LOCATION eastus2
-azd env set AZURE_RESOURCE_GROUP $spokeRG
-azd env set NETWORK_ISOLATION true
-azd env set HUB_VNET_RESOURCE_ID $hub.hubVnetResourceId
-azd env set CREATE_HUB_PEERING true
-azd env set EGRESS_NEXT_HOP_IP $hub.firewallPrivateIp                  # Gap 6 (optional)
-azd env set LOG_ANALYTICS_WORKSPACE_RESOURCE_ID $hub.logAnalyticsWorkspaceResourceId  # Gap 5 (optional)
-azd env set DEPLOY_BASTION false                                       # Use hub Bastion instead
-
-# Provision
-azd provision
-```
-
-> **Note:** the specific `azd env` keys above (HUB_VNET_RESOURCE_ID,
-> CREATE_HUB_PEERING, etc.) are introduced by v2.0.0 Gaps 6/7/4. Until the
-> corresponding gap commit lands, those env vars will be silently ignored by the
-> spoke deployment.
-
-### 3. Connect to the spoke jumpbox via the hub Bastion
-
-After provision completes, locate the jumpbox VM in the spoke RG and connect
-through Azure Portal:
-
-1. Azure Portal → Resource Groups → `rg-ailz-hub` → Bastion host
-2. Connect to the spoke jumpbox VM by resource ID (paste `/subscriptions/9788a92c-.../resourceGroups/<spokeRG>/providers/Microsoft.Compute/virtualMachines/<vmName>`).
-3. Authenticate with the credentials set via `azd env set AZURE_JUMPBOX_PASSWORD` (the standard landing-zone parameter).
-
-Once logged in, post-provision scripts and validation run **from inside the
-jumpbox**.
-
-### 4. Verify the Container App from the jumpbox
-
-Inside the jumpbox session:
-
-```pwsh
-# Get the Container App FQDN (output by the spoke deployment)
-$caFqdn = azd env get-value APP_CONTAINER_APP_ORCHESTRATOR_FQDN
-
-# Hit it from the jumpbox (which sits inside the spoke VNet and can reach
-# the Container App private FQDN through the VNet-linked Private DNS zone)
-Invoke-WebRequest "https://$caFqdn" -UseBasicParsing | Select-Object StatusCode, Content
-```
-
-Expected: HTTP 200 + the dotnet/samples:aspnetapp-9.0 default landing page
-(which is the v2.0.0 dummy image listening on port 8080).
-
-## What the test fixture intentionally does NOT do
-
-- The hub firewall has an **empty policy**. Spoke egress is not forced through
-  it by default. To exercise Gap 6 end-to-end with active filtering, populate
-  `firewallPolicy.properties.ruleCollectionGroups` (out of scope for the
-  v2.0.0 acceptance test). See plan.md §4.6 Option B.
-- The hub has **no Private DNS zones**. The spoke creates its own (default) or
-  reuses external zones declared via `existingPrivateDnsZones` (Gap 2). No
-  central DNS resolver is configured.
-- Bidirectional VNet peering: the **spoke→hub** peering is created by the
-  spoke deployment itself (Gap 7). The **hub→spoke** reverse peering must be
-  added separately — the hub deploy script does not know spoke VNet IDs
-  in advance. Use:
-
-  ```pwsh
-  az network vnet peering create `
-    --name to-spoke-<timestamp> `
-    --resource-group rg-ailz-hub `
-    --vnet-name $hub.hubVnetName `
-    --remote-vnet $spokeVnetId `
-    --allow-vnet-access true
-  ```
-
-  This is captured in `tests/scripts/Add-HubToSpokePeering.ps1` (Phase 7 add).
+The copied engineering-agent/release-workflow tests and synthetic manual hub
+lab have been removed with their obsolete assets. Existing hub-and-spoke
+product capabilities remain supported; operational guidance belongs in the
+[central documentation](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/),
+not a second deployment project here.

@@ -196,7 +196,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
-    declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/main.bicep").read_text(), re.M)
+    declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
     assert len(declarations) == 217
     original = values()
     for name, kind in declarations:
@@ -368,6 +368,21 @@ def test_provider_defaults_and_native_custom_path(tmp_path):
     (tmp_path / "custom tf").mkdir()
     (tmp_path / "custom tf/foundation.tf").touch()
     assert resolve_provider(tmp_path)["entrypoint"] == str((tmp_path / "custom tf/foundation.tf").resolve())
+    (tmp_path / "azure.yaml").write_text(
+        'infra: {provider: bicep, path: "custom bicep", module: platform}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "custom bicep").mkdir()
+    (tmp_path / "custom bicep/platform.bicep").touch()
+    assert resolve_provider(tmp_path)["entrypoint"] == str((tmp_path / "custom bicep/platform.bicep").resolve())
+
+
+def test_checked_in_project_selects_moved_bicep_entrypoint():
+    selected = resolve_provider(ROOT)
+    assert selected == {
+        "provider": "bicep", "path": "infra/bicep", "module": "main",
+        "entrypoint": str((ROOT / "infra/bicep/main.bicep").resolve()),
+    }
 
 
 @pytest.mark.parametrize("configuration", [
@@ -435,7 +450,7 @@ def test_provider_cli_parent_flag():
 def test_catalogue_types_match_the_entire_current_interface():
     from config.deployment.input_types import INPUT_TYPES
 
-    declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/main.bicep").read_text(), re.M)
+    declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
     expected = {}
     for name, kind in declarations:
         expected[name] = (

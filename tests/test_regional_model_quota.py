@@ -130,10 +130,10 @@ class RegionalModelQuotaTests(unittest.TestCase):
             environment = dict(
                 os.environ, QUOTA_FIXTURE=str(folder / "fixture.json"),
                 QUOTA_SOURCE=str(
-                    ROOT / "infra" / "scripts" / "Invoke-PreflightChecks.ps1"
+                    ROOT / "scripts" / "infra" / "Invoke-PreflightChecks.ps1"
                     if gate == "foundation" else ROOT / "scripts" / "Invoke-RegionalPreflight.ps1"
                 ),
-                QUOTA_HELPER=str(ROOT / "infra" / "scripts" / "ModelQuota.ps1"),
+                QUOTA_HELPER=str(ROOT / "scripts" / "infra" / "ModelQuota.ps1"),
                 QUOTA_GATE=gate,
                 AZURE_AI_PROJECT_RESOURCE_ID=project, AZURE_RESOURCE_GROUP=group,
                 AZURE_FOUNDRY_RESOURCE_GROUP=foundry_group,

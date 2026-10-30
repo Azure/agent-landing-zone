@@ -62,7 +62,7 @@ def evaluate_setting(expression, template, parameters):
 class InfraProducedPermissionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.template = compile_template("infra/main.bicep")
+        cls.template = compile_template("infra/bicep/main.bicep")
 
     def produced_context(self, overrides):
         parameters = {

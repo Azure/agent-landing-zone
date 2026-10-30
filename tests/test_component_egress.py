@@ -512,7 +512,7 @@ def test_compiled_generic_handoff_does_not_create_new_resources_or_relax_firewal
     compiler = shutil.which("bicep")
     assert compiler, "Standalone Bicep is required for the foundation contract."
     result = subprocess.run(
-        [compiler, "build", str(ROOT / "infra/main.bicep"), "--no-restore", "--stdout"],
+        [compiler, "build", str(ROOT / "infra/bicep/main.bicep"), "--no-restore", "--stdout"],
         capture_output=True, text=True, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stderr

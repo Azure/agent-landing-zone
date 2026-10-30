@@ -17,11 +17,13 @@ Preserve these boundaries:
   not the local Terraform composition.
 - `contracts/` contains shared versioned schemas.
 - `infra/` is repository-owned foundation source, changed only through reviewed edits;
-  `infra/main.parameters.json` is a tracked seed regenerated locally by
+  `infra/bicep/main.parameters.json` is a tracked seed regenerated locally by
   `preProvision`; generated private values must not be committed.
-- `infra/main.bicep` and `infra/terraform` implement the same platform contract.
+- `infra/bicep/main.bicep` and `infra/terraform` implement the same platform contract.
   Assess every infrastructure change in both directions and update affected
   counterparts in the same coordinated change.
+- `infra/shared/` contains catalogs used by both providers. Keep lifecycle hooks
+  in root `scripts/` and infrastructure helpers in `scripts/infra/` (ADR-0032).
 
 ## Design questions
 

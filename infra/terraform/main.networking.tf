@@ -3,7 +3,7 @@
 # Keep producer dependencies out of subnet_ids: endpoints consume service IDs,
 # never the reverse. All for_each keys below are derived from deployment intent.
 locals {
-  network_abbreviations    = jsondecode(file("${path.module}/../constants/abbreviations.json"))
+  network_abbreviations    = jsondecode(file("${path.module}/../shared/abbreviations.json"))
   network_rg_id            = local.deployment_context.network_rg_id
   network_byo_parts        = split("/", var.existingVnetResourceId)
   network_vnet_id          = var.networkIsolation ? (var.useExistingVNet ? var.existingVnetResourceId : module.network_vnet[0].resource_id) : ""

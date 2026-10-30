@@ -580,7 +580,7 @@ run "foundation_inventory_is_actually_published_with_real_connection_paths" {
       toset([for setting in azapi_resource.foundation_setting : split("$", setting.name)[0]]) ==
       setunion(
         toset([
-          for match in regexall("(?m)^[ \\t]*\\{ name: '([^']+)'", split("// OUTPUTS", split("module appConfigPopulate ", file("${path.module}/../main.bicep"))[1])[0]) :
+          for match in regexall("(?m)^[ \\t]*\\{ name: '([^']+)'", split("// OUTPUTS", split("module appConfigPopulate ", file("${path.module}/../bicep/main.bicep"))[1])[0]) :
           match[0] if match[0] != "CONTAINER_APPS"
         ]),
         toset(["COSMOS_DB_ACCOUNT_RESOURCE_ID", "COSMOS_DB_ENDPOINT"]),
