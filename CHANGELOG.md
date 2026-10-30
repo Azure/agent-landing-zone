@@ -1,5 +1,50 @@
 # Changelog
 
+## [v5.6.0] - 2026-10-30
+
+### Changed
+- Separate provider source into `infra/bicep/` and `infra/terraform/`, centralize
+  shared catalogs under `infra/shared/` and infrastructure helpers under
+  `scripts/infra/`, and align azd, lifecycle hooks, CI and native custom paths.
+  The root azd workflow and existing hub-and-spoke support remain available.
+- Remove obsolete inherited repository assets and the manual hub laboratory
+  without adding an archive, reducing tracked infrastructure files from 245
+  to 118. ADR-0032 records the layout and coordinated path rollback.
+- Default `text-embedding-3-large` version `1` to `GlobalStandard` across root
+  inputs, the Bicep seed and both providers' defaults and empty-list fallbacks.
+  Keep explicit `Standard` overrides, declared capacity `100` and fallback
+  capacity `10`. Model versions, dimensions, runtime pins, identity, RBAC,
+  networking and Terraform state bindings are unchanged.
+- Custom Bicep consumers must adopt `infra/bicep/`. Before updating an existing
+  checkout, clear the old parameter seed's skip-worktree flag and preserve
+  private local inputs outside tracked source. ADR-0033 documents global
+  processing, which can occur outside the resource region even with private
+  endpoints. Operators requiring regional processing must explicitly select
+  `Standard` and review availability, quota and any existing SKU transition.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes `python -m pytest tests --quiet`: 1230 tests and 1001
+  subtests passed, with 7 skipped.
+- Bicep 0.42.1 build/lint and all 17 offline contract entrypoints pass through
+  `infra/tests/Invoke-OfflineContracts.ps1`, preserving historical graph
+  fingerprints and narrowly checking the intentional embedding SKU change.
+- Terraform formatting, backend-disabled read-only-lock initialization,
+  validation and all 120 mocked tests pass on Ubuntu and Windows. Runtime
+  component pins, infrastructure provenance, module pins and provider lock
+  are unchanged.
+- Validation is offline. No Azure deployment, what-if, live availability or
+  quota qualification, or existing-deployment SKU transition was performed.
+  The Azure what-if gate was skipped because OIDC was not configured.
+  Compilation and mocked checks do not establish deployed provider parity.
+
 ## [v5.5.3] - 2026-10-28
 
 ### Changed
