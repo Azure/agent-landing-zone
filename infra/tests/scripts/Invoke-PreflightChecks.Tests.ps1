@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Deterministic behavioral tests for scripts/Invoke-PreflightChecks.ps1.
+    Deterministic behavioral tests for scripts/infra/Invoke-PreflightChecks.ps1.
 
 .DESCRIPTION
     Synthetic-input tests that exercise the deterministic checks (Test-Topology,
@@ -9,7 +9,7 @@
     No Azure credentials or writes are used.
 
     Usage:
-        pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1
+        pwsh -NoProfile -File infra/tests/scripts/Invoke-PreflightChecks.Tests.ps1
 
     Exits non-zero on any test failure.
 #>
@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 # directly. Instead, we use AST parsing to extract the function definitions and
 # re-execute them in this scope.
 
-$scriptPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath '..\scripts\Invoke-PreflightChecks.ps1'
+$scriptPath = Join-Path $PSScriptRoot '..\..\..\scripts\infra\Invoke-PreflightChecks.ps1'
 $scriptPath = (Resolve-Path -Path $scriptPath).Path
 . (Join-Path (Split-Path -Parent $scriptPath) 'ModelQuota.ps1')
 $raw = Get-Content -Path $scriptPath -Raw
@@ -182,7 +182,7 @@ function Get-AzdEnvValues {
         AI_FOUNDRY_DISABLE_LOCAL_AUTH = ''
     }
 }
-$mainParametersPath = Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath 'main.parameters.json'
+$mainParametersPath = Join-Path $PSScriptRoot '..\..\..\main.parameters.json'
 Reset-Findings
 $incorporatedDefaults = Get-EffectiveParameters -Path $mainParametersPath
 Assert-True 'Incorporated literal true defaults do not consume empty azd aliases' (

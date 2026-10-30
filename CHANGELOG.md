@@ -1,5 +1,42 @@
 # Changelog
 
+## [v5.5.3] - 2026-10-28
+
+### Changed
+- Default isolated standalone deployments to Azure Firewall Basic in Bicep and
+  Terraform, with explicit Standard selection and matching policy SKU.
+- Provision Basic's management subnet, Standard/static public IP and management
+  NIC only when required. Keep management networking separate from workload
+  routes and generic subnet associations.
+- Create the firewall data subnet according to local firewall requirements;
+  omit unused spoke firewall reservations for external hub egress. Make
+  GatewaySubnet opt-in, independently of whether a shared hub has a gateway.
+- Resolve and persist deployment inputs through both lifecycle hook variants,
+  reject unsupported Basic DNS proxy selections, and align the central
+  configuration, network, VPN and cost guidance.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes the complete Python and hook suite: 1180 tests and 995
+  subtests passed, with 7 skipped.
+- Bicep 0.42.1 build/lint and all 20 offline contract entrypoints pass,
+  including 408 Basic firewall assertions, 535 subnet assertions and 450
+  preflight checks. Protected-graph tests reject 45 graph and 68 subnet deltas
+  without regenerating the original fingerprint fixtures.
+- Terraform readonly initialization, formatting, validation and all 117 mocked
+  tests pass on Ubuntu and Windows, including 49 networking scenarios. Module
+  pins and the provider lock are unchanged.
+- No live Azure deployment or capacity qualification was performed; the Azure
+  what-if gate was skipped because OIDC was not configured. Offline checks do
+  not establish deployed Bicep/Terraform parity.
+
 ## [v5.5.2] - 2026-10-28
 
 ### Fixed

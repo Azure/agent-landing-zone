@@ -24,15 +24,15 @@
     in finally, including on compilation or assertion failure.
 
 .EXAMPLE
-    pwsh ./tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
+    pwsh -NoProfile -File infra/tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
 
 .EXAMPLE
-    pwsh ./tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1 -MainFile /isolated-copy/main.bicep
+    pwsh -NoProfile -File infra/tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1 -MainFile /isolated-copy/infra/bicep/main.bicep
 #>
 
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'

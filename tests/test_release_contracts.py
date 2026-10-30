@@ -74,7 +74,7 @@ class IntegrationPinTests(unittest.TestCase):
     def test_infra_is_in_repository_source_without_submodule_pin(self) -> None:
         self.assertFalse((ROOT / ".gitmodules").exists())
         completed = subprocess.run(
-            ["git", "ls-files", "--stage", "--", "infra/main.bicep", "infra"],
+            ["git", "ls-files", "--stage", "--", "infra/bicep/main.bicep", "infra"],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -94,7 +94,7 @@ class IntegrationPinTests(unittest.TestCase):
                 self.assertNotIn("fetch --depth 1 origin", content)
                 self.assertNotIn("checkout --detach", content)
                 self.assertNotIn("config.deployment.infra_checkout", content)
-                self.assertIn("infra/main.bicep was not found", content)
+                self.assertIn("was not found. Restore the configured infrastructure entry point", content)
 
     def test_preprovision_fails_when_topology_persistence_fails(self) -> None:
         scripts = ROOT / "scripts"
@@ -386,7 +386,7 @@ class LifecycleParityTests(unittest.TestCase):
     def test_hosted_configuration_bootstrap_uses_foundation_vault_uri(self) -> None:
         import yaml
 
-        foundation = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+        foundation = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
         self.assertIn(
             "output KEY_VAULT_URI string = deployKeyVault ? keyVault!.outputs.properties.vaultUri : ''",
             foundation,

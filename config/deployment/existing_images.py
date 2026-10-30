@@ -23,7 +23,7 @@ from config.deployment.resource_groups import resource_group_for
 LOGGER = logging.getLogger("config.deployment.existing_images")
 
 PLACEHOLDER_IMAGE_PREFIX = "mcr.microsoft.com/dotnet/samples:"
-# Must match ``_containerDummyImageName`` in infra/main.bicep.
+# Must match ``_containerDummyImageName`` in infra/bicep/main.bicep.
 PLACEHOLDER_IMAGE = f"{PLACEHOLDER_IMAGE_PREFIX}aspnetapp-9.0"
 CONTAINERAPP_KIND = "containerapp"
 COMPONENT_KINDS = (CONTAINERAPP_KIND, "azure.ai.agent")

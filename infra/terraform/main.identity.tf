@@ -30,7 +30,7 @@ locals {
     }
   }
   identity_roles = merge(
-    jsondecode(file("${path.module}/../constants/roles.json")),
+    jsondecode(file("${path.module}/../shared/roles.json")),
     # This newer ABAC role is not yet in the incorporated role vocabulary.
     { ContainerRegistryRepositoryReader = { guid = "b93aa761-3e63-49ed-ac28-beffa264f7ac", key = "ContainerRegistryRepositoryReader" } }
   )

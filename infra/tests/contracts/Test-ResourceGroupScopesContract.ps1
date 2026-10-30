@@ -7,7 +7,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'

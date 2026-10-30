@@ -9,7 +9,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -147,7 +147,7 @@ try {
     & az bicep build --file $MainFile --outfile $compiledFile
     if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed: $LASTEXITCODE" }
     $t = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-    $rootParameters = Join-Path (Split-Path -Parent (Split-Path -Parent $MainFile)) 'main.parameters.json'
+    $rootParameters = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MainFile))) 'main.parameters.json'
     $bindings = (Get-Content -LiteralPath $rootParameters -Raw | ConvertFrom-Json -AsHashtable -Depth 100).parameters
     Assert-LayoutShape $t $bindings
 

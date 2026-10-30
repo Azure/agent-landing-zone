@@ -419,7 +419,7 @@ class PrivateLinkReadinessTests(unittest.TestCase):
         self.network.assert_not_called()
 
     def test_template_publishes_exact_names_targets_and_existing_label(self):
-        template = (Path(__file__).resolve().parents[3] / "infra/main.bicep").read_text(encoding="utf-8")
+        template = (Path(__file__).resolve().parents[3] / "infra/bicep/main.bicep").read_text(encoding="utf-8")
         self.assertIn("var searchFoundrySharedPrivateLinkReadinessManifest = [for spl in searchFoundrySharedPrivateLinkResources:", template)
         self.assertIn("name: spl.name", template)
         self.assertIn("name: 'spl-${resourceNames.searchServiceName}-blob-0'", template)

@@ -32,12 +32,12 @@ def compile_template(path):
 
 @pytest.fixture(scope="module")
 def template():
-    return compile_template("infra/main.bicep")
+    return compile_template("infra/bicep/main.bicep")
 
 
 @pytest.fixture(scope="module")
 def firewall_template():
-    return compile_template("infra/modules/networking/azure-firewall.bicep")
+    return compile_template("infra/bicep/modules/networking/azure-firewall.bicep")
 
 
 def evaluate(value, parameters, variables=None):
@@ -128,7 +128,7 @@ def test_parameter_defaults_and_azd_surface(template, firewall_template):
             "networkIsolation": True, "deployAzureFirewall": True,
         }
         assert evaluate(policy["properties"], module_parameters, firewall["template"]["variables"])["dnsSettings"] == {"enableProxy": proxy}
-    for path in ("main.parameters.json", "infra/main.parameters.json"):
+    for path in ("main.parameters.json", "infra/bicep/main.parameters.json"):
         parameters = json.loads((ROOT / path).read_text(encoding="utf-8"))
         assert parameters["parameters"][SETTING]["value"] == ENV_VALUE
 

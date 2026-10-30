@@ -257,7 +257,7 @@
             "version": "1"
           },
           "sku": {
-            "name": "Standard",
+            "name": "GlobalStandard",
             "capacity": 100
           },
           "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",

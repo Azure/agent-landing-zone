@@ -85,7 +85,9 @@ foreach ($base in @($repoRoot, $infraRoot)) {
         '.github/workflows', '.github/agents', '.github/skills',
         '.github/instructions', '.github/scripts', 'scripts'
     )) {
-        foreach ($file in Get-ChildItem (Join-Path $base $directory) -File -Recurse |
+        $directoryPath = Join-Path $base $directory
+        if (-not (Test-Path $directoryPath -PathType Container)) { continue }
+        foreach ($file in Get-ChildItem $directoryPath -File -Recurse |
             Where-Object Extension -In @('.yml', '.yaml', '.md', '.ps1', '.sh', '.py', '.mjs', '.json')) {
             Assert-NoExternalParityReference (Get-Content $file.FullName -Raw) $file.FullName
             $count++

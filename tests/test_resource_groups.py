@@ -1091,9 +1091,9 @@ class HookTests(ScratchTest):
             INFRA_TEST_PROVIDER=provider,
         )
         if inspect_defaults:
-            (self.scratch / "infra").mkdir(exist_ok=True)
+            (self.scratch / "infra" / "bicep").mkdir(parents=True, exist_ok=True)
             if provider == "bicep":
-                (self.scratch / "infra" / "main.bicep").write_text("", encoding="utf-8")
+                (self.scratch / "infra" / "bicep" / "main.bicep").write_text("", encoding="utf-8")
         selection = json.dumps({
             "foundry": "rg-ai", "application": "rg-app", "network": "rg-net",
             "create_resource_groups": True,
@@ -1108,7 +1108,7 @@ class HookTests(ScratchTest):
                 "function python {\n"
                 " if ($args[1] -like '*config.deployment.provider*') {\n"
                 "  $global:LASTEXITCODE = 0\n"
-                "  @{ provider = $env:INFRA_TEST_PROVIDER; path = 'infra/terraform'; module = 'main' } | ConvertTo-Json -Compress\n"
+                "  @{ provider = $env:INFRA_TEST_PROVIDER; path = \"infra/$($env:INFRA_TEST_PROVIDER)\"; module = 'main' } | ConvertTo-Json -Compress\n"
                 " } elseif ($args[1] -like '*config.appdefinition*') {\n"
                 "  Add-Content -LiteralPath $env:TRACE -Value appdefinition\n"
                 "  $global:LASTEXITCODE = [int]$env:APP_CODE\n"
@@ -1143,7 +1143,7 @@ class HookTests(ScratchTest):
             )
             (bin_dir / "python3").write_text(
                 '#!/bin/sh\ncase "$2" in\n'
-                'config.deployment.provider) printf \'{"provider":"%s","path":"infra/terraform","module":"main"}\\n\' "$INFRA_TEST_PROVIDER"; exit 0;;\n'
+                'config.deployment.provider) printf \'{"provider":"%s","path":"infra/%s","module":"main"}\\n\' "$INFRA_TEST_PROVIDER" "$INFRA_TEST_PROVIDER"; exit 0;;\n'
                 'config.appdefinition) echo appdefinition >> "$TRACE"; exit "$APP_CODE";;\n'
                 'config.deployment.resource_groups) echo resource_groups >> "$TRACE"; '
                 f"printf '%s\\n' '{selection}'; " + 'exit "$RG_CODE";;\n'
@@ -1175,7 +1175,7 @@ class HookTests(ScratchTest):
         expected_code = 5 if inspect_defaults else app_code or rg_code or 1
         self.assertEqual(expected_code, result.returncode, result.stdout + result.stderr)
         if not app_code and not rg_code and not inspect_defaults:
-            self.assertIn("infra/main.bicep", result.stdout + result.stderr)
+            self.assertIn("main.bicep was not found", result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which("pwsh"), "PowerShell unavailable")
     def test_powershell_behavioral_order_and_failures(self) -> None:

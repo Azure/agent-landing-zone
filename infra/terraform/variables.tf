@@ -1211,7 +1211,7 @@ variable "modelDeploymentList" {
   }))
   default = [
     { name = "chat", model = { format = "OpenAI", name = "gpt-5-nano", version = "2025-08-07" }, sku = { name = "GlobalStandard", capacity = 100 }, canonical_name = "CHAT_DEPLOYMENT_NAME", apiVersion = "2025-12-01-preview" },
-    { name = "text-embedding", model = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }, sku = { name = "Standard", capacity = 100 }, canonical_name = "EMBEDDING_DEPLOYMENT_NAME", apiVersion = "2025-01-01-preview" }
+    { name = "text-embedding", model = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }, sku = { name = "GlobalStandard", capacity = 100 }, canonical_name = "EMBEDDING_DEPLOYMENT_NAME", apiVersion = "2025-01-01-preview" }
   ]
   nullable = false
   validation {
