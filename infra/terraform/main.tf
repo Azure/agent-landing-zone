@@ -65,7 +65,7 @@ locals {
     lower(var.subscriptionId), var.environmentName, lower(local.root_location)
   ])), 0, 13))
 
-  abbreviations = jsondecode(file("${path.module}/../constants/abbreviations.json"))
+  abbreviations = jsondecode(file("${path.module}/../shared/abbreviations.json"))
   naming_definitions = {
     aiFoundryAccountName        = { prefix = local.abbreviations.ai.aiFoundry, max = 64, compact = false }
     aiFoundryProjectName        = { prefix = local.abbreviations.ai.aiFoundryProject, max = 64, compact = false }

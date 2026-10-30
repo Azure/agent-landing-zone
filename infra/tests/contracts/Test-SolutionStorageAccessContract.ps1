@@ -33,9 +33,10 @@
     regenerate these hashes merely to obtain a passing test.
     The subnet guard also permits only #168's exact AzureBastionSubnet addition
     to generic-NSG exclusions; other nested properties remain fingerprinted.
-    Release metadata is checked against the actual manifest and changelog first.
+    Historical foundation metadata is checked against its explicit fixture first.
     Only tag and ailz_tag on the pinned $fxv#0 object behind _manifest are then
-    normalized to v2.6.1 for the historical fingerprint (proposed ADR-0006).
+    normalized to v2.6.1 for the historical fingerprint. The actual compiled
+    umbrella manifest is checked before projection by the scoped normalizer.
 
     Uses a unique temporary directory beside MainFile for portable relative
     'using' paths (also across Windows drives). Deletes only its own files.
@@ -44,14 +45,14 @@
     Policy, authentication and Defender scanning require separate live evidence.
 
 .EXAMPLE
-    pwsh -NoProfile -File tests/contracts/Test-SolutionStorageAccessContract.ps1
+    pwsh -NoProfile -File infra/tests/contracts/Test-SolutionStorageAccessContract.ps1
 .EXAMPLE
-    pwsh -NoProfile -File tests/contracts/Test-SolutionStorageAccessContract.ps1 -MainFile ./infra/main.bicep
+    pwsh -NoProfile -File infra/tests/contracts/Test-SolutionStorageAccessContract.ps1 -MainFile ./infra/bicep/main.bicep
 #>
 
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -113,7 +114,7 @@ function Get-ContractHash {
 }
 
 function Test-UnchangedGraph {
-    param($Template, $OriginalSolution, $Manifest, [string]$Changelog)
+    param($Template, $OriginalSolution, $Manifest)
     # These are the SAME e3d94e5 objects as the original aggregate fingerprint,
     # now individually fingerprinted for actionable diagnostics. No new graph
     # baseline or mutation exemption is introduced. Keep all nested properties,
@@ -220,7 +221,9 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
         else { $Template.resources[$name] }
         if ((Get-ContractHash $resource) -cne $resourceHashes[$name]) { $changed.Add("resources.$name") }
     }
-    Assert-ReleaseMetadata -Manifest $Manifest -Changelog $Changelog
+    $historicalManifest = Get-Content (Join-Path $PSScriptRoot 'fixtures/historical-foundation-manifest.json') -Raw | ConvertFrom-Json -AsHashtable
+    Assert-Equal 'Historical foundation manifest must match the incorporated release fixture exactly.' `
+        @{ _manifest = $Manifest } @{ _manifest = $historicalManifest }
     Assert-Equal 'Compiled _manifest must retain its exact compiler binding.' $Template.variables._manifest '[variables(''$fxv#0'')]'
     Assert-Equal 'Compiled _manifest must match the actual manifest before release normalization.' @{ _manifest = $Template.variables['$fxv#0'] } @{ _manifest = $Manifest }
     $variables = $Template.variables | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
@@ -471,9 +474,7 @@ try {
     Assert-Contract ($PSVersionTable.PSVersion.Major -ge 7) 'PowerShell 7 is required.'
     $MainFile = (Resolve-Path -LiteralPath $MainFile).Path
     $root = Split-Path -Parent $MainFile
-    . (Join-Path $PSScriptRoot '..\..\scripts\ReleaseMetadata.ps1')
-    $manifest = Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
-    $changelog = Get-Content -LiteralPath (Join-Path $root 'CHANGELOG.md') -Raw
+    $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures/historical-foundation-manifest.json') -Raw | ConvertFrom-Json -AsHashtable
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI is required; standalone Bicep is not used.' }
     $env:PYTHONIOENCODING = 'utf-8'
     $versionOutput = (& az bicep version 2>&1) -join "`n"
@@ -581,20 +582,20 @@ try {
     $null = $oldSolution.properties.parameters.Remove('allowSharedKeyAccess')
     $null = $oldSolution.properties.parameters.networkAcls.value.Remove('resourceAccessRules')
     $oldSolution.properties.parameters.networkAcls.value.bypass = 'AzureServices'
-    Test-UnchangedGraph $graphTemplate $oldSolution $manifest $changelog
+    Test-UnchangedGraph $graphTemplate $oldSolution $manifest
     $graphMutations = @(
         @{ Name = 'unrelated subnet exclusion'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $t.resources.virtualNetworkSubnets.properties.template.variables.invalidNsgSubnets += 'workload' } },
         @{ Name = 'subnet explicit NSG priority drift'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $child = @($t.resources.virtualNetworkSubnets.properties.template.resources | Where-Object { $_.Contains('copy') -and $_.copy.name -ceq 'subnetsM' })[0]; $child.properties.parameters.networkSecurityGroupId = @{ value = '' } } },
-        @{ Name = 'manifest repo drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.repo = 'https://example.invalid/changed.git'; $t.variables['$fxv#0'].repo = $m.repo } },
-        @{ Name = 'manifest components drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.components = @(@{ repo = 'https://example.invalid/component.git'; tag = 'v1.0.0' }); $t.variables['$fxv#0'].components = $m.components } },
-        @{ Name = 'extra manifest field'; Expected = 'root.variables'; Change = { param($t, $m) $m.extra = 'drift'; $t.variables['$fxv#0'].extra = 'drift' } },
-        @{ Name = 'manifest generator is not compiler metadata'; Expected = 'root.variables'; Change = { param($t, $m) $m._generator = 'drift'; $t.variables['$fxv#0']._generator = 'drift' } },
+        @{ Name = 'manifest repo drift'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.repo = 'https://example.invalid/changed.git'; $t.variables['$fxv#0'].repo = $m.repo } },
+        @{ Name = 'manifest components drift'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.components = @(@{ repo = 'https://example.invalid/component.git'; tag = 'v1.0.0' }); $t.variables['$fxv#0'].components = $m.components } },
+        @{ Name = 'extra manifest field'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.extra = 'drift'; $t.variables['$fxv#0'].extra = 'drift' } },
+        @{ Name = 'manifest generator is not compiler metadata'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m._generator = 'drift'; $t.variables['$fxv#0']._generator = 'drift' } },
         @{ Name = 'unrelated root variable'; Expected = 'root.variables'; Change = { param($t, $m) $t.variables._publicNetworkAccess = 'Enabled' } },
         @{ Name = 'compiled release mismatch'; Expected = 'Compiled _manifest'; Change = { param($t, $m) $t.variables['$fxv#0'].tag = 'v99.0.0'; $t.variables['$fxv#0'].ailz_tag = 'v99.0.0' } },
         @{ Name = 'compiler manifest binding drift'; Expected = 'Compiled _manifest'; Change = { param($t, $m) $t.variables._manifest = '[variables(''other'')]' } },
-        @{ Name = 'manifest tag mismatch'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.ailz_tag = 'v99.0.0'; $t.variables['$fxv#0'].ailz_tag = $m.ailz_tag } },
-        @{ Name = 'invalid release format'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.tag = 'v2.7.0-rc.1'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
-        @{ Name = 'changelog mismatch'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.tag = 'v99.0.0'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
+        @{ Name = 'manifest tag mismatch'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.ailz_tag = 'v99.0.0'; $t.variables['$fxv#0'].ailz_tag = $m.ailz_tag } },
+        @{ Name = 'invalid release format'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.tag = 'v2.7.0-rc.1'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
+        @{ Name = 'historical release mismatch'; Expected = 'Historical foundation manifest'; Change = { param($t, $m) $m.tag = 'v99.0.0'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
         @{ Name = 'unrelated resource'; Expected = 'resources.aiFoundryStorageAccount'; Change = { param($t, $m) $t.resources.aiFoundryStorageAccount.condition = $false } },
         @{ Name = 'unrelated output'; Expected = 'root.outputs'; Change = { param($t, $m) $t.outputs.extra = @{ type = 'string'; value = 'drift' } } }
     )
@@ -603,7 +604,7 @@ try {
         $changedManifest = $manifest | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
         & $mutation.Change $changedTemplate $changedManifest
         $caught = $false
-        try { Test-UnchangedGraph $changedTemplate $oldSolution $changedManifest $changelog }
+        try { Test-UnchangedGraph $changedTemplate $oldSolution $changedManifest }
         catch {
             if ($_.Exception.Message -notmatch [regex]::Escape($mutation.Expected)) { throw }
             $caught = $true

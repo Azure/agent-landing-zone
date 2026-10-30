@@ -7,10 +7,10 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$sizeGate = Join-Path $repoRoot 'scripts\Measure-MainJsonSize.ps1'
-$workflow = Join-Path $repoRoot '.github\workflows\bicep-validate.yml'
-$mainJson = Join-Path $repoRoot 'main.json'
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$sizeGate = Join-Path $repoRoot 'scripts\infra\Measure-MainJsonSize.ps1'
+$workflow = Join-Path $repoRoot '.github\workflows\infra-validate.yml'
+$mainJson = Join-Path $repoRoot 'infra\bicep\main.json'
 $originalBytes = if (Test-Path $mainJson) {
     [System.IO.File]::ReadAllBytes($mainJson)
 }
@@ -65,11 +65,11 @@ function Invoke-SizeGate {
 
 try {
     $workflowText = Get-Content -Path $workflow -Raw
-    $bareCommandPattern = '(?m)^\s*pwsh \./scripts/Measure-MainJsonSize\.ps1\s*$'
+    $runnerCommandPattern = '(?m)^\s*run: \./infra/tests/Invoke-OfflineContracts\.ps1\s*$'
     Assert-Result `
-        -Name 'Workflow uses the bare size-gate command' `
-        -Condition ($workflowText -match $bareCommandPattern) `
-        -Detail 'Expected CI to consume the script defaults without threshold overrides.'
+        -Name 'Active workflow runs the offline size-gate regression' `
+        -Condition ($workflowText -match $runnerCommandPattern) `
+        -Detail 'Expected active CI to invoke the offline contract runner.'
     Assert-Result `
         -Name 'Workflow does not duplicate threshold switches' `
         -Condition ($workflowText -notmatch '-WorkingBudgetMB|-FailThresholdMB|-ArmHardCeilingMB') `

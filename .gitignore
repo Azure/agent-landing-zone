@@ -98,11 +98,16 @@ venv.bak/
 
 # Rope project settings
 .ropeproject
-# infra/main.parameters.json is a tracked seed so azd can initialize the Bicep
+# infra/bicep/main.parameters.json is a tracked seed so azd can initialize the Bicep
 # provider in a fresh clone; scripts/preProvision regenerates it on every
 # provision and marks it skip-worktree so the regenerated file does not show
 # in git status. To commit seed changes, first run:
-#   git update-index --no-skip-worktree infra/main.parameters.json
+#   git update-index --no-skip-worktree infra/bicep/main.parameters.json
+
+# Compiled Bicep output and Terraform's diagnostic-only preflight parameters.
+infra/**/main.json
+infra/shared/main.parameters.json
+infra/tests/.offline-contracts-*/
 
 # Terraform state/plans may contain secrets. Keep caches and environment inputs
 # out of source, including materialized native azd main.tfvars.json. Retain the

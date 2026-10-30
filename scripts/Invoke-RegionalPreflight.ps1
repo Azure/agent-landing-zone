@@ -32,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'infra') 'scripts') 'ModelQuota.ps1')
+. (Join-Path $PSScriptRoot 'infra/ModelQuota.ps1')
 
 $script:FailureCount = 0
 $script:WarningCount = 0

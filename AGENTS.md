@@ -51,7 +51,7 @@ solution:
   changes, keep `infra.source` accurate when re-synchronizing from upstream,
   and keep it foundation-only; application deployment stays outside it
   (ADR-0016).
-- `infra/main.bicep` and `infra/terraform/` are co-maintained implementations
+- `infra/bicep/main.bicep` and `infra/terraform/` are co-maintained implementations
   of the same platform capabilities (ADR-0028). `infra.source` records Bicep
   provenance, not the local Terraform composition or its dependency pins.
 
@@ -64,6 +64,9 @@ version tables into agent instructions because they become stale.
   Foundry, Container Apps, Search, governance, and related Azure services.
 - `scripts/`: cross-platform `azd` lifecycle hooks. PowerShell and shell
   implementations must remain behaviorally aligned.
+- `scripts/infra/`: infrastructure helpers called by lifecycle hooks and checks.
+- `infra/bicep/` and `infra/terraform/`: provider-specific foundation source.
+- `infra/shared/`: naming and RBAC catalogs consumed by both providers.
 - `util/`: operational and prerequisite utilities.
 - `contracts/`: shared, versioned schemas and their integrity metadata.
 - `docs/adr/`: architectural decisions for this platform repository.

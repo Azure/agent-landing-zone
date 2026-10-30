@@ -118,9 +118,19 @@ function Get-ArchitectureSubnetProjection {
 
 . (Join-Path $PSScriptRoot 'FirewallBasicNormalization.ps1')
 
+function Get-EmbeddingDefaultProjection {
+    $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\embedding-default-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    return $fixture.projection
+}
+
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # Intentional post-layout default change: validate the entire native list
+    # selection (including explicit-list passthrough), then restore ONLY the
+    # embedding fallback SKU for the original historical fingerprints.
+    $copy = Invoke-ScopedProjection $copy (Get-EmbeddingDefaultProjection)
     # ADR-0031: check only the reviewed Basic/default/subnet delta before the
     # existing adapters and original security fingerprints. Never alter actual.
     $copy = Invoke-ScopedProjection $copy (Get-FirewallBasicProjection)
@@ -206,8 +216,10 @@ function ConvertTo-HistoricalFoundationGraph {
     param([Parameter(Mandatory)] $Template, [Parameter(Mandatory)] [string]$MainFile)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
     $foundationRoot = Split-Path -Parent (Resolve-Path $MainFile).Path
-    $umbrella = Get-Content (Join-Path $foundationRoot '..\manifest.json') -Raw | ConvertFrom-Json -AsHashtable
-    $foundation = Get-Content (Join-Path $foundationRoot 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
+    $umbrella = Get-Content (Join-Path $foundationRoot '..\..\manifest.json') -Raw | ConvertFrom-Json -AsHashtable
+    # Incorporated release data is a historical test input, not a second
+    # product manifest. The compiled object must still match the actual root.
+    $foundation = Get-Content (Join-Path $PSScriptRoot 'fixtures\historical-foundation-manifest.json') -Raw | ConvertFrom-Json -AsHashtable
     Assert-ScopedValue $copy.variables['$fxv#0'] $umbrella '/variables/loadedUmbrellaManifest'
     Assert-ScopedValue $umbrella.infra.source.tag $foundation.tag '/manifest/infraSourceTag'
     if ($umbrella.tag -cnotmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {

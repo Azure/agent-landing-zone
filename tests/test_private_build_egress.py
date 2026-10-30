@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FIREWALL = ROOT / "infra/modules/networking/azure-firewall.bicep"
+FIREWALL = ROOT / "infra/bicep/modules/networking/azure-firewall.bicep"
 FEED_ARRAY = "_firewallAcrTaskPackageFeedFqdns"
 # Verified from frontend/package-lock.json at manifest commit
 # 27f952fcf8d48a2ba6267c237ea6bea8361fedd2 (orchestrator v5.2.1).
@@ -115,13 +115,13 @@ def test_microsoft_os_packages_already_allowed_without_duplicate():
 
 
 def test_existing_settings_and_defaults_are_unchanged():
-    main = (ROOT / "infra/main.bicep").read_text(encoding="utf-8")
+    main = (ROOT / "infra/bicep/main.bicep").read_text(encoding="utf-8")
     assert "param extendFirewallForAcrTaskBuilds bool = true" in main
     assert "param deployAcrTaskAgentPool bool = true" in main
     assert "param additionalAcrTaskBuildFqdns array = []" in main
     assert "var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && deployAcrTaskAgentPool" in main
     assert "additionalAcrTaskBuildFqdns: additionalAcrTaskBuildFqdns" in main
-    for path in ("main.parameters.json", "infra/main.parameters.json"):
+    for path in ("main.parameters.json", "infra/bicep/main.parameters.json"):
         parameters = json.loads((ROOT / path).read_text(encoding="utf-8"))["parameters"]
         assert parameters["additionalAcrTaskBuildFqdns"]["value"] == []
 

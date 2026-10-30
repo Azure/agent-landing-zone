@@ -197,6 +197,11 @@ root = Path(os.environ["HOOK_ROOT"])
 snapshot = root / "environment.json"
 trace = root / "trace"
 failure = os.environ["HOOK_FAILURE"]
+provider = os.environ.get("HOOK_PROVIDER", "terraform")
+provider_path = os.environ.get("HOOK_PROVIDER_PATH", "infra/foundation")
+provider_module = os.environ.get("HOOK_PROVIDER_MODULE", "foundation")
+diagnostic = (root / "infra/shared/main.parameters.json" if provider == "terraform"
+              else root / provider_path / (provider_module + ".parameters.json"))
 
 def record(event):
     with trace.open("a", encoding="utf-8") as stream:
@@ -237,15 +242,16 @@ def argument(name):
 
 if module == "config.deployment.provider":
     print(json.dumps({
-        "provider": "terraform", "path": "infra/foundation", "module": "foundation",
+        "provider": provider, "path": provider_path, "module": provider_module,
     }))
 elif module == "config.appdefinition":
     record("appdefinition")
     assert Path(argument("--validate")).is_file()
-elif module == "config.deployment.terraform_groups":
-    record("terraform_groups")
-    assert argument("--environment") == "-"
-    assert json.load(sys.stdin)["HOOK_LITERAL"] == values["HOOK_LITERAL"]
+elif module in ("config.deployment.terraform_groups", "config.deployment.resource_groups"):
+    record("terraform_groups" if provider == "terraform" else "resource_groups")
+    if provider == "terraform":
+        assert argument("--environment") == "-"
+        assert json.load(sys.stdin)["HOOK_LITERAL"] == values["HOOK_LITERAL"]
     values.update(AZURE_RESOURCE_GROUP="rg-ai", AZURE_APP_RESOURCE_GROUP="rg-app",
                   AZURE_NETWORK_RESOURCE_GROUP="rg-net", CREATE_RESOURCE_GROUPS="true")
     save(values)
@@ -292,23 +298,36 @@ elif module == "config.deployment.terraform_inputs":
     assert argument("--hosted-source-commit") == commit
     destination = Path(argument("--output"))
     assert destination == root / "infra" / "foundation" / "foundation.tfvars.json"
-    assert Path(argument("--diagnostic-output")) == root / "infra" / "main.parameters.json"
+    assert Path(argument("--diagnostic-output")) == diagnostic
     if failure == "inputs":
         sys.exit(17)
     destination.parent.mkdir(parents=True)
     destination.write_text(json.dumps({"literal": incoming["HOOK_LITERAL"]}), encoding="utf-8")
-    (root / "infra" / "main.parameters.json").write_text(
+    diagnostic.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic.write_text(
         json.dumps({"parameters": {"location": {"value": "eastus2"}}}), encoding="utf-8")
     values.update(ARM_ENVIRONMENT="public", TF_STATE_SUBSCRIPTION_ID="normalized",
                   HOOK_PREPARED="true")
     save(values)
+elif module == "config.deployment.composition":
+    record("inputs")
+    assert provider == "bicep"
+    assert Path(argument("--input")) == root / "main.parameters.json"
+    assert Path(argument("--output")) == diagnostic
+    if failure == "inputs":
+        sys.exit(17)
+    diagnostic.write_text(
+        json.dumps({"parameters": {"location": {"value": "eastus2"}}}), encoding="utf-8")
 elif module == "config.deployment.egress":
     record("egress")
     assert args == ["--plan", "--save"]
-    assert os.environ["ARM_ENVIRONMENT"] == "public"
-    assert os.environ["TF_STATE_SUBSCRIPTION_ID"] == "normalized"
+    if provider == "terraform":
+        assert os.environ["ARM_ENVIRONMENT"] == "public"
+        assert os.environ["TF_STATE_SUBSCRIPTION_ID"] == "normalized"
     assert os.environ["HOOK_LITERAL"] == values["HOOK_LITERAL"]
-    assert (root / "infra" / "foundation" / "foundation.tfvars.json").is_file()
+    assert diagnostic.is_file()
+    if provider == "terraform":
+        assert (root / "infra" / "foundation" / "foundation.tfvars.json").is_file()
     if failure == "egress":
         sys.exit(19)
 else:
@@ -317,11 +336,32 @@ else:
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
-@pytest.mark.parametrize("failure", ["none", "firewall", "inputs", "reload", "egress"])
-def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, shell, failure):
+@pytest.mark.parametrize(("provider", "provider_path", "provider_module", "failure"), [
+    ("terraform", "infra/foundation", "foundation", failure)
+    for failure in ("none", "firewall", "inputs", "reload", "egress")
+] + [
+    ("bicep", path, module, failure)
+    for path, module in (("infra/bicep", "main"), ("custom foundation", "platform"))
+    for failure in ("none", "firewall", "inputs", "egress")
+])
+def test_complete_hook_prepares_selected_inputs_and_short_circuits(
+    tmp_path, shell, provider, provider_path, provider_module, failure,
+):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    (tmp_path / "infra" / "scripts").mkdir(parents=True)
+    (scripts / "infra").mkdir()
+    if provider == "bicep":
+        entrypoint = tmp_path / provider_path / (provider_module + ".bicep")
+        entrypoint.parent.mkdir(parents=True)
+        entrypoint.touch()
+        if provider_path == "infra/bicep":
+            seed = entrypoint.with_name("main.parameters.json")
+            seed.write_text('{"parameters": {}}', encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+            subprocess.run(
+                ["git", "-C", str(tmp_path), "add", "infra/bicep/main.parameters.json"],
+                check=True,
+            )
     for name in ("manifest.json", "azure.yaml", "app-definition.json", "main.parameters.json"):
         shutil.copyfile(ROOT / name, tmp_path / name)
     extension = "ps1" if shell == "pwsh" else "sh"
@@ -337,10 +377,11 @@ def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, s
     driver = tmp_path / "driver.py"
     driver.write_text(HOOK_DRIVER, encoding="utf-8")
     preflight = (
-        "param([string]$ProjectRoot, [string]$ParameterFile)\n"
+        "param([string]$ProjectRoot, [Alias('ParametersFile')][string]$ParameterFile)\n"
         "$ErrorActionPreference = 'Stop'\n"
-        "if ($env:ARM_ENVIRONMENT -ne 'public') { throw 'Environment not reloaded' }\n"
-        "if (-not $ParameterFile) { $ParameterFile = Join-Path $env:HOOK_ROOT 'infra/main.parameters.json' }\n"
+        "if ($env:HOOK_PROVIDER -eq 'terraform' -and $env:ARM_ENVIRONMENT -ne 'public') { throw 'Environment not reloaded' }\n"
+        "if (-not $ParameterFile) { throw 'Diagnostic input must be explicit' }\n"
+        "if ([IO.Path]::GetFullPath($ParameterFile) -ne [IO.Path]::GetFullPath($env:HOOK_DIAGNOSTIC)) { throw 'Wrong diagnostic path' }\n"
         "$document = Get-Content -LiteralPath $ParameterFile -Raw | ConvertFrom-Json\n"
         "if ($document.parameters.location.value -ne 'eastus2') { throw 'Wrong diagnostic input' }\n"
     )
@@ -348,13 +389,19 @@ def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, s
         preflight + "Add-Content -LiteralPath (Join-Path $env:HOOK_ROOT 'trace') -Value regional-preflight\n",
         encoding="utf-8",
     )
-    (tmp_path / "infra" / "scripts" / "Invoke-PreflightChecks.ps1").write_text(
+    (scripts / "infra" / "Invoke-PreflightChecks.ps1").write_text(
         preflight + "Add-Content -LiteralPath (Join-Path $env:HOOK_ROOT 'trace') -Value foundation-preflight\n",
         encoding="utf-8",
     )
     environment = {
         **os.environ, "HOOK_ROOT": str(tmp_path), "HOOK_FAILURE": failure,
         "REAL_PYTHON": sys.executable, "HOOK_DRIVER": str(driver),
+        "HOOK_PROVIDER": provider, "HOOK_PROVIDER_PATH": provider_path,
+        "HOOK_PROVIDER_MODULE": provider_module,
+        "HOOK_DIAGNOSTIC": str(tmp_path / (
+            "infra/shared/main.parameters.json" if provider == "terraform"
+            else f"{provider_path}/{provider_module}.parameters.json"
+        )),
     }
     if shell == "pwsh":
         wrapper = tmp_path / "wrapper.ps1"
@@ -385,11 +432,13 @@ def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, s
         command, cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=120
     )
     output = result.stdout + result.stderr
-    expected = ["appdefinition", "terraform_groups", "topology", "firewall"]
+    expected = ["appdefinition", "terraform_groups" if provider == "terraform" else "resource_groups",
+                "topology", "firewall"]
     if failure != "firewall":
         expected.append("inputs")
     if failure not in ("firewall", "inputs"):
-        expected.append("environment-reload")
+        if provider == "terraform":
+            expected.append("environment-reload")
         if failure != "reload":
             expected.append("egress")
             if failure == "none":
@@ -398,6 +447,18 @@ def test_complete_terraform_hook_prepares_reloads_and_short_circuits(tmp_path, s
     assert (result.returncode == 0) == (failure == "none"), output
     if failure == "inputs":
         assert result.returncode == 17, output
-    if failure == "none":
+    if failure == "none" and provider == "terraform":
         native = tmp_path / "infra" / "foundation" / "foundation.tfvars.json"
         assert json.loads(native.read_text(encoding="utf-8"))["literal"] == literal
+    if failure == "none" and provider == "bicep":
+        diagnostic = tmp_path / provider_path / (provider_module + ".parameters.json")
+        assert json.loads(diagnostic.read_text(encoding="utf-8-sig"))["parameters"]["location"]["value"] == "eastus2"
+        assert not (tmp_path / "infra/shared/main.parameters.json").exists()
+        if provider_path == "infra/bicep":
+            indexed = subprocess.run(
+                ["git", "-C", str(tmp_path), "ls-files", "-v", "--",
+                 "infra/bicep/main.parameters.json"],
+                check=True, capture_output=True, text=True,
+            )
+            assert indexed.stdout.startswith("S "), indexed.stdout
+    assert not (tmp_path / "infra/main.parameters.json").exists()

@@ -1,7 +1,7 @@
 <# Read-only mocked operator authorization with no implicit role grants. #>
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\..\scripts\ModelQuota.ps1')
-$source = Get-Content (Join-Path $PSScriptRoot '../../scripts/Invoke-PreflightChecks.ps1') -Raw
+. (Join-Path $PSScriptRoot '..\..\..\scripts\infra\ModelQuota.ps1')
+$source = Get-Content (Join-Path $PSScriptRoot '../../../scripts/infra/Invoke-PreflightChecks.ps1') -Raw
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
     Invoke-Expression $function.Extent.Text

@@ -415,6 +415,65 @@ run "legacy_bootstrap_is_labeled_key_vault_reference_only" {
   }
 }
 
+run "embedding_declared_default_reaches_resource" {
+  command = plan
+  assert {
+    condition = (
+      length(azapi_resource.model_deployment) == 2 &&
+      azapi_resource.model_deployment["text-embedding"].body.sku.name == "GlobalStandard" &&
+      azapi_resource.model_deployment["text-embedding"].body.sku.capacity == 100 &&
+      azapi_resource.model_deployment["text-embedding"].body.properties.model.name == "text-embedding-3-large" &&
+      azapi_resource.model_deployment["text-embedding"].body.properties.model.version == "1" &&
+      azapi_resource.model_deployment["text-embedding"].type == "Microsoft.CognitiveServices/accounts/deployments@2025-06-01" &&
+      var.modelDeploymentList[1].apiVersion == "2025-01-01-preview" &&
+      var.modelDeploymentList[1].canonical_name == "EMBEDDING_DEPLOYMENT_NAME"
+    )
+    error_message = "The typed declared embedding default must reach the actual resource as GlobalStandard/100 without model, version, name or API drift."
+  }
+}
+
+run "embedding_empty_list_fallback_reaches_resource" {
+  command = plan
+  variables {
+    modelDeploymentList = []
+  }
+  assert {
+    condition = (
+      length(azapi_resource.model_deployment) == 2 &&
+      azapi_resource.model_deployment["text-embedding-3-large"].body.sku.name == "GlobalStandard" &&
+      azapi_resource.model_deployment["text-embedding-3-large"].body.sku.capacity == 10 &&
+      azapi_resource.model_deployment["text-embedding-3-large"].body.properties.model.format == "OpenAI" &&
+      azapi_resource.model_deployment["text-embedding-3-large"].body.properties.model.name == "text-embedding-3-large" &&
+      azapi_resource.model_deployment["text-embedding-3-large"].body.properties.model.version == "1" &&
+      azapi_resource.model_deployment["gpt-5-nano"].body.sku.capacity == 40
+    )
+    error_message = "An explicit empty list must retain the foundation fallback names/models/capacities, changing only the embedding SKU."
+  }
+}
+
+run "embedding_explicit_standard_override_reaches_resource" {
+  command = plan
+  variables {
+    modelDeploymentList = [{
+      name           = "custom-embedding"
+      canonical_name = "CUSTOM_EMBEDDING"
+      apiVersion     = "2025-01-01-preview"
+      model          = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }
+      sku            = { name = "Standard", capacity = 37 }
+    }]
+  }
+  assert {
+    condition = (
+      length(azapi_resource.model_deployment) == 1 &&
+      azapi_resource.model_deployment["custom-embedding"].body.sku.name == "Standard" &&
+      azapi_resource.model_deployment["custom-embedding"].body.sku.capacity == 37 &&
+      azapi_resource.model_deployment["custom-embedding"].body.properties.model.name == "text-embedding-3-large" &&
+      azapi_resource.model_deployment["custom-embedding"].body.properties.model.version == "1"
+    )
+    error_message = "Explicit Standard lists must not be rewritten or supplemented by the GlobalStandard fallback."
+  }
+}
+
 run "model_settings_and_runtime_api_version_remain_distinct" {
   command = plan
   variables {
@@ -580,7 +639,7 @@ run "foundation_inventory_is_actually_published_with_real_connection_paths" {
       toset([for setting in azapi_resource.foundation_setting : split("$", setting.name)[0]]) ==
       setunion(
         toset([
-          for match in regexall("(?m)^[ \\t]*\\{ name: '([^']+)'", split("// OUTPUTS", split("module appConfigPopulate ", file("${path.module}/../main.bicep"))[1])[0]) :
+          for match in regexall("(?m)^[ \\t]*\\{ name: '([^']+)'", split("// OUTPUTS", split("module appConfigPopulate ", file("${path.module}/../bicep/main.bicep"))[1])[0]) :
           match[0] if match[0] != "CONTAINER_APPS"
         ]),
         toset(["COSMOS_DB_ACCOUNT_RESOURCE_ID", "COSMOS_DB_ENDPOINT"]),

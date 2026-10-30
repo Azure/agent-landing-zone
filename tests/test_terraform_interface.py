@@ -10,7 +10,7 @@ TERRAFORM_ROOT = REPO_ROOT / "infra" / "terraform"
 
 
 def _bicep_names(kind: str) -> set[str]:
-    source = (REPO_ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
     return set(re.findall(rf"^{kind}\s+([A-Za-z_][A-Za-z0-9_]*)\s+", source, re.MULTILINE))
 
 

@@ -20,7 +20,7 @@ locals {
   }
   services_model_deployments = concat(var.modelDeploymentList, [for deployment in [
     { name = "gpt-5-nano", model = { format = "OpenAI", name = "gpt-5-nano", version = "2025-08-07" }, sku = { name = "GlobalStandard", capacity = 40 }, canonical_name = "GPT_MODEL" },
-    { name = "text-embedding-3-large", model = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }, sku = { name = "Standard", capacity = 10 }, canonical_name = "EMBEDDING_MODEL" }
+    { name = "text-embedding-3-large", model = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }, sku = { name = "GlobalStandard", capacity = 10 }, canonical_name = "EMBEDDING_MODEL" }
   ] : deployment if length(var.modelDeploymentList) == 0])
 }
 

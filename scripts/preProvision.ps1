@@ -69,7 +69,6 @@ if (-not $projectRoot) {
 }
 $env:AGENTLZ_REPO_ROOT = $projectRoot
 $infraDir = Join-Path $projectRoot "infra"
-$mainBicep = Join-Path $infraDir "main.bicep"
 $manifestSource = Join-Path $projectRoot "manifest.json"
 
 # BEGIN azd environment import
@@ -97,6 +96,16 @@ if ($null -eq $providerProperty -or $providerProperty.Value -notin @('bicep', 't
 }
 $infrastructureProvider = $providerProperty.Value
 # END infrastructure provider validation
+
+# Use azd's selected path/module for Bicep, not a second hardcoded entry point.
+# Terraform's envelope is diagnostic-only and never a native provider input.
+if ($infrastructureProvider -eq 'bicep') {
+    $bicepDirectory = [IO.Path]::GetFullPath($providerConfiguration.path, $projectRoot)
+    $mainBicep = Join-Path $bicepDirectory "$($providerConfiguration.module).bicep"
+    $parameterDestination = Join-Path $bicepDirectory "$($providerConfiguration.module).parameters.json"
+} else {
+    $parameterDestination = Join-Path $infraDir 'shared/main.parameters.json'
+}
 
 #-------------------------------------------------------------------------------
 # Application definition: validate and bind before any Azure change.
@@ -169,12 +178,11 @@ if (-not (Test-Path -LiteralPath $manifestSource)) {
     exit 1
 }
 if ($infrastructureProvider -eq 'bicep' -and -not (Test-Path -LiteralPath $mainBicep -PathType Leaf)) {
-    Write-Host "Error: infra/main.bicep was not found. The infrastructure is part of this repository; restore infra/ from source control." -ForegroundColor Red
+    Write-Host "Error: $mainBicep was not found. Restore the configured infrastructure entry point from source control." -ForegroundColor Red
     exit 1
 }
 
 $parameterSource = Join-Path $projectRoot "main.parameters.json"
-$parameterDestination = Join-Path $infraDir "main.parameters.json"
 
 # ADR-0001 rev. 5: resolve and materialize the Agent Landing Zone deployment topology
 # (fresh default, sticky existing/persisted-classic, explicit override, or a
@@ -235,7 +243,7 @@ try {
         Where-Object { $_.name -like '*-orchestrator' } |
         Select-Object -ExpandProperty commit -First 1
     if ($infrastructureProvider -eq 'terraform') {
-        $terraformDirectory = Join-Path $projectRoot $providerConfiguration.path
+        $terraformDirectory = [IO.Path]::GetFullPath($providerConfiguration.path, $projectRoot)
         $terraformParameterDestination = Join-Path $terraformDirectory "$($providerConfiguration.module).tfvars.json"
         $environmentJson = Get-AzdEnvironmentJson
         $null = Invoke-PythonModule -ModuleName 'config.deployment.terraform_inputs' -Arguments @(
@@ -268,19 +276,21 @@ Invoke-PythonModule -ModuleName 'config.deployment.egress' -Arguments @('--plan'
 if ($LASTEXITCODE -ne 0) { Write-Error "Component egress planning failed; provisioning has not started."; exit $LASTEXITCODE }
 # END component runtime egress
 
-# The composed infra/main.parameters.json is environment-specific; hide local
+# The composed infra/bicep/main.parameters.json is environment-specific; hide local
 # regeneration from git status so the committed seed stays untouched.
-if (Get-Command git -ErrorAction SilentlyContinue) {
+if ($infrastructureProvider -eq 'bicep' -and
+    [IO.Path]::GetFullPath($parameterDestination) -eq [IO.Path]::GetFullPath((Join-Path $projectRoot 'infra/bicep/main.parameters.json')) -and
+    (Get-Command git -ErrorAction SilentlyContinue)) {
     try {
         $inWorkTree = (& git -C $projectRoot rev-parse --is-inside-work-tree 2>$null)
         if ($LASTEXITCODE -eq 0 -and $inWorkTree -eq 'true') {
-            & git -C $projectRoot ls-files --error-unmatch 'infra/main.parameters.json' *> $null
+            & git -C $projectRoot ls-files --error-unmatch 'infra/bicep/main.parameters.json' *> $null
             if ($LASTEXITCODE -eq 0) {
-                & git -C $projectRoot update-index --skip-worktree 'infra/main.parameters.json' *> $null
+                & git -C $projectRoot update-index --skip-worktree 'infra/bicep/main.parameters.json' *> $null
             }
         }
     } catch {
-        Write-Host "Note: could not mark infra/main.parameters.json as skip-worktree; it may appear as modified in git status." -ForegroundColor Yellow
+        Write-Host "Note: could not mark infra/bicep/main.parameters.json as skip-worktree; it may appear as modified in git status." -ForegroundColor Yellow
     }
     $global:LASTEXITCODE = 0
 }
@@ -306,10 +316,10 @@ if ((Test-Path $regionalPreflightScript) -and (-not (Test-Truthy $env:PREFLIGHT_
 # https://github.com/Azure/bicep-ptn-aiml-landing-zone/blob/v2.0.4/scripts/Invoke-PreflightChecks.ps1
 # Covers parameter/topology/BYO/IP checks plus regional readiness (subscription drift,
 # provider/location, AI Search & Cosmos capacity warnings, jumpbox VM SKU, model quota).
-$preflightScript = Join-Path $infraDir "scripts/Invoke-PreflightChecks.ps1"
+$preflightScript = Join-Path $PSScriptRoot "infra/Invoke-PreflightChecks.ps1"
 if ((Test-Path $preflightScript) -and (-not (Test-Truthy $env:PREFLIGHT_SKIP))) {
     Write-Host "Running landing-zone preflight checks..." -ForegroundColor Cyan
-    & pwsh -NoProfile -File $preflightScript
+    & pwsh -NoProfile -File $preflightScript -ParametersFile $parameterDestination
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Preflight checks failed. Fix the reported parameter issues, or set PREFLIGHT_SKIP=true to bypass." -ForegroundColor Red
         exit $LASTEXITCODE

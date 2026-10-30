@@ -32,7 +32,6 @@ fi
 AGENTLZ_REPO_ROOT="$PROJECT_ROOT"
 export AGENTLZ_REPO_ROOT
 INFRA_DIR="$PROJECT_ROOT/infra"
-MAIN_BICEP="$INFRA_DIR/main.bicep"
 PYTHON_CMD=""
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python3"
@@ -96,6 +95,20 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 # END infrastructure provider validation
+
+# Bicep composition follows azd's selected path/module. Terraform's separate
+# parameter envelope is only diagnostic input for the shared preflights.
+PARAMETER_DESTINATION="$(printf '%s' "$PROVIDER_OUTPUT" | "$PYTHON_CMD" -c '
+import json, sys
+from pathlib import Path
+provider = json.load(sys.stdin)
+root = Path(sys.argv[1])
+if provider["provider"] == "bicep":
+    print((root / provider["path"] / (provider["module"] + ".parameters.json")).resolve())
+else:
+    print(root / "infra/shared/main.parameters.json")
+' "$PROJECT_ROOT")" || exit 1
+MAIN_BICEP="${PARAMETER_DESTINATION%.parameters.json}.bicep"
 
 ###############################################################################
 # Application definition: validate and bind before any Azure change.
@@ -180,7 +193,7 @@ if [ ! -f "$PROJECT_ROOT/manifest.json" ]; then
     exit 1
 fi
 if [ "$INFRA_PROVIDER" = "bicep" ] && [ ! -f "$MAIN_BICEP" ]; then
-    echo "${YELLOW}Error: infra/main.bicep was not found. The infrastructure is part of this repository; restore infra/ from source control.${NC}"
+    echo "${YELLOW}Error: $MAIN_BICEP was not found. Restore the configured infrastructure entry point from source control.${NC}"
     exit 1
 fi
 
@@ -245,7 +258,7 @@ if [ "$INFRA_PROVIDER" = "terraform" ]; then
 import json, sys
 from pathlib import Path
 provider = json.load(sys.stdin)
-print(Path(sys.argv[1]) / provider["path"] / (provider["module"] + ".tfvars.json"))
+print((Path(sys.argv[1]) / provider["path"] / (provider["module"] + ".tfvars.json")).resolve())
 ' "$PROJECT_ROOT")" || exit 1
     TERRAFORM_OWNERSHIP_FILE="$(printf '%s' "$RESOURCE_GROUP_OUTPUT" | "$PYTHON_CMD" -c 'import json,sys; print(json.load(sys.stdin)["ownershipFile"])')" || exit 1
     printf '%s' "$AZD_ENVIRONMENT_JSON" | (
@@ -255,7 +268,7 @@ print(Path(sys.argv[1]) / provider["path"] / (provider["module"] + ".tfvars.json
             --environment - \
             --app-definition "$APP_DEFINITION_PATH" \
             --output "$TERRAFORM_PARAMETER_DESTINATION" \
-            --diagnostic-output "$INFRA_DIR/main.parameters.json" \
+            --diagnostic-output "$PARAMETER_DESTINATION" \
             --resource-group-ownership "$TERRAFORM_OWNERSHIP_FILE" \
             --hosted-source-commit "$HOSTED_SOURCE_COMMIT"
     ) >/dev/null
@@ -264,7 +277,7 @@ else
         cd "$PROJECT_ROOT" &&
         "$PYTHON_CMD" -m config.deployment.composition \
             --input "$PROJECT_ROOT/main.parameters.json" \
-            --output "$INFRA_DIR/main.parameters.json" \
+            --output "$PARAMETER_DESTINATION" \
             --hosted-source-commit "$HOSTED_SOURCE_COMMIT"
     )
 fi
@@ -282,13 +295,19 @@ if [ "$INFRA_PROVIDER" = "terraform" ]; then import_azd_environment; fi
 }
 # END component runtime egress
 
-# The composed infra/main.parameters.json is environment-specific; hide local
+# The composed infra/bicep/main.parameters.json is environment-specific; hide local
 # regeneration from git status so the committed seed stays untouched.
-if command -v git >/dev/null 2>&1 &&
+if [ "$INFRA_PROVIDER" = "bicep" ] &&
+    [ "$("$PYTHON_CMD" -c '
+from pathlib import Path
+import sys
+print(Path(sys.argv[2]).resolve() == (Path(sys.argv[1]) / "infra/bicep/main.parameters.json").resolve())
+' "$PROJECT_ROOT" "$PARAMETER_DESTINATION")" = "True" ] &&
+    command -v git >/dev/null 2>&1 &&
     [ "$(git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
-    git -C "$PROJECT_ROOT" ls-files --error-unmatch infra/main.parameters.json >/dev/null 2>&1; then
-    git -C "$PROJECT_ROOT" update-index --skip-worktree infra/main.parameters.json >/dev/null 2>&1 ||
-        echo "${YELLOW}Note: could not mark infra/main.parameters.json as skip-worktree; it may appear as modified in git status.${NC}"
+    git -C "$PROJECT_ROOT" ls-files --error-unmatch infra/bicep/main.parameters.json >/dev/null 2>&1; then
+    git -C "$PROJECT_ROOT" update-index --skip-worktree infra/bicep/main.parameters.json >/dev/null 2>&1 ||
+        echo "${YELLOW}Note: could not mark infra/bicep/main.parameters.json as skip-worktree; it may appear as modified in git status.${NC}"
 fi
 
 ###############################################################################
@@ -299,7 +318,7 @@ REGIONAL_PREFLIGHT_SCRIPT="$SCRIPT_DIR/Invoke-RegionalPreflight.ps1"
 if [ -f "$REGIONAL_PREFLIGHT_SCRIPT" ] && [ "$PREFLIGHT_SKIP" != "true" ] && [ "$PREFLIGHT_SKIP" != "1" ] && [ "$AGENTLZ_REGIONAL_PREFLIGHT_SKIP" != "true" ] && [ "$AGENTLZ_REGIONAL_PREFLIGHT_SKIP" != "1" ]; then
     if command -v pwsh >/dev/null 2>&1; then
         echo "${CYAN}Running Agent Landing Zone regional preflight...${NC}"
-        pwsh -NoProfile -File "$REGIONAL_PREFLIGHT_SCRIPT" -ProjectRoot "$PROJECT_ROOT" -ParameterFile "$INFRA_DIR/main.parameters.json"
+        pwsh -NoProfile -File "$REGIONAL_PREFLIGHT_SCRIPT" -ProjectRoot "$PROJECT_ROOT" -ParameterFile "$PARAMETER_DESTINATION"
         REGIONAL_PREFLIGHT_EXIT=$?
         if [ $REGIONAL_PREFLIGHT_EXIT -ne 0 ]; then
             echo "${YELLOW}Agent Landing Zone regional preflight failed. Fix the reported blockers, or set AGENTLZ_REGIONAL_PREFLIGHT_SKIP=true to bypass only this check.${NC}"
@@ -318,11 +337,11 @@ fi
 # model quota).
 ###############################################################################
 
-PREFLIGHT_SCRIPT="$INFRA_DIR/scripts/Invoke-PreflightChecks.ps1"
+PREFLIGHT_SCRIPT="$SCRIPT_DIR/infra/Invoke-PreflightChecks.ps1"
 if [ -f "$PREFLIGHT_SCRIPT" ] && [ "$PREFLIGHT_SKIP" != "true" ] && [ "$PREFLIGHT_SKIP" != "1" ]; then
     if command -v pwsh >/dev/null 2>&1; then
         echo "${CYAN}Running landing-zone preflight checks...${NC}"
-        pwsh -NoProfile -File "$PREFLIGHT_SCRIPT"
+        pwsh -NoProfile -File "$PREFLIGHT_SCRIPT" -ParametersFile "$PARAMETER_DESTINATION"
         PREFLIGHT_EXIT=$?
         if [ $PREFLIGHT_EXIT -ne 0 ]; then
             echo "${YELLOW}Preflight checks failed. Fix the reported parameter issues, or set PREFLIGHT_SKIP=true to bypass.${NC}"

@@ -69,7 +69,7 @@ class AzureCommandError(AccessError):
 
 
 class Role(str, Enum):
-    # Verified against infra/constants/roles.json; never resolve a role by name.
+    # Verified against infra/shared/roles.json; never resolve a role by name.
     CONFIG = "516239f1-63e1-4d78-a4de-a74fb236a071"
     SECRET = "4633458b-17de-408a-b874-0445c86b69e6"
     MODEL = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
