@@ -45,6 +45,7 @@ from config.deployment.composition import (
     validate_ingestion_selection,
 )
 from util.azure_cli import resolve_az_command
+from config.deployment.native import resolve_application, selected as native_selected
 
 _PERSISTED_KEYS = (
     DEPLOY_INGESTION_CONTAINER_APP,
@@ -249,7 +250,8 @@ def resolve_environment_topology(
 ) -> DeploymentMode:
     # Compatibility API returns only topology. Lifecycle hooks use the full
     # plan so application selection cannot be discarded there.
-    return _resolve_environment_plan(
+    resolver = resolve_environment_plan if native_selected(environment) else _resolve_environment_plan
+    return resolver(
         environment,
         resource_group_name=resource_group_name,
         subscription_id=subscription_id,
@@ -265,46 +267,43 @@ def resolve_environment_plan(
     app_config_endpoint: str | None = None,
 ) -> TopologyResolution:
     """Resolve component selection with the shared topology detection path."""
+    if native_selected(environment):
+        # Native selection does not inspect or migrate old execution state.
+        mode = resolve_mode(environment)
+        enabled = resolve_ingestion_selection(environment, existing=False)
+        validate_ingestion_selection(environment, enabled)
+        return TopologyResolution(mode, False, enabled)
     explicit_ingestion = (
         DEPLOY_INGESTION_CONTAINER_APP in environment
         or resolve_ingestion_selection(environment, existing=False)
     )
-    # A materialized selection needs no new detection or data-plane lookups.
     if explicit_ingestion:
         enabled = resolve_ingestion_selection(environment)
         validate_ingestion_selection(environment, enabled)
         plan = _resolve_environment_plan(
-            environment,
-            resource_group_name=resource_group_name,
-            subscription_id=subscription_id,
-            app_config_endpoint=app_config_endpoint,
+            environment, resource_group_name=resource_group_name,
+            subscription_id=subscription_id, app_config_endpoint=app_config_endpoint,
         )
     else:
         exists = resource_group_exists(resource_group_name, subscription_id)
         has_runtime_state = any(
             (environment.get(key) or "").strip() for key in _LOCAL_RUNTIME_MARKERS
         )
-        # Durable local runtime state is conservative evidence of an existing
-        # deployment even when the resource-group output has been lost.
         existing = exists or has_runtime_state
         if exists and not has_runtime_state:
             existing = resource_group_has_resources(resource_group_name, subscription_id)
         persisted = read_persisted_settings(app_config_endpoint) if existing else {}
         enabled = resolve_ingestion_selection(
-            environment, existing=existing, persisted_settings=persisted
+            environment, existing=existing, persisted_settings=persisted,
         )
         validate_ingestion_selection(environment, enabled)
         plan = _resolve_environment_plan(
-            environment,
-            resource_group_name=resource_group_name,
-            subscription_id=subscription_id,
-            app_config_endpoint=app_config_endpoint,
-            detected_exists=existing,
-            detected_has_resources=existing,
+            environment, resource_group_name=resource_group_name,
+            subscription_id=subscription_id, app_config_endpoint=app_config_endpoint,
+            detected_exists=existing, detected_has_resources=existing,
             persisted_settings=persisted,
         )
     return TopologyResolution(plan.mode, plan.preserve_classic_runtime, enabled)
-
 
 def _resolve_environment_plan(
     environment: Mapping[str, str],
@@ -391,7 +390,7 @@ def _print_materialized(resolution: TopologyResolution) -> None:
     runtime_environment[PRESERVE_CLASSIC_RUNTIME] = str(
         resolution.preserve_classic_runtime
     ).lower()
-    for key, value in materialized_settings(
+    values = materialized_settings(
         resolution.mode,
         preserve_classic_runtime=resolution.preserve_classic_runtime,
         runtime_mode=resolve_runtime_mode(
@@ -403,7 +402,16 @@ def _print_materialized(resolution: TopologyResolution) -> None:
         )
         and not resolution.preserve_classic_runtime,
         deploy_ingestion=resolution.deploy_ingestion,
-    ).items():
+    )
+    if native_selected(os.environ):
+        app = resolve_application(os.environ)
+        values.update(app.settings())
+        values["CHAT_BACKEND"] = ""
+        values["ENABLE_CHAT_HISTORY"] = os.environ.get("ENABLE_CHAT_HISTORY", str(
+            os.environ.get("DEPLOYMENT_TOPOLOGY") == "hosted-panel"
+        ).lower())
+        values["ENABLE_USER_FEEDBACK"] = os.environ.get("ENABLE_USER_FEEDBACK", "false")
+    for key, value in values.items():
         print(f"{key}={value}")
 
 
@@ -420,6 +428,13 @@ def _print_description(mode: DeploymentMode) -> None:
         deploy_ingestion=enabled,
     )
     description["deploy_cosmos_db"] = resolve_cosmos_selection(os.environ)
+    if native_selected(os.environ):
+        app = resolve_application(os.environ)
+        description.update(app.settings())
+        description["native"] = True
+        description["publications"] = list(app.publications)
+        description["chat_backend"] = ""
+        description["runtime_chat_backend"] = ""
     print(json.dumps(description))
 
 
@@ -429,6 +444,7 @@ def main() -> int:
             "Resolve the Agent Landing Zone deployment topology (ADR-0001 revision 5)."
         )
     )
+    parser.add_argument("--native", action="store_true", help="Select the ADR-0034 application lifecycle; never infer a migration.")
     parser.add_argument(
         "--describe",
         action="store_true",
@@ -486,6 +502,8 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        if args.native:
+            os.environ.setdefault("APPLICATION_MODE", "conversational")
         if (
             args.describe
             or args.validate_hosted_deploy
@@ -518,7 +536,7 @@ def main() -> int:
                 app_config_endpoint=app_config_endpoint,
             )
             _print_materialized(resolution)
-    except DeploymentTopologyError as exc:
+    except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 0

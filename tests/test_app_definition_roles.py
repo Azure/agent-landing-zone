@@ -133,7 +133,7 @@ class RoleAssignmentTests(unittest.TestCase):
         vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "exactly one"):
-                assign_hosted_roles({"name": "agent"}, "22222222-2222-4222-8222-222222222222",
+                assign_hosted_roles({"name": "agent", "profiles": ["secret-reader"]}, "22222222-2222-4222-8222-222222222222",
                                     CONTEXT, run_az=az)
         self.assertEqual([], az.creates())
 
@@ -233,6 +233,7 @@ class RoleAssignmentTests(unittest.TestCase):
         )
         # Foundry account storage is never chosen for the storage scope.
         self.assertFalse(any(f"{SUB}/Microsoft.Storage/storageAccounts/staifx" in call for call in az.calls))
+        self.assertFalse(any("Microsoft.KeyVault" in str(call) for call in az.calls))
         cosmos = [c for c in az.creates() if c[0] == "cosmosdb"]
         self.assertEqual({"p-orch", "p-ing"}, {c[c.index("--principal-id") + 1] for c in cosmos})
 
@@ -252,12 +253,15 @@ class RoleAssignmentTests(unittest.TestCase):
         vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "AZURE_KEY_VAULT_NAME"):
-                assign_roles(bundled(), CONTEXT, hosted_orchestration=False, run_az=az)
+                assign_hosted_roles(
+                    {"name": "agent", "profiles": ["secret-reader"]},
+                    "22222222-2222-4222-8222-222222222222", CONTEXT, run_az=az,
+                )
             self.assertEqual([], az.creates(), "no partial assignment before the failure")
-            created = assign_roles(
-                bundled(),
+            created = assign_hosted_roles(
+                {"name": "agent", "profiles": ["secret-reader"]},
+                "22222222-2222-4222-8222-222222222222",
                 {**CONTEXT, "KEY_VAULT_URI": "https://kv-b.vault.azure.net/"},
-                hosted_orchestration=False,
                 run_az=az,
             )
         self.assertTrue(created)

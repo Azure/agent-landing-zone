@@ -24,6 +24,7 @@ from config.deployment.existing_images import (
 )
 from config.deployment.resource_groups import resource_group_for
 from config.deployment.firewall import resolve_firewall_inputs
+from config.deployment.native import nl2sql_selected, resolve_application, selected as native_selected
 from config.panel.settings import (
     FEEDBACK_CONTAINER_CONFIG_KEY,
     FEEDBACK_CONTAINER_NAME,
@@ -102,7 +103,7 @@ def resolve_ingestion_selection(
     if raw is None and existing:
         raw = (persisted_settings or {}).get(DEPLOY_INGESTION_CONTAINER_APP)
     if raw is None:
-        return existing
+        return False if native_selected(environment) else existing
     normalized = raw.strip().lower()
     if normalized not in {"true", "false"}:
         raise DeploymentTopologyError(
@@ -129,16 +130,16 @@ def validate_ingestion_selection(
             or (backend == "foundry_iq" and pattern == "searchIndex" and kind == "searchIndex")
         )
     )
-    conversation_upload = is_truthy(
-        environment.get("FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED")
+    conversation_upload = (
+        not native_selected(environment)
+        and is_truthy(environment.get("FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"))
     )
     if (not native and not index_bound) or conversation_upload:
         raise DeploymentTopologyError(
             f"{DEPLOY_INGESTION_CONTAINER_APP}=false requires supported native "
             "Foundry IQ azureBlob ingestion, or an explicitly supplied "
             "SEARCH_RAG_INDEX_NAME populated by an independent ingestion pipeline "
-            "with ai_search / Foundry IQ searchIndex. Conversation uploads still "
-            "require the ingestion application. Set the switch to true or review "
+            "with ai_search / Foundry IQ searchIndex. Set the switch to true or review "
             "the retrieval/source/index bindings; selection never changes them."
         )
 
@@ -146,7 +147,7 @@ def validate_ingestion_selection(
 def hosted_startup_command(environment: Mapping[str, str]) -> str:
     return (
         environment.get("HOSTED_AGENT_STARTUP_COMMAND")
-        or HOSTED_STARTUP_COMMAND_DEFAULT
+        or ("python -m src.native.hosted" if native_selected(environment) else HOSTED_STARTUP_COMMAND_DEFAULT)
     )
 
 
@@ -190,15 +191,11 @@ def validate_hosted_prerequisites(
     configured_startup_command = (
         environment.get("HOSTED_AGENT_STARTUP_COMMAND") or ""
     ).strip()
-    if (
-        configured_startup_command
-        and configured_startup_command != HOSTED_STARTUP_COMMAND_DEFAULT
-    ):
-        raise DeploymentTopologyError(
-            "Custom HOSTED_AGENT_STARTUP_COMMAND values are not supported by "
-            "the azure.ai.agent deployment manifest; use the default hosted "
-            "entrypoint."
-        )
+    if native_selected(environment):
+        if "hosted_entrypoint" in configured_startup_command or "uvicorn" in configured_startup_command:
+            raise DeploymentTopologyError("Native Hosted requires the official hosting entrypoint, not the legacy uvicorn adapter.")
+    elif configured_startup_command and configured_startup_command != HOSTED_STARTUP_COMMAND_DEFAULT:
+        raise DeploymentTopologyError("Custom HOSTED_AGENT_STARTUP_COMMAND values are not supported by the legacy deployment manifest.")
 
     scope = (environment.get("HOSTED_AGENT_RESOURCE_SCOPE") or "").strip()
     if not HOSTED_RESOURCE_SCOPE_PATTERN.fullmatch(scope):
@@ -249,13 +246,13 @@ def resolve_runtime_mode(
     environment: Mapping[str, str],
 ) -> DeploymentMode:
     """Keep a migrating classic runtime until hosted cutover inputs exist."""
-    if mode is DeploymentMode.CLASSIC or not is_truthy(
-        environment.get(PRESERVE_CLASSIC_RUNTIME)
-    ):
+    if native_selected(environment):
+        if is_truthy(environment.get(PRESERVE_CLASSIC_RUNTIME)):
+            raise DeploymentTopologyError("Native applications have no legacy runtime migration engine.")
         return mode
-    if hosted_cutover_ready(environment):
+    if mode is DeploymentMode.CLASSIC or not is_truthy(environment.get(PRESERVE_CLASSIC_RUNTIME)):
         return mode
-    return DeploymentMode.CLASSIC
+    return mode if hosted_cutover_ready(environment) else DeploymentMode.CLASSIC
 
 
 def _explicit_flag_topology(
@@ -350,10 +347,12 @@ def resolve_mode(environment: Mapping[str, str]) -> DeploymentMode:
     full fresh-vs-existing/sticky/conflict contract should use
     ``resolve_topology`` instead.
     """
-    explicit = resolve_explicit_topology(environment)
-    if explicit is not None:
-        return explicit
-    return DeploymentMode.HOSTED_NO_PANEL
+    if native_selected(environment):
+        try:
+            return DeploymentMode(resolve_application(environment).topology)
+        except ValueError as exc:
+            raise DeploymentTopologyError(str(exc)) from exc
+    return resolve_explicit_topology(environment) or DeploymentMode.HOSTED_NO_PANEL
 
 
 def resolve_topology(
@@ -523,6 +522,8 @@ def resolve_database_containers(
     *,
     preserving_classic_runtime: bool = False,
     custom_cosmos: bool = False,
+    native: bool = False,
+    metadata: bool = False,
 ) -> list[dict[str, object]]:
     """Return the exact ``databaseContainersList`` value for ``mode``.
 
@@ -538,9 +539,9 @@ def resolve_database_containers(
       feedback), plus configured containers required by custom consumers.
       Panel metadata stays in its own containers with container-scoped grants.
     """
-    if preserving_classic_runtime or mode is DeploymentMode.CLASSIC:
+    if not native and (preserving_classic_runtime or mode is DeploymentMode.CLASSIC):
         return existing_containers
-    if mode is DeploymentMode.HOSTED_PANEL:
+    if mode is DeploymentMode.HOSTED_PANEL or metadata:
         panel_containers = panel_database_containers()
         if custom_cosmos:
             return [
@@ -667,9 +668,11 @@ def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
     """Resolve application storage without changing Foundry backing services."""
     mode = resolve_mode(environment)
     required = (
-        mode in {DeploymentMode.CLASSIC, DeploymentMode.HOSTED_PANEL}
-        or resolve_runtime_mode(mode, environment) is DeploymentMode.CLASSIC
+        mode is DeploymentMode.HOSTED_PANEL
         or requires_custom_cosmos(environment)
+        or (resolve_application(environment).metadata if native_selected(environment) else
+            resolve_runtime_mode(mode, environment) is DeploymentMode.CLASSIC)
+        or (native_selected(environment) and nl2sql_selected(environment))
     )
     raw = environment.get(DEPLOY_COSMOS_DB)
     if raw is None:
@@ -683,7 +686,7 @@ def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
     if required and not enabled:
         raise DeploymentTopologyError(
             f"{DEPLOY_COSMOS_DB}=false conflicts with application Cosmos DB "
-            "required by the classic runtime, administrative panel, or a custom "
+            "required by the administrative panel or a custom "
             "conversation-store capability. Set it to true or remove the consumer."
         )
     return enabled
@@ -795,6 +798,7 @@ def _resolve_application_overrides(
     parameters: dict[str, object] = {}
 
     mode = resolve_mode(environment)
+    native = resolve_application(environment) if native_selected(environment) else None
     deploy_ingestion = resolve_ingestion_selection(environment)
     validate_ingestion_selection(environment, deploy_ingestion)
     hosted = mode is not DeploymentMode.CLASSIC
@@ -843,11 +847,12 @@ def _resolve_application_overrides(
         )
 
     parameters["prepareHostedAgent"] = prepare_hosted
+    parameters["deployDurableTaskScheduler"] = bool(native and native.host == "container_apps")
     if prepare_hosted and not hosted:
         # Custom Hosted preparation requires foundation pull, not additional
         # operator privilege. Bundled/foundation callers retain their default.
         parameters["grantHostedAgentProjectManager"] = False
-    parameters["deployHostedAgent"] = deploy_hosted
+    parameters["deployHostedAgent"] = False if native else deploy_hosted
     parameters["deployCosmosDb"] = resolve_cosmos_selection(environment)
     if hosted and is_truthy(environment.get("NETWORK_ISOLATION")):
         parameters["deployAcrTaskAgentPool"] = True
@@ -889,8 +894,19 @@ def _resolve_application_overrides(
                     if role != "CosmosDBBuiltInDataContributor"
                 ]
     apps.extend(custom_container_apps(environment, apps, hosted_orchestration=hosted))
+    for app in apps if native else []:
+        if app.get("service_name") in {"orchestrator", "frontend", "dataingest"}:
+            # Runtime checkpoints are native; metadata access is feature-owned.
+            app["roles"] = [
+                role for role in app.get("roles", [])
+                if role not in {"CosmosDBBuiltInDataContributor", "KeyVaultSecretsUser"}
+            ]
+        if app.get("service_name") == "orchestrator":
+            app["external"] = False
+            app["disable_ingress"] = True
+            app["dapr"] = {"enabled": False}
     parameters["containerAppsList"] = apps
-    if hosted and not preserving_classic_runtime:
+    if native or (hosted and not preserving_classic_runtime):
         # The orchestrator API key only protects classic UI-to-orchestrator
         # calls. Hosted mode authenticates with Entra tokens, so no key is
         # created in Key Vault or referenced from App Configuration.
@@ -902,9 +918,38 @@ def _resolve_application_overrides(
         existing_containers if isinstance(existing_containers, list) else [],
         preserving_classic_runtime=preserving_classic_runtime,
         custom_cosmos=requires_custom_cosmos(environment),
+        native=native is not None,
+        metadata=bool(native and native.metadata),
     )
+    if native:
+        native_containers = (
+            ([{
+                "name": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
+                "canonical_name": "NATIVE_UI_METADATA_CONTAINER", "partitionKey": "/principal_id",
+            }] if native.metadata else [])
+            + ([item for item in existing_containers if item.get("name") == "datasources"]
+               if nl2sql_selected(environment) else [])
+            + (existing_containers if requires_custom_cosmos(environment) else [])
+        )
+        unique_containers = {}
+        for item in native_containers:
+            unique_containers.setdefault(item["name"], item)
+        parameters["databaseContainersList"] = list(unique_containers.values())
 
     generated_settings = [
+            *([_setting(name, value) for name, value in native.settings().items()] if native else []),
+            *([
+                _setting("ENABLE_CHAT_HISTORY", environment.get("ENABLE_CHAT_HISTORY", "false")),
+                _setting("ENABLE_USER_FEEDBACK", environment.get("ENABLE_USER_FEEDBACK", "false")),
+                _setting("ENABLE_PRIVATE_ATTACHMENTS", "false"),
+                _setting("NL2SQL_ENABLED", str(nl2sql_selected(environment)).lower()),
+                _setting("NL2SQL_SOURCE_REGISTRY", environment.get("NL2SQL_SOURCE_REGISTRY", "")),
+                _setting("NATIVE_TOOL_SECRET_NAMES", environment.get("NATIVE_TOOL_SECRET_NAMES", "[]")),
+                _setting("DATASOURCES_CONTAINER", "datasources" if nl2sql_selected(environment) else ""),
+                _setting("HOSTED_WORKFLOW_BASE_URL", environment.get("HOSTED_WORKFLOW_BASE_URL", "")),
+            ] if native else []),
+    ]
+    generated_settings.extend([
             _setting(DEPLOY_INGESTION_CONTAINER_APP, str(deploy_ingestion).lower()),
             *(
                 [_setting("SEARCH_RAG_INDEX_NAME", environment["SEARCH_RAG_INDEX_NAME"].strip())]
@@ -916,7 +961,7 @@ def _resolve_application_overrides(
                 str(runtime_hosted).lower(),
             ),
             _setting("PREPARE_HOSTED_AGENT", str(prepare_hosted).lower()),
-            _setting("DEPLOY_HOSTED_AGENT", str(deploy_hosted).lower()),
+            _setting("DEPLOY_HOSTED_AGENT", str(deploy_hosted and not native).lower()),
             _setting("HOSTED_AGENT_PREPARED", str(prepare_hosted).lower()),
             _setting(
                 "DEPLOY_ADMINISTRATIVE_PANEL",
@@ -941,10 +986,10 @@ def _resolve_application_overrides(
                     "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "60"
                 ),
             ),
-            *[
+            *([] if native else [
                 _setting(name, value)
                 for name, value in continuity_public_settings(environment).items()
-            ],
+            ]),
             *[
                 _setting(name, value)
                 for name, value in panel_public_settings(environment).items()
@@ -953,9 +998,9 @@ def _resolve_application_overrides(
             # immutable-image prerequisites materialize before cutover.
             _setting(
                 "CHAT_BACKEND",
-                "hosted_agent" if runtime_hosted else "orchestrator",
+                "" if native else "hosted_agent" if runtime_hosted else "orchestrator",
             ),
-        ]
+        ])
     parameters["additionalAppConfigurationSettings"] = merge_app_configuration_settings(
         source.get("additionalAppConfigurationSettings", []), generated_settings,
         default_label=source.get("appConfigLabel", APP_CONFIG_LABEL),

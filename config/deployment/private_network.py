@@ -17,6 +17,7 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 from config.deployment.composition import DeploymentMode, is_truthy, resolve_mode
+from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
 
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ ENDPOINT_SUFFIXES = {
     "APP_CONFIG_ENDPOINT": ".azconfig.io",
     "AZURE_AI_PROJECT_ENDPOINT": ".services.ai.azure.com",
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": ".azurecr.io",
+    "DURABLE_TASK_SCHEDULER_ENDPOINT": ".durabletask.io",
 }
 _DNS_SCRIPT = (
     "import json, socket, sys; "
@@ -188,6 +190,12 @@ def check_stage(environment: Mapping[str, str], stage: str) -> int:
     elif stage == "pre-deploy" and resolve_mode(environment) is not DeploymentMode.CLASSIC:
         keys.append("AZURE_AI_PROJECT_ENDPOINT")
     endpoints = [(key, environment.get(key) or "") for key in keys]
+    if stage == "pre-deploy" and native_selected(environment) and resolve_application(environment).host == "container_apps":
+        # Validate the actual output before probing it. No constructed hostname,
+        # public-network fallback or RUN_FROM_JUMPBOX connectivity bypass.
+        scheduler_settings(environment)
+        backend = json.loads(environment["HOSTED_AGENT_DEPLOYMENT"])["durableTask"]
+        endpoints.append(("DURABLE_TASK_SCHEDULER_ENDPOINT", backend["endpoint"]))
     for key, endpoint in endpoints:
         if not endpoint.strip():
             raise PrivateNetworkError(

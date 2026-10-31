@@ -26,6 +26,7 @@ from config.deployment.composition import (
     validate_hosted_prerequisites,
     validate_ingestion_selection,
 )
+from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
 from util.azure_cli import resolve_az_command
 from config.deployment.context import context_settings
 from config.deployment.resource_groups import resource_group_for
@@ -151,6 +152,7 @@ def build_settings(
     deploy_ingestion = resolve_ingestion_selection(environment)
     validate_ingestion_selection(environment, deploy_ingestion)
     hosted = mode is not DeploymentMode.CLASSIC
+    native = resolve_application(environment) if native_selected(environment) else None
     resource_group = resource_group_for(environment, "application")
     subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip()
     deployment_context = context_settings(environment)
@@ -175,9 +177,13 @@ def build_settings(
             require_image_digest=False,
         )
     if hosted and require_hosted_endpoint:
-        if not hosted_base_url:
+        required_endpoints = (
+            [("HOSTED_AGENT_BASE_URL" if kind == "conversational" else "HOSTED_WORKFLOW_BASE_URL")
+             for kind in native.publications] if native else ["HOSTED_AGENT_BASE_URL"]
+        )
+        if any(not environment.get(key, "").strip() for key in required_endpoints):
             raise ValueError(
-                "Hosted deployment completed without HOSTED_AGENT_BASE_URL."
+                "Hosted deployment completed without required publication endpoints: " + ", ".join(required_endpoints)
             )
     runtime_mode = resolve_runtime_mode(mode, environment)
     runtime_hosted = runtime_mode is not DeploymentMode.CLASSIC
@@ -229,6 +235,26 @@ def build_settings(
         )
 
     return {
+        **(native.settings() if native else {}),
+        **({
+            "HOSTED_WORKFLOW_BASE_URL": environment.get("HOSTED_WORKFLOW_BASE_URL", "").strip(),
+            "NATIVE_UI_METADATA_CONTAINER": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
+            "ENABLE_CHAT_HISTORY": environment.get("ENABLE_CHAT_HISTORY", "false"),
+            "ENABLE_USER_FEEDBACK": environment.get("ENABLE_USER_FEEDBACK", "false"),
+            "ENABLE_PRIVATE_ATTACHMENTS": "false",
+            "DATASOURCES_CONTAINER": "datasources" if environment.get("NL2SQL_ENABLED", "").lower() == "true" else "",
+            "NL2SQL_ENABLED": environment.get("NL2SQL_ENABLED", "false"),
+            "NL2SQL_SOURCE_REGISTRY": environment.get("NL2SQL_SOURCE_REGISTRY", ""),
+            "NATIVE_TOOL_SECRET_NAMES": environment.get("NATIVE_TOOL_SECRET_NAMES", "[]"),
+        } if native else {}),
+        **(
+            scheduler_settings(environment)
+            if native and native.host == "container_apps" else {}
+        ),
+        **({
+            "DURABLE_AGENT_NAME": environment.get("DURABLE_AGENT_NAME", "alz-conversation"),
+            "DURABLE_WORKFLOW_NAME": environment.get("DURABLE_WORKFLOW_NAME", "alz-research-review"),
+        } if native else {}),
         **deployment_context,
         DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),
         **(
@@ -245,11 +271,11 @@ def build_settings(
             or str(prepare_hosted)
         ).strip().lower(),
         "DEPLOY_ADMINISTRATIVE_PANEL": str(
-            runtime_mode is DeploymentMode.HOSTED_PANEL
+            runtime_mode is DeploymentMode.HOSTED_PANEL and not native
         ).lower(),
         "DEPLOYMENT_TOPOLOGY": runtime_mode.value,
         "CHAT_BACKEND": (
-            "hosted_agent" if runtime_hosted else "orchestrator"
+            "" if native else "hosted_agent" if runtime_hosted else "orchestrator"
         ),
         "ORCHESTRATOR_BASE_URL": (
             f"https://{orchestrator['fqdn']}" if orchestrator["fqdn"] else ""
@@ -287,7 +313,7 @@ def build_settings(
             if runtime_mode is DeploymentMode.CLASSIC
             else {}
         ),
-        **continuity_public_settings(environment),
+        **({} if native else continuity_public_settings(environment)),
         **retrieval_settings,
         **source_settings,
         **panel_public_settings(environment),

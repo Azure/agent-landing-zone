@@ -182,6 +182,8 @@ def prepare_environment(
         source_ref=component["source_ref"],
         source_commit=source_commit,
         startup_command=hosted_startup_command(environment),
+        port=8080 if environment.get("ORCHESTRATION_HOST") == "hosted" else 8088,
+        required_source_paths=("src/native/hosted.py",) if environment.get("ORCHESTRATION_HOST") == "hosted" else (),
         agent_pool=agent_pool or None,
         resource_group=registry_resource_group(environment),
         azure_cli=resolve_az_command(),

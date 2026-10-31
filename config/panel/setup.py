@@ -330,7 +330,12 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     No-op (returns 0) unless ``DEPLOY_ADMINISTRATIVE_PANEL`` is ``true``.
     Returns the number of newly created assignments.
     """
-    if not is_truthy(environment.get("DEPLOY_ADMINISTRATIVE_PANEL")):
+    from config.deployment.native import resolve_application, selected as native_selected
+    metadata = (
+        resolve_application(environment).metadata if native_selected(environment)
+        else is_truthy(environment.get("DEPLOY_ADMINISTRATIVE_PANEL"))
+    )
+    if not metadata:
         logging.info(
             "[panel.setup] DEPLOY_ADMINISTRATIVE_PANEL is not true; skipping "
             "panel Cosmos RBAC (no container, no role assignment)."
@@ -387,7 +392,7 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     app_names = {
         FRONTEND_APP_SERVICE_NAME: f"ca-{resource_token}-frontend",
     }
-    if resolve_ingestion_selection(environment):
+    if resolve_ingestion_selection(environment) and not native_selected(environment):
         app_names[DATA_INGEST_APP_SERVICE_NAME] = f"ca-{resource_token}-dataingest"
     principal_ids = {
         service_name: resolve_container_app_principal_id(resource_group, app_name)
@@ -395,7 +400,14 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     }
 
     created = 0
-    for grant in panel_container_grants():
+    grants = (
+        (PanelContainerGrant(
+            FRONTEND_APP_SERVICE_NAME, COSMOS_DATA_CONTRIBUTOR_ROLE_GUID,
+            environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
+        ),)
+        if native_selected(environment) else panel_container_grants()
+    )
+    for grant in grants:
         if grant.service_name not in principal_ids:
             continue
         scope = container_scope_path(

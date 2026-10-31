@@ -258,6 +258,13 @@ do not prove private-network parity, long-duration SLA, Hosted crash recovery,
 cross-user platform isolation or exactly-once business writes. Record those
 unverified scenarios explicitly.
 
+The maintainer explicitly prioritized implementation and unit tests for this
+iteration and deferred live private-network validation. Preserve private-network
+configuration and provider contracts, but do not provision a complete ALZ to
+validate this runtime revision. A bounded minimal Azure proof may supplement
+local native-SDK checks where available. Record missing deployed evidence as a
+limitation, not as a passing test or a reason to expand the deployment.
+
 ## Documentation impact
 
 Update the current application architecture, quickstart/deployment, configuration,

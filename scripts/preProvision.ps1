@@ -195,7 +195,7 @@ $parameterSource = Join-Path $projectRoot "main.parameters.json"
 Write-Host "Resolving Agent Landing Zone deployment topology..." -ForegroundColor Cyan
 Push-Location $projectRoot
 try {
-    $topologyOutput = Invoke-PythonModule -ModuleName 'config.deployment.topology'
+    $topologyOutput = Invoke-PythonModule -ModuleName 'config.deployment.topology' -Arguments @('--native')
     $topologyExitCode = $LASTEXITCODE
 } finally {
     Pop-Location

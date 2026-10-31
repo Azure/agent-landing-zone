@@ -173,6 +173,17 @@ def invocations_base_url(endpoint: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, base_path, "", ""))
 
 
+def responses_base_url(endpoint: str) -> str:
+    """Use the official publication output; OpenAI clients append /responses."""
+    parsed = urlsplit(endpoint.strip())
+    if (
+        parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+        or parsed.query or parsed.fragment or not parsed.path.endswith("/responses")
+    ):
+        raise ValueError("Native Hosted publication must return an absolute HTTPS Responses endpoint.")
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path[:-len("/responses")], "", ""))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group(required=True)

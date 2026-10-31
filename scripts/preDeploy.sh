@@ -240,7 +240,21 @@ fi
 had_errors=0
 release_default="$(jq -r '.release // empty' "$manifest_path")"
 
-if [[ "$hosted_mode" =~ ^(1|true|t|yes|y)$ ]]; then
+native_mode="$(printf "%s" "$topology_json" | jq -r '.native // false')"
+# BEGIN native application lifecycle
+if [ "$native_mode" = "true" ]; then
+  (cd "$repo_root" && python3 -m config.deployment.native_deploy --deploy) || {
+    red "Native application preparation/publication failed; component deployment has not started."
+    exit 1
+  }
+  (cd "$repo_root" && python3 -m config.deployment.appconfig --require-hosted-endpoint) || {
+    red "Native runtime settings could not be published."
+    exit 1
+  }
+fi
+# END native application lifecycle
+
+if [[ "$hosted_mode" =~ ^(1|true|t|yes|y)$ ]] && [ "$native_mode" != "true" ]; then
   hosted_project="$repo_root/hosted-agent"
   hosted_scope="$(get_azd_value "$repo_root" "HOSTED_AGENT_RESOURCE_SCOPE")"
   project_endpoint="$(get_azd_value "$repo_root" "AZURE_AI_PROJECT_ENDPOINT")"
@@ -419,6 +433,13 @@ while IFS= read -r comp; do
     fi
   fi
 
+  if [ "$native_mode" = "true" ]; then
+    (cd "$repo_root" && python3 -m config.deployment.native_deploy --validate-component-source "$target" --component "$name") || {
+      red "$name is not a compatible native component; deployment has not started."
+      had_errors=1
+      continue
+    }
+  fi
   git config --global --add safe.directory "$target" >/dev/null 2>&1 || true
   copy_dot_azure "$dot_azure" "$target"
 
@@ -518,7 +539,7 @@ if [ "$had_errors" -ne 0 ]; then
   exit 1
 fi
 
-if [[ "$hosted_mode" =~ ^(1|true|t|yes|y)$ ]]; then
+if [[ "$hosted_mode" =~ ^(1|true|t|yes|y)$ ]] && [ "$native_mode" != "true" ]; then
   export HOSTED_CUTOVER_COMPLETE=true
   migrating_classic_runtime=false
   [[ "$(printf "%s" "${PRESERVE_CLASSIC_RUNTIME:-}" | tr '[:upper:]' '[:lower:]')" = "true" ]] && migrating_classic_runtime=true

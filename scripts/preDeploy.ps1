@@ -235,7 +235,22 @@ if (-not (Docker-Ready)) {
 
 $hadErrors = $false
 
-if ($hostedMode) {
+$nativeMode = [bool]$topologyInfo.native
+# BEGIN native application lifecycle
+if ($nativeMode) {
+  Invoke-PythonModule -ModuleName 'config.deployment.native_deploy' -Arguments @('--deploy')
+  if ($LASTEXITCODE -ne 0) { Write-Error "Native application preparation/publication failed; component deployment has not started."; exit 1 }
+  # Read the exact persisted publication/backend outputs, not process defaults.
+  $globalEnv = Get-AzdEnv -projectPath $repoRoot
+  foreach ($prop in $globalEnv.PSObject.Properties) {
+    Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
+  }
+  Invoke-PythonModule -ModuleName 'config.deployment.appconfig' -Arguments @('--require-hosted-endpoint')
+  if ($LASTEXITCODE -ne 0) { Write-Error "Native runtime settings could not be published."; exit 1 }
+}
+# END native application lifecycle
+
+if ($hostedMode -and -not $nativeMode) {
   $hostedProject = Join-Path $repoRoot 'hosted-agent'
   if (-not (Test-Path -LiteralPath (Join-Path $hostedProject 'azure.yaml'))) {
     Write-Error "Hosted agent azd project not found at $hostedProject."
@@ -464,6 +479,11 @@ foreach ($c in $manifest.components) {
     }
   }
 
+  if ($nativeMode) {
+    Invoke-PythonModule -ModuleName 'config.deployment.native_deploy' -Arguments @('--validate-component-source', $target, '--component', $name)
+    if ($LASTEXITCODE -ne 0) { Write-Error "$name is not a compatible native component; deployment has not started."; $hadErrors = $true; continue }
+  }
+
   # Copy shared azd env into the freshly cloned project
   if (Test-Path -LiteralPath $dotAzure) {
     Copy-Item $dotAzure $target -Recurse -Force -Container
@@ -567,7 +587,7 @@ foreach ($dc in $definitionComponents) {
 
 if ($hadErrors) { Write-Error "One or more components failed. See logs above."; exit 1 }
 
-if ($hostedMode) {
+if ($hostedMode -and -not $nativeMode) {
   $env:HOSTED_CUTOVER_COMPLETE = 'true'
   $migratingClassicRuntime = "$($env:PRESERVE_CLASSIC_RUNTIME)".ToLowerInvariant() -eq 'true'
   Push-Location $repoRoot

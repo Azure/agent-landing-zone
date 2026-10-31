@@ -209,7 +209,7 @@ fi
 # 'config.deployment.topology --describe', with no further Azure CLI lookups
 # and no duplicated detection logic.
 echo "${CYAN}Resolving Agent Landing Zone deployment topology...${NC}"
-TOPOLOGY_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.topology)"
+TOPOLOGY_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.topology --native)"
 TOPOLOGY_EXIT=$?
 if [ $TOPOLOGY_EXIT -ne 0 ]; then
     echo "${YELLOW}Error: Agent Landing Zone deployment topology resolution failed.${NC}"

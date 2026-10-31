@@ -194,7 +194,8 @@ TRIO_CANONICAL = {"ui": "FRONTEND_APP", "orchestrator": "ORCHESTRATOR_APP", "ing
 
 class CapabilityProfileTests(unittest.TestCase):
     EXPECTED = {
-        "base": {"AppConfigurationDataReader", "AcrPull", "KeyVaultSecretsUser"},
+        "base": {"AppConfigurationDataReader", "AcrPull"},
+        "secret-reader": {"KeyVaultSecretsUser"},
         "model-user": {"CognitiveServicesUser", "CognitiveServicesOpenAIUser"},
         "retrieval-reader": {"SearchIndexDataReader", "StorageBlobDataReader"},
         "conversation-store": {"CosmosDBBuiltInDataContributor"},
@@ -240,7 +241,10 @@ class CapabilityProfileTests(unittest.TestCase):
         for component in trio.document["components"]:
             canonical = TRIO_CANONICAL[component["name"]]
             with self.subTest(component=component["name"], app=canonical):
-                self.assertEqual(current[canonical], set(role_names(component["profiles"])))
+                self.assertEqual(
+                    current[canonical] - {"KeyVaultSecretsUser"},
+                    set(role_names(component["profiles"])),
+                )
         self.assertEqual(set(TRIO_CANONICAL.values()), set(current))
 
 

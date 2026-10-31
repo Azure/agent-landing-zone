@@ -459,6 +459,18 @@ param deployAcrTaskAgentPool bool = true
 @description('Prepare accelerator-neutral Microsoft Foundry hosted-agent prerequisites without requesting downstream agent deployment. Provisions the required project and registry RBAC and exposes project, registry, network, and private-build handoff values. deployHostedAgent implies this behavior. Defaults to false.')
 param prepareHostedAgent bool = false
 
+@description('Provision the native Container Apps execution backend. Application publishing remains outside infra.')
+param deployDurableTaskScheduler bool = false
+param durableTaskSchedulerName string?
+@minLength(3)
+@maxLength(64)
+param durableTaskHubName string = 'agent-lz'
+@allowed(['Consumption', 'Dedicated'])
+param durableTaskSchedulerSku string = 'Consumption'
+@minValue(1)
+param durableTaskSchedulerCapacity int = 1
+param existingPrivateDnsZoneDurableTaskResourceId string = ''
+
 @description('Grant the deployment executor Foundry Project Manager when Hosted prerequisites are selected. Defaults to true for compatible foundation callers. Set false when the executor already has required project authorization; this never disables the project managed identity registry pull grant.')
 param grantHostedAgentProjectManager bool = true
 
@@ -2108,6 +2120,9 @@ var _byoZoneOdsOpInsights  = !empty(existingPrivateDnsZoneOdsOpsInsightsResource
 var _byoZoneAzureAutomation= !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '')
 
 var _dnsZonesList = _deployPrivateDnsZones ? concat(
+  (deployDurableTaskScheduler && empty(existingPrivateDnsZoneDurableTaskResourceId)) ? [
+    { dnsName: 'privatelink.durabletask.io', virtualNetworkLinkName: '${resourceNames.vnetName}-durabletask-link${_dnsZonesLinkSuffix}' }
+  ] : [],
   _byoZoneCogSvcs       ? [] : [ { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${resourceNames.vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneOpenAi        ? [] : [ { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${resourceNames.vnetName}-openai-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneAiServices    ? [] : [ { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${resourceNames.vnetName}-aiservices-link${_dnsZonesLinkSuffix}' } ],
@@ -2201,6 +2216,27 @@ var _peDnsZoneGroups = {
 }
 
 var _peList = concat(
+  (_networkIsolation && deployDurableTaskScheduler) ? [
+    {
+      name: 'pe-dts-${resourceToken}'
+      subnetResourceId: _applicationPeSubnetId
+      privateLinkServiceConnections: [
+        {
+          name: 'durableTaskConnection'
+          properties: { privateLinkServiceId: durableTask!.outputs.backend.resourceId, groupIds: ['scheduler'] }
+        }
+      ]
+      privateDnsZoneGroup: policyManagedPrivateDns ? null : {
+        name: 'durableTaskDnsZoneGroup'
+        privateDnsZoneGroupConfigs: [
+          {
+            name: 'scheduler'
+            privateDnsZoneResourceId: !empty(existingPrivateDnsZoneDurableTaskResourceId) ? existingPrivateDnsZoneDurableTaskResourceId : resourceId(_dnsZonesSubscriptionId, _dnsZonesTargetRg, 'Microsoft.Network/privateDnsZones', 'privatelink.durabletask.io')
+          }
+        ]
+      }
+    }
+  ] : [],
   (_networkIsolation && deployStorageAccount) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${resourceNames.storageAccountName}'
@@ -2871,6 +2907,39 @@ module acrTaskAgentPool 'modules/application/acr-agent-pool.bicep' = if (_deploy
 }
 
 //Container Apps User Managed Identity
+module durableTask 'modules/application/durable-task.bicep' = if (deployDurableTaskScheduler) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'durable-task'
+  params: {
+    name: durableTaskSchedulerName ?? 'dts-${resourceToken}'
+    taskHubName: durableTaskHubName
+    location: location
+    tags: _tags
+    networkIsolation: _networkIsolation
+    sku: durableTaskSchedulerSku
+    capacity: durableTaskSchedulerCapacity
+  }
+}
+
+// Both the trusted BFF client and official worker need native data operations.
+// The grant is task-hub scoped, not subscription/scheduler-wide.
+module durableTaskRoles 'modules/security/resource-role-assignment.bicep' = [
+  for (app, i) in containerAppsList: if (deployDurableTaskScheduler && _deployContainerApps && contains(['frontend', 'orchestrator'], app.service_name)) {
+    name: 'durable-task-role-${i}'
+    params: {
+      name: 'durable-task-${app.service_name}'
+      roleAssignments: [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.DurableTaskDataContributor.guid)
+          resourceId: durableTask!.outputs.backend.taskHubResourceId
+          principalId: _useUAI ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalType: 'ServicePrincipal'
+        }
+      ]
+    }
+  }
+]
+
 module containerAppsUAI 'modules/security/managed-identity.bicep' = [
   for app in containerAppsList: if (_useUAI && _deployContainerApps) {
     scope: resourceGroup(_applicationResourceGroupName)
@@ -3001,6 +3070,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       workloadProfileName: app.profile_name
 
       ingressExternal: app.external
+      disableIngress: app.?disable_ingress ?? false
       ingressTargetPort: int(app.?target_port ?? 8080)
       ingressTransport: 'auto'
       ingressAllowInsecure: false
@@ -4258,6 +4328,7 @@ output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = (deployContainerRegistry ||
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = (deployContainerRegistry || _hostedAgentPrerequisitesEnabled) ? _hostedAgentContainerRegistryEndpoint : ''
 #disable-next-line BCP318
 output HOSTED_AGENT_DEPLOYMENT object = {
+  durableTask: deployDurableTaskScheduler ? durableTask!.outputs.backend : null
   workloadEgress: {
     networkIsolation: _networkIsolation
     managedFirewallPolicyId: firewall.outputs.policyResourceId

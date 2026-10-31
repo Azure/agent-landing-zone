@@ -385,6 +385,7 @@ def prepare_hosted_image(
     agent_pool: str | None = None,
     resource_group: str | None = None,
     azure_cli: str = "az",
+    required_source_paths: tuple[str, ...] = (),
 ) -> str:
     """Resolve an override or automatically build a hosted-compatible digest."""
     if image_version and image_version.strip():
@@ -417,6 +418,12 @@ def prepare_hosted_image(
             expected_commit=source_commit,
             target_dir=source_dir,
         )
+        if any(not (source_dir / path).is_file() for path in required_source_paths):
+            raise ValueError(
+                "The manifest-pinned orchestrator source lacks the required native "
+                "entrypoint. Coordinate compatible component pins before building; "
+                "no application image was built."
+            )
         base_digest = build_source_image(
             registry=registry,
             source_dir=source_dir,
