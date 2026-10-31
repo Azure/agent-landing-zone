@@ -241,7 +241,7 @@ def build_settings(
             "NATIVE_UI_METADATA_CONTAINER": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
             "ENABLE_CHAT_HISTORY": environment.get("ENABLE_CHAT_HISTORY", "false"),
             "ENABLE_USER_FEEDBACK": environment.get("ENABLE_USER_FEEDBACK", "false"),
-            "ENABLE_PRIVATE_ATTACHMENTS": "false",
+            "ENABLE_PRIVATE_ATTACHMENTS": environment.get("ENABLE_PRIVATE_ATTACHMENTS", "false"),
             "DATASOURCES_CONTAINER": "datasources" if environment.get("NL2SQL_ENABLED", "").lower() == "true" else "",
             "NL2SQL_ENABLED": environment.get("NL2SQL_ENABLED", "false"),
             "NL2SQL_SOURCE_REGISTRY": environment.get("NL2SQL_SOURCE_REGISTRY", ""),
@@ -252,8 +252,8 @@ def build_settings(
             if native and native.host == "container_apps" else {}
         ),
         **({
-            "DURABLE_AGENT_NAME": environment.get("DURABLE_AGENT_NAME", "alz-conversation"),
-            "DURABLE_WORKFLOW_NAME": environment.get("DURABLE_WORKFLOW_NAME", "alz-research-review"),
+            "DURABLE_AGENT_NAME": environment.get("DURABLE_AGENT_NAME", "agent-lz-conversation"),
+            "DURABLE_WORKFLOW_NAME": environment.get("DURABLE_WORKFLOW_NAME", "agent-lz-research-review"),
         } if native else {}),
         **deployment_context,
         DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),

@@ -107,7 +107,7 @@
       "name": "${HOSTED_AGENT_NAME=agent-app-orchestrator}",
       "image": "${HOSTED_AGENT_IMAGE=agent-app-orchestrator}",
       "version": "${HOSTED_AGENT_IMAGE_VERSION=}",
-      "startupCommand": "${HOSTED_AGENT_STARTUP_COMMAND=python -m src.native.hosted}",
+      "startupCommand": "${HOSTED_AGENT_STARTUP_COMMAND=python -m native.hosted}",
       "runtime": {
         "cpu": "${HOSTED_AGENT_CONTAINER_CPU=2}",
         "memory": "${HOSTED_AGENT_CONTAINER_MEMORY=4Gi}"

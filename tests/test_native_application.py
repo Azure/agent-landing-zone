@@ -13,7 +13,9 @@ from config.deployment.native import resolve_application, scheduler_settings
 from config.deployment import native_deploy, native_access
 from config.deployment import appconfig, private_network
 from config.deployment import hosted_image
-from config.deployment.composition import compose_parameters
+from config.deployment.composition import compose_parameters, hosted_startup_command, resolve_ingestion_selection
+from config.appdefinition.loader import DEFINITION_ENV, effective_components, load_selected_definition
+from config.appdefinition.validator import validate_definition
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +50,16 @@ def test_native_defaults_do_not_require_metadata_or_ingestion():
     assert not app.ingestion
 
 
+def test_native_hosted_startup_matches_canonical_runtime_module_and_parameter_seed():
+    command = hosted_startup_command(environment())
+    assert command == "python -m native.hosted"
+    assert hosted_startup_command({**environment(), "HOSTED_AGENT_STARTUP_COMMAND": command}) == command
+    source = json.loads((ROOT / "main.parameters.json").read_text())
+    assert source["parameters"]["hostedAgent"]["value"]["startupCommand"] == (
+        "${HOSTED_AGENT_STARTUP_COMMAND=" + command + "}"
+    )
+
+
 @pytest.mark.parametrize("topology,host", [
     ("classic", "container_apps"),
     ("hosted-no-panel", "hosted"),
@@ -66,6 +78,8 @@ def test_topology_maps_only_at_composition_boundary(topology, host):
     {"PRESERVE_CLASSIC_RUNTIME": "true"},
     {"CHAT_BACKEND": "orchestrator"},
     {"DEPLOY_INGESTION_CONTAINER_APP": "perhaps"},
+    {"ENABLE_PRIVATE_ATTACHMENTS": "perhaps"},
+    {"APPLICATION_MODE": "workflow", "ENABLE_PRIVATE_ATTACHMENTS": "true"},
 ])
 def test_contradictions_and_unknown_values_fail(values):
     with pytest.raises(ValueError):
@@ -89,7 +103,7 @@ def test_scheduler_binding_uses_returned_endpoint_and_is_nonsecret():
     settings = scheduler_settings({"HOSTED_AGENT_DEPLOYMENT": json.dumps(handoff)})
     assert settings["DURABLE_TASK_SCHEDULER_CONNECTION_STRING"] == (
         "Endpoint=https://returned-suffix.eastus.durabletask.io;"
-        "TaskHub=agent-lz;Authentication=DefaultAzure"
+        "TaskHub=agent-lz;Authentication=ManagedIdentity"
     )
     assert settings["DURABLE_TASK_HUB_NAME"] == "agent-lz"
 
@@ -123,17 +137,57 @@ def test_native_foundation_consumers_and_no_blanket_grants(host, mode, cosmos):
         assert worker["min_replicas"] >= 1
 
 
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
+def test_loaded_root_definition_native_defaults_have_no_application_cosmos_or_ingestion(host):
+    env = {
+        **environment(host), DEFINITION_ENV: str(ROOT / "app-definition.json"),
+        "ENABLE_CHAT_HISTORY": "false", "ENABLE_USER_FEEDBACK": "false", "NL2SQL_ENABLED": "false",
+    }
+    definition = validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
+    assert definition.bundled and definition.path == ROOT / "app-definition.json"
+    selected = effective_components(
+        definition, hosted_orchestration=host == "hosted", deploy_ingestion=resolve_ingestion_selection(env),
+    )
+    assert {component["name"] for component in selected} == {"ui", "orchestrator"}
+    result = compose_parameters(json.loads((ROOT / "main.parameters.json").read_text()), env)["parameters"]
+    assert result["deployCosmosDb"]["value"] is False
+    assert result["databaseContainersList"]["value"] == []
+    assert result["deployDurableTaskScheduler"]["value"] is (host == "container_apps")
+    assert all(app["service_name"] != "dataingest" for app in result["containerAppsList"]["value"])
+    assert all("CosmosDBBuiltInDataContributor" not in app["roles"] for app in result["containerAppsList"]["value"])
+
+
 def test_nl2sql_is_an_explicit_catalog_not_a_global_checkpoint_database():
     source = json.loads((ROOT / "main.parameters.json").read_text())
+    env = {**environment(), DEFINITION_ENV: str(ROOT / "app-definition.json"), "NL2SQL_ENABLED": "true"}
+    validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
     with pytest.raises(ValueError, match="NL2SQL_SOURCE_REGISTRY"):
-        compose_parameters(source, {**environment(), "NL2SQL_ENABLED": "true"})
+        compose_parameters(source, env)
     result = compose_parameters(source, {
-        **environment(), "NL2SQL_ENABLED": "true", "NL2SQL_SOURCE_REGISTRY": "cosmos",
+        **env, "NL2SQL_SOURCE_REGISTRY": "cosmos",
     })["parameters"]
     assert result["deployCosmosDb"]["value"]
     assert [c["name"] for c in result["databaseContainersList"]["value"]] == ["datasources"]
     with pytest.raises(ValueError):
-        resolve_application({**environment(), "ENABLE_PRIVATE_ATTACHMENTS": "true"})
+        resolve_application({**environment(mode="workflow"), "ENABLE_PRIVATE_ATTACHMENTS": "true"})
+
+
+def test_enabled_nl2sql_runtime_grant_is_catalog_reader_not_conversation_writer():
+    env = {
+        **environment("container_apps"), DEFINITION_ENV: str(ROOT / "app-definition.json"),
+        "NL2SQL_ENABLED": "true", "NL2SQL_SOURCE_REGISTRY": "cosmos",
+    }
+    validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
+    principal = "22222222-2222-4222-8222-222222222222"
+    with patch.object(native_access, "secret_names", return_value=()), \
+         patch.object(native_access, "_config_value", side_effect=["catalog-account", "catalog-db"]), \
+         patch.object(native_access, "ensure_cosmos_sql_role_assignment") as grant:
+        native_access.grant_runtime_features(env, principal)
+    grant.assert_called_once_with(
+        "catalog-account", "rg-test", SUB, principal, "00000000-0000-0000-0000-000000000001",
+        f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.DocumentDB/databaseAccounts/"
+        "catalog-account/dbs/catalog-db/colls/datasources",
+    )
 
 
 def test_native_metadata_is_ui_owned_and_optional_for_conversation():
@@ -142,10 +196,55 @@ def test_native_metadata_is_ui_owned_and_optional_for_conversation():
     assert resolve_application(environment(mode="workflow")).metadata
 
 
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
+@pytest.mark.parametrize("mode", ["conversational", "both"])
+def test_private_native_inputs_select_ui_metadata_not_corporate_ingestion_or_blob_writes(host, mode):
+    env = {
+        **environment(host, mode), DEFINITION_ENV: str(ROOT / "app-definition.json"),
+        "ENABLE_PRIVATE_ATTACHMENTS": "true", "ENABLE_CHAT_HISTORY": "false",
+        "ENABLE_USER_FEEDBACK": "false", "NL2SQL_ENABLED": "false",
+    }
+    validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
+    result = compose_parameters(json.loads((ROOT / "main.parameters.json").read_text()), env)["parameters"]
+    assert result["deployCosmosDb"]["value"] is True
+    assert result["databaseContainersList"]["value"] == [{
+        "name": "native-ui-metadata", "canonical_name": "NATIVE_UI_METADATA_CONTAINER", "partitionKey": "/principal_id",
+    }]
+    apps = result["containerAppsList"]["value"]
+    assert all(app["service_name"] != "dataingest" for app in apps)
+    frontend = next(app for app in apps if app["service_name"] == "frontend")
+    assert "StorageBlobDataContributor" not in frontend["roles"]
+    assert "CosmosDBBuiltInDataContributor" not in frontend["roles"]
+    published = {item["name"]: item["value"] for item in result["additionalAppConfigurationSettings"]["value"]}
+    assert published["ENABLE_PRIVATE_ATTACHMENTS"] == "true"
+    assert published["DEPLOY_INGESTION_CONTAINER_APP"] == "false"
+    with patch.object(appconfig, "_container_app", return_value={"fqdn": "ui.example", "principalId": "principal"}):
+        assert appconfig.build_settings(env)["ENABLE_PRIVATE_ATTACHMENTS"] == "true"
+    with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB"):
+        compose_parameters(json.loads((ROOT / "main.parameters.json").read_text()), {**env, "DEPLOY_COSMOS_DB": "false"})
+
+
+def test_private_native_metadata_grant_is_frontend_only_and_container_scoped():
+    from config.panel import setup
+    env = {
+        **environment(), "ENABLE_PRIVATE_ATTACHMENTS": "true",
+        "DATABASE_ACCOUNT_NAME": "ui-account", "DATABASE_NAME": "ui-db",
+    }
+    with patch.object(setup, "resolve_container_app_principal_id", return_value="ui-principal") as principal, \
+         patch.object(setup, "ensure_cosmos_sql_role_assignment", return_value=True) as grant:
+        assert setup.configure_panel_rbac(env) == 1
+    principal.assert_called_once_with("rg-test", "ca-test-frontend")
+    grant.assert_called_once_with(
+        "ui-account", "rg-test", SUB, "ui-principal", "00000000-0000-0000-0000-000000000002",
+        f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.DocumentDB/databaseAccounts/"
+        "ui-account/dbs/ui-db/colls/native-ui-metadata",
+    )
+
+
 def test_worker_client_settings_use_real_output_and_actual_registration_names():
     settings = native_deploy.runtime_settings(environment("container_apps", "both"))
-    assert settings["DURABLE_AGENT_NAME"] == "alz-conversation"
-    assert settings["DURABLE_WORKFLOW_NAME"] == "alz-research-review"
+    assert settings["DURABLE_AGENT_NAME"] == "agent-lz-conversation"
+    assert settings["DURABLE_WORKFLOW_NAME"] == "agent-lz-research-review"
     assert "Endpoint=https://returned.eastus.durabletask.io;" in settings["DURABLE_TASK_SCHEDULER_CONNECTION_STRING"]
     assert settings["HOSTED_AGENT_BASE_URL"] == settings["HOSTED_WORKFLOW_BASE_URL"] == ""
     with pytest.raises(ValueError, match="published runtime registration"):
@@ -177,13 +276,20 @@ def test_private_ca_hook_uses_provisioned_scheduler_without_network_calls():
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_hosted_both_renders_separate_native_publications_then_publishes_outputs(tmp_path, failure):
+@pytest.mark.parametrize("private_attachments", [False, True])
+def test_hosted_both_renders_separate_native_publications_then_publishes_outputs(tmp_path, failure, private_attachments):
     (tmp_path / ".azure/test").mkdir(parents=True)
     (tmp_path / ".azure/test/.env").write_text("AZURE_ENV_NAME=test\n")
     (tmp_path / "config/deployment/templates").mkdir(parents=True)
     shutil.copy(ROOT / "config/deployment/templates/native-hosted.yaml", tmp_path / "config/deployment/templates")
     shutil.copy(ROOT / "manifest.json", tmp_path)
-    calls, publications, grants = [], [], []
+    calls, publications, grants, prepared = [], [], [], []
+    def prepare(values, manifest):
+        # Real image preparation and identity discovery resolve this boundary.
+        # Shared frontend uploads must not make the workflow publication invalid.
+        resolve_application(values)
+        prepared.append(values)
+        return "sha256:" + "a" * 64, "b" * 40
     def run(args, **kwargs):
         calls.append((args, kwargs["cwd"]))
         if args[:2] == ["azd", "deploy"]:
@@ -192,18 +298,22 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
                 return subprocess.CompletedProcess(args, 1, "", "omitted")
         output = json.dumps({"AGENT_PUBLICATION_RESPONSES_ENDPOINT": f"https://test.example/{len(publications)}/responses"})
         return subprocess.CompletedProcess(args, 0, output, "")
-    with patch.object(native_deploy, "prepare_environment", return_value=("sha256:" + "a" * 64, "b" * 40)), \
+    env = {**environment(mode="both"), "ENABLE_PRIVATE_ATTACHMENTS": str(private_attachments).lower()}
+    with patch.object(native_deploy, "prepare_environment", side_effect=prepare), \
          patch.object(native_deploy, "discover", side_effect=lambda env: type("Plan", (), {"principal_id": env["HOSTED_AGENT_NAME"]})()), \
          patch.object(native_deploy, "apply", side_effect=lambda p: grants.append(p.principal_id)), \
          patch.object(native_deploy, "grant_runtime_features"):
         if failure:
             with pytest.raises(RuntimeError):
-                native_deploy.deploy_hosted(tmp_path, environment(mode="both"), run=run)
+                native_deploy.deploy_hosted(tmp_path, env, run=run)
         else:
-            result = native_deploy.deploy_hosted(tmp_path, environment(mode="both"), run=run)
+            result = native_deploy.deploy_hosted(tmp_path, env, run=run)
             assert result == {"HOSTED_AGENT_BASE_URL": "https://test.example/1", "HOSTED_WORKFLOW_BASE_URL": "https://test.example/2"}
+    assert prepared[0]["ENABLE_PRIVATE_ATTACHMENTS"] == str(private_attachments).lower()
+    assert prepared[1]["ENABLE_PRIVATE_ATTACHMENTS"] == "false"
+    assert env["ENABLE_PRIVATE_ATTACHMENTS"] == str(private_attachments).lower()
     assert [p["env"]["APPLICATION_MODE"] for p in publications] == ["conversational", "workflow"]
-    assert all(p["startupCommand"] == "python -m src.native.hosted" for p in publications)
+    assert all(p["startupCommand"] == "python -m native.hosted" for p in publications)
     assert all(p["protocols"] == [{"protocol": "responses", "version": "2.0.0"}] for p in publications)
     assert all("hooks" not in p for p in publications)  # never the stateless legacy postdeploy adapter
     assert grants == (["agent-app-orchestrator"] if failure else ["agent-app-orchestrator", "agent-app-orchestrator-workflow"])
@@ -211,7 +321,8 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
     assert bool(advertised) is not failure
 
 
-def test_ca_preparation_preserves_container_environment_and_sets_official_command(tmp_path):
+@pytest.mark.parametrize("startup_command", [None, "python -m native.durable"])
+def test_ca_preparation_preserves_container_environment_and_sets_official_command(tmp_path, startup_command):
     updates = []
     def run(args, **kwargs):
         if "show" in args:
@@ -223,10 +334,13 @@ def test_ca_preparation_preserves_container_environment_and_sets_official_comman
         if "--yaml" in args:
             updates.append(yaml.safe_load(Path(args[args.index("--yaml") + 1]).read_text()))
         return subprocess.CompletedProcess(args, 0, "", "")
-    native_deploy.prepare_container_apps(tmp_path, environment("container_apps", "both"), run=run)
+    env = environment("container_apps", "both")
+    if startup_command is not None:
+        env["CONTAINER_APPS_WORKER_STARTUP_COMMAND"] = startup_command
+    native_deploy.prepare_container_apps(tmp_path, env, run=run)
     assert len(updates) == 2
     worker = updates[1]["properties"]["template"]["containers"][0]
-    assert worker["command"] == ["python", "-m", "src.native.durable"]
+    assert worker["command"] == ["python", "-m", "native.durable"]
     assert worker["args"] == []
     assert {"name": "UNRELATED", "value": "kept"} in worker["env"]
     assert any(e["name"] == "DURABLE_TASK_SCHEDULER_CONNECTION_STRING" for e in worker["env"])

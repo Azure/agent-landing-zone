@@ -18,7 +18,7 @@
       "kind": "containerapp",
       "path": "orchestrator",
       "source": { "commit": "2c0579ef29a15bc862b150c1a6a8387f74de398e" },
-      "profiles": ["model-user", "retrieval-reader", "conversation-store"],
+      "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {
           "fqdn": "openaipublic.blob.core.windows.net",

@@ -454,11 +454,13 @@ class LifecycleParityTests(unittest.TestCase):
                 # preProvision resolves and materializes topology itself; it
                 # must invoke the module without --describe at least once
                 # (a comment may still mention --describe when explaining
-                # that later hooks read the decision back).
+                # that later hooks read the decision back). --native selects
+                # the native lifecycle but still resolves and materializes it.
                 self.assertTrue(
                     "-m config.deployment.topology\n" in content
                     or "-m config.deployment.topology)" in content
                     or "-m config.deployment.topology\"" in content
+                    or "-m config.deployment.topology --native)" in content
                     or (
                         "Invoke-PythonModule -ModuleName "
                         "'config.deployment.topology'" in content

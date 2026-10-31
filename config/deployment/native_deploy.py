@@ -65,7 +65,7 @@ def runtime_settings(environment: Mapping[str, str]) -> dict[str, str]:
             ("workflow", "DURABLE_WORKFLOW_NAME"),
         ):
             if mode in app.publications:
-                default = "alz-conversation" if mode == "conversational" else "alz-research-review"
+                default = "agent-lz-conversation" if mode == "conversational" else "agent-lz-research-review"
                 name = environment.get(key, default)
                 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", name):
                     raise ValueError(f"{key} must be a stable registration name.")
@@ -80,6 +80,9 @@ def runtime_settings(environment: Mapping[str, str]) -> dict[str, str]:
 def publication_environment(environment: Mapping[str, str], mode: str) -> dict[str, str]:
     values = {**environment, "APPLICATION_MODE": mode, "ORCHESTRATION_HOST": "hosted"}
     if mode == "workflow":
+        # Uploads are a conversational frontend capability. Keep the shared
+        # 'both' selection intact, but resolve this publication without uploads.
+        values["ENABLE_PRIVATE_ATTACHMENTS"] = "false"
         for suffix in ("NAME", "IMAGE", "IMAGE_VERSION", "STARTUP_COMMAND",
                        "IMAGE_SOURCE_COMMIT", "IMAGE_STARTUP_COMMAND_SHA256"):
             target = "HOSTED_AGENT_" + suffix
@@ -190,7 +193,7 @@ def deploy_hosted(root: Path, environment: Mapping[str, str], *, run: Run = subp
 
 def prepare_container_apps(root: Path, environment: Mapping[str, str], *, run: Run = subprocess.run) -> dict[str, str]:
     settings = runtime_settings(environment)
-    command = shlex.split(environment.get("CONTAINER_APPS_WORKER_STARTUP_COMMAND", "python -m src.native.durable"))
+    command = shlex.split(environment.get("CONTAINER_APPS_WORKER_STARTUP_COMMAND", "python -m native.durable"))
     if not command or any("uvicorn" in part or "hosted_entrypoint" in part for part in command):
         raise ValueError("Container Apps requires the confirmed standalone Durable Extension worker command.")
     _persist(root, environment, settings, run)

@@ -68,9 +68,10 @@ def resolve_application(environment: Mapping[str, str]) -> NativeApplication:
         raise ValueError("Native selection cannot be combined with legacy CHAT_BACKEND. Use a separate native environment; do not migrate or delete the previous deployment's state.")
     history = boolean(environment, "ENABLE_CHAT_HISTORY", panel)
     feedback = boolean(environment, "ENABLE_USER_FEEDBACK")
-    metadata = mode in {"workflow", "both"} or history or feedback
-    if boolean(environment, "ENABLE_PRIVATE_ATTACHMENTS"):
-        raise ValueError("ENABLE_PRIVATE_ATTACHMENTS is not supported by the current native input contract.")
+    private_attachments = boolean(environment, "ENABLE_PRIVATE_ATTACHMENTS")
+    if private_attachments and mode == "workflow":
+        raise ValueError("ENABLE_PRIVATE_ATTACHMENTS requires conversational or both mode; workflow starts do not accept private attachments.")
+    metadata = mode in {"workflow", "both"} or history or feedback or private_attachments
     # Legacy panel is mapped to product history at this boundary, not enabled
     # as a second native runtime. Materialized native topology has no panel.
     topology = "classic" if host == "container_apps" else "hosted-no-panel"
@@ -110,7 +111,7 @@ def scheduler_settings(environment: Mapping[str, str]) -> dict[str, str]:
         raise ValueError("Missing or invalid provisioned Durable Task backend; run azd provision. Scheduler endpoints must come from resource outputs.") from None
     return {
         "DURABLE_TASK_SCHEDULER_CONNECTION_STRING": (
-            f"Endpoint={endpoint.rstrip('/')};TaskHub={hub};Authentication=DefaultAzure"
+            f"Endpoint={endpoint.rstrip('/')};TaskHub={hub};Authentication=ManagedIdentity"
         ),
         "DURABLE_TASK_HUB_NAME": hub,
         "DURABLE_TASK_SCHEDULER_RESOURCE_ID": resource_id,

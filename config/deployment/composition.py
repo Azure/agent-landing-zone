@@ -147,7 +147,7 @@ def validate_ingestion_selection(
 def hosted_startup_command(environment: Mapping[str, str]) -> str:
     return (
         environment.get("HOSTED_AGENT_STARTUP_COMMAND")
-        or ("python -m src.native.hosted" if native_selected(environment) else HOSTED_STARTUP_COMMAND_DEFAULT)
+        or ("python -m native.hosted" if native_selected(environment) else HOSTED_STARTUP_COMMAND_DEFAULT)
     )
 
 
@@ -941,7 +941,7 @@ def _resolve_application_overrides(
             *([
                 _setting("ENABLE_CHAT_HISTORY", environment.get("ENABLE_CHAT_HISTORY", "false")),
                 _setting("ENABLE_USER_FEEDBACK", environment.get("ENABLE_USER_FEEDBACK", "false")),
-                _setting("ENABLE_PRIVATE_ATTACHMENTS", "false"),
+                _setting("ENABLE_PRIVATE_ATTACHMENTS", environment.get("ENABLE_PRIVATE_ATTACHMENTS", "false")),
                 _setting("NL2SQL_ENABLED", str(nl2sql_selected(environment)).lower()),
                 _setting("NL2SQL_SOURCE_REGISTRY", environment.get("NL2SQL_SOURCE_REGISTRY", "")),
                 _setting("NATIVE_TOOL_SECRET_NAMES", environment.get("NATIVE_TOOL_SECRET_NAMES", "[]")),

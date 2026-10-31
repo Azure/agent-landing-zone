@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from config.appdefinition import expand_profiles, load_definition
+from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
 from config.appdefinition.__main__ import main as cli_main
 from config.appdefinition.roles import (
     RoleAssignmentError,
@@ -235,11 +236,33 @@ class RoleAssignmentTests(unittest.TestCase):
         self.assertFalse(any(f"{SUB}/Microsoft.Storage/storageAccounts/staifx" in call for call in az.calls))
         self.assertFalse(any("Microsoft.KeyVault" in str(call) for call in az.calls))
         cosmos = [c for c in az.creates() if c[0] == "cosmosdb"]
-        self.assertEqual({"p-orch", "p-ing"}, {c[c.index("--principal-id") + 1] for c in cosmos})
+        self.assertEqual({"p-ing"}, {c[c.index("--principal-id") + 1] for c in cosmos})
 
         az.calls.clear()
         self.assertEqual([], assign_roles(bundled(), environment, hosted_orchestration=False, run_az=az))
         self.assertEqual([], az.creates())
+
+    def test_loaded_native_default_does_not_assign_legacy_cosmos_profiles(self) -> None:
+        for host in ("hosted", "container_apps"):
+            with self.subTest(host=host):
+                environment = {
+                    **CONTEXT, DEFINITION_ENV: str(ROOT / "app-definition.json"),
+                    "APPLICATION_MODE": "conversational", "ORCHESTRATION_HOST": host,
+                    "ENABLE_CHAT_HISTORY": "false", "ENABLE_USER_FEEDBACK": "false", "NL2SQL_ENABLED": "false",
+                }
+                definition = load_selected_definition(environment, repo_root=ROOT)
+                self.assertTrue(definition.bundled)
+                az = FakeAz()
+                created = assign_roles(
+                    definition, environment, hosted_orchestration=host == "hosted", run_az=az,
+                )
+                self.assertEqual(
+                    {"ui"} if host == "hosted" else {"ui", "orchestrator"},
+                    {item.component for item in created},
+                )
+                self.assertFalse(any(item.assignment.scope == "cosmosDbAccount" for item in created))
+                self.assertFalse(any(call[0] == "cosmosdb" or "Microsoft.DocumentDB" in str(call) for call in az.calls))
+                self.assertFalse(any("Microsoft.KeyVault" in str(call) for call in az.calls))
 
     def test_missing_container_app_fails_with_actionable_error(self) -> None:
         az = FakeAz()
