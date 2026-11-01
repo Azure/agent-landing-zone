@@ -320,7 +320,7 @@ def test_image_discovery_and_runtime_selection_remain_application_owned(applicat
     with patch("config.deployment.existing_images.discover_existing_images", return_value={"frontend": "cr.azurecr.io/ui@sha256:" + "a" * 64}) as read:
         plan = definition_placeholder_plan(env)
     assert plan["ui"].endswith("a" * 64)
-    assert resolve_mode(env).value == "hosted-no-panel"
+    assert resolve_mode(env).value == "hosted"
     assert read.call_args.args[0] == (application or "rg-ai")
 
 
