@@ -124,9 +124,19 @@ function Get-EmbeddingDefaultProjection {
     return $fixture.projection
 }
 
+function Get-NativePlatformProjection {
+    $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\native-platform-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    return $fixture.projection
+}
+
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0034: validate every native addition (including complete PE/DNS
+    # expressions and hub-scoped grants) before the pre-native adapters.
+    # Never exempt endpoint arrays or alter the original fingerprints.
+    $copy = Invoke-ScopedProjection $copy (Get-NativePlatformProjection)
     # Intentional post-layout default change: validate the entire native list
     # selection (including explicit-list passthrough), then restore ONLY the
     # embedding fallback SKU for the original historical fingerprints.

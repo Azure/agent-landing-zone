@@ -1,5 +1,6 @@
 """Local protected retrieval deployment contracts; no Azure credentials."""
 
+import json
 import traceback
 import unittest
 from dataclasses import replace
@@ -16,7 +17,11 @@ from tests.test_hosted_access import (
 ENV = {
     "AZURE_RESOURCE_GROUP": "test-group",
     "RESOURCE_TOKEN": "test",
-    "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+    "ORCHESTRATION_HOST": "hosted",
+    "HOSTED_AGENT_DEPLOYMENT": json.dumps({"durableTask": {
+        "resourceId": "/subscriptions/example/resourceGroups/example/providers/Microsoft.DurableTask/schedulers/example",
+        "endpoint": "https://returned.eastus.durabletask.io", "taskHubName": "agent-lz",
+    }}),
     "HOSTED_AGENT_RESOURCE_SCOPE": "https://ai.azure.com/.default",
 }
 SOURCE_IDS = {
@@ -37,9 +42,9 @@ class RetrievalPublicationTests(unittest.TestCase):
             return appconfig.build_settings({**ENV, **overrides})
 
     def test_normal_hosted_deploy_publishes_native_route_and_preserves_invocation(self):
-        for topology in ("hosted-no-panel", "hosted-panel"):
-            with self.subTest(topology=topology):
-                settings = self.build(DEPLOYMENT_TOPOLOGY=topology)
+        for mode in ("conversational", "workflow", "both"):
+            with self.subTest(mode=mode):
+                settings = self.build(APPLICATION_MODE=mode)
                 self.assertEqual("native_search", settings["RETRIEVAL_AUTH_MODE"])
                 self.assertEqual("user_delegated", settings["HOSTED_AGENT_AUTH_MODE"])
                 self.assertNotIn("RETRIEVAL_AUTH_CONFIG_JSON", settings)
@@ -51,34 +56,31 @@ class RetrievalPublicationTests(unittest.TestCase):
         self.assertNotIn("SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_ID", settings)
         self.assertNotIn("SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID", settings)
 
-    def test_classic_clears_hosted_route_without_changing_classic_auth(self):
+    def test_container_apps_has_no_hosted_invocation_route(self):
         settings = self.build(
-            DEPLOYMENT_TOPOLOGY="classic", RETRIEVAL_AUTH_MODE="native_search",
+            ORCHESTRATION_HOST="container_apps", RETRIEVAL_AUTH_MODE="native_search",
             HOSTED_AGENT_AUTH_MODE="service_identity",
         )
         self.assertEqual("", settings["RETRIEVAL_AUTH_MODE"])
         self.assertNotIn("HOSTED_AGENT_AUTH_MODE", settings)
-        self.assertEqual("orchestrator", settings["CHAT_BACKEND"])
+        self.assertNotIn("CHAT_BACKEND", settings)
 
-    def test_prepare_only_migration_keeps_classic_route_until_successful_cutover(self):
-        settings = self.build(PRESERVE_CLASSIC_RUNTIME="true")
-        self.assertEqual("", settings["RETRIEVAL_AUTH_MODE"])
-        settings = self.build(
-            PRESERVE_CLASSIC_RUNTIME="true", HOSTED_CUTOVER_COMPLETE="true",
-            HOSTED_AGENT_BASE_URL="https://agent.example.test/protocols",
-            HOSTED_AGENT_IMAGE_VERSION="sha256:" + "a" * 64,
-        )
-        self.assertEqual("native_search", settings["RETRIEVAL_AUTH_MODE"])
+    def test_retired_preservation_controls_fail_before_discovery(self):
+        for key in ("PRESERVE_CLASSIC_RUNTIME", "HOSTED_CUTOVER_COMPLETE"):
+            with self.subTest(key=key), patch("config.deployment.appconfig._container_app") as read:
+                with self.assertRaisesRegex(ValueError, "[Oo]bsolete"):
+                    self.build(**{key: "false"})
+                read.assert_not_called()
 
     def test_unknown_or_unimplemented_modes_fail_before_azure_reads(self):
         for mode in ("foundry_toolbox", "bff_obo", "auto", "native-search", "{}", 1):
-            for topology in ("classic", "hosted-no-panel"):
+            for topology in ("hosted", "container_apps"):
                 with self.subTest(mode=mode, topology=topology), patch(
                     "config.deployment.appconfig._container_app"
                 ) as read:
                     with self.assertRaisesRegex(ValueError, "RETRIEVAL_AUTH_MODE"):
                         appconfig.build_settings({
-                            **ENV, "DEPLOYMENT_TOPOLOGY": topology,
+                            **ENV, "ORCHESTRATION_HOST": topology,
                             "RETRIEVAL_AUTH_MODE": mode,
                         })
                     read.assert_not_called()
@@ -100,12 +102,12 @@ class RetrievalPublicationTests(unittest.TestCase):
 
     def test_default_native_blob_and_existing_index_routes_remain_automatic(self):
         for override in (
-            {}, {"FOUNDRY_IQ_PATTERN": "managed"},
+            {}, {"FOUNDRY_IQ_PATTERN": "managed", "DEPLOY_INGESTION_CONTAINER_APP": "true"},
             {"FOUNDRY_IQ_IS_ADLS_GEN2": "true"},
             {"FOUNDRY_IQ_PATTERN": "searchIndex",
-             "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]"},
+             "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]", "DEPLOY_INGESTION_CONTAINER_APP": "true"},
             {"RETRIEVAL_BACKEND": "ai_search",
-             "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]"},
+             "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]", "DEPLOY_INGESTION_CONTAINER_APP": "true"},
             {"FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED": "true"},
         ):
             with self.subTest(override=override):
@@ -120,9 +122,9 @@ class RetrievalPublicationTests(unittest.TestCase):
             "FABRIC_DATA_AGENT_ENABLED": "true", "SHAREPOINT_INDEXED_ENABLED": "true",
             "FOUNDRY_IQ_MCP_ENABLED": "true",
         }
-        for topology in ("classic", "hosted-no-panel"):
+        for topology in ("hosted", "container_apps"):
             with self.subTest(topology=topology):
-                settings = self.build(DEPLOYMENT_TOPOLOGY=topology, **source_settings)
+                settings = self.build(ORCHESTRATION_HOST=topology, **source_settings)
                 self.assertTrue(source_settings.keys().isdisjoint(settings))
                 self.assertNotIn("RETRIEVAL_AUTH_CONFIG_JSON", settings)
 
@@ -131,15 +133,15 @@ class RetrievalPublicationTests(unittest.TestCase):
             "unknown", "Foundry_IQ", "foundry_toolbox",
         ):
             with self.subTest(backend=backend), self.assertRaisesRegex(ValueError, "RETRIEVAL_BACKEND"):
-                self.build(RETRIEVAL_BACKEND=backend)
+                self.build(RETRIEVAL_BACKEND=backend, DEPLOY_INGESTION_CONTAINER_APP="true")
 
-    def test_publication_uses_shared_label_and_completes_prerequisites_before_cutover(self):
+    def test_publication_uses_shared_label_without_retired_route_selector(self):
         settings = self.build()
         with patch("config.deployment.appconfig._run_az") as azure:
             appconfig.publish_settings("https://store.azconfig.io", settings)
         commands = [call.args[0] for call in azure.call_args_list]
         keys = [args[args.index("--key") + 1] for args in commands]
-        self.assertLess(keys.index("RETRIEVAL_AUTH_MODE"), keys.index("CHAT_BACKEND"))
+        self.assertNotIn("CHAT_BACKEND", keys)
         for key in ("RETRIEVAL_AUTH_MODE", "HOSTED_AGENT_AUTH_MODE"):
             command = commands[keys.index(key)]
             self.assertEqual("agent-lz", command[command.index("--label") + 1])
@@ -147,8 +149,8 @@ class RetrievalPublicationTests(unittest.TestCase):
 
     def test_optional_source_ids_have_no_defaults_and_do_not_enable_sources(self):
         for overrides in (
-            {}, {"DEPLOYMENT_TOPOLOGY": "classic"},
-            {"PRESERVE_CLASSIC_RUNTIME": "true"},
+            {}, {"ORCHESTRATION_HOST": "container_apps"},
+            {"APPLICATION_MODE": "workflow"},
         ):
             with self.subTest(overrides=overrides):
                 self.assertTrue(SOURCE_IDS.keys().isdisjoint(self.build(**overrides)))
@@ -177,18 +179,18 @@ class RetrievalPublicationTests(unittest.TestCase):
                     self.assertEqual(value, command[command.index("--value") + 1])
                     self.assertEqual("agent-lz", command[command.index("--label") + 1])
                     self.assertEqual("text/plain", command[command.index("--content-type") + 1])
-                    self.assertLess(commands.index(command), len(commands) - 1)
+                    self.assertNotIn("CHAT_BACKEND", [args[args.index("--key") + 1] for args in commands])
 
     def test_invalid_source_ids_fail_before_resource_discovery_without_echoing_values(self):
         for key in SOURCE_IDS:
             for value in ("PRIVATE-MARKER", "not-a-uuid", " ", None, 123):
-                for topology in ("classic", "hosted-no-panel"):
+                for topology in ("hosted", "container_apps"):
                     with self.subTest(key=key, value_type=type(value).__name__, topology=topology), patch(
                         "config.deployment.appconfig._container_app"
                     ) as resource, patch("config.deployment.appconfig._run_az") as azure:
                         try:
                             appconfig.build_settings({
-                                **ENV, "DEPLOYMENT_TOPOLOGY": topology, key: value,
+                                **ENV, "ORCHESTRATION_HOST": topology, key: value,
                             })
                         except ValueError as error:
                             self.assertIn(key, str(error))
@@ -237,8 +239,8 @@ class NativeSearchTransportTests(unittest.TestCase):
         self.assertEqual([], self.azure.writes)
         self.assertIn(["resource", "show", "--ids", SEARCH], self.azure.calls)
 
-    def test_classic_and_no_retrieval_deployments_never_add_search_grant(self):
-        plan = self.discover(DEPLOYMENT_TOPOLOGY="classic")
+    def test_container_apps_and_no_retrieval_deployments_never_add_hosted_search_grant(self):
+        plan = self.discover(ORCHESTRATION_HOST="container_apps")
         self.assertFalse(plan.search_transport)
         self.assertEqual((), plan.grants)
         self.assertEqual([], self.azure.calls)

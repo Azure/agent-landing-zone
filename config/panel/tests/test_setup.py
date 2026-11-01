@@ -23,7 +23,7 @@ class PanelContainerGrantsTests(unittest.TestCase):
 
         self.assertEqual(
             service_names,
-            {setup.FRONTEND_APP_SERVICE_NAME, setup.DATA_INGEST_APP_SERVICE_NAME},
+            {setup.FRONTEND_APP_SERVICE_NAME},
         )
         # The hosted agent/orchestrator identity must never appear here.
         self.assertNotIn("orchestrator", service_names)
@@ -43,7 +43,7 @@ class PanelContainerGrantsTests(unittest.TestCase):
         }
 
         self.assertEqual(frontend_roles, {setup.COSMOS_DATA_CONTRIBUTOR_ROLE_GUID})
-        self.assertEqual(ingestion_roles, {setup.COSMOS_DATA_READER_ROLE_GUID})
+        self.assertEqual(ingestion_roles, set())
 
     def test_every_grant_targets_a_panel_only_container(self) -> None:
         from config.panel.settings import (
@@ -55,7 +55,7 @@ class PanelContainerGrantsTests(unittest.TestCase):
         container_names = {grant.container_name for grant in grants}
 
         self.assertEqual(
-            container_names, {OWNER_INDEX_CONTAINER_NAME, FEEDBACK_CONTAINER_NAME}
+            container_names, {"native-ui-metadata"}
         )
         self.assertNotIn("conversations", container_names)
         self.assertNotIn("datasources", container_names)
@@ -125,7 +125,7 @@ class ConfigurePanelRbacTests(unittest.TestCase):
 
     def test_noop_when_panel_not_deployed(self) -> None:
         with patch.object(setup, "_run_az") as run_az:
-            created = setup.configure_panel_rbac({"DEPLOY_ADMINISTRATIVE_PANEL": "false"})
+            created = setup.configure_panel_rbac({})
 
         self.assertEqual(created, 0)
         run_az.assert_not_called()
@@ -138,7 +138,7 @@ class ConfigurePanelRbacTests(unittest.TestCase):
         # live `az` invocation.
         with patch.object(setup, "_run_az") as run_az:
             with self.assertRaises(setup.PanelRbacError):
-                setup.configure_panel_rbac({"DEPLOY_ADMINISTRATIVE_PANEL": "true"})
+                setup.configure_panel_rbac({"APPLICATION_MODE": "workflow"})
         run_az.assert_not_called()
 
     def test_falls_back_to_az_account_show_when_subscription_id_unset(self) -> None:
@@ -158,8 +158,8 @@ class ConfigurePanelRbacTests(unittest.TestCase):
             ["account", "show", "--query", "id", "--output", "tsv"]
         )
 
-    def test_creates_four_scoped_assignments_when_none_exist(self) -> None:
-        environment = {**ENVIRONMENT_BASE, "DEPLOY_ADMINISTRATIVE_PANEL": "true"}
+    def test_creates_one_frontend_metadata_assignment_when_none_exist(self) -> None:
+        environment = {**ENVIRONMENT_BASE, "APPLICATION_MODE": "both"}
 
         def fake_run_az(arguments, required=True):
             if arguments[:2] == ["containerapp", "show"]:
@@ -178,14 +178,14 @@ class ConfigurePanelRbacTests(unittest.TestCase):
         with patch.object(setup, "_run_az", side_effect=fake_run_az) as run_az:
             created = setup.configure_panel_rbac(environment)
 
-        self.assertEqual(created, 4)
+        self.assertEqual(created, 1)
         create_calls = [
             call
             for call in run_az.call_args_list
             if call.args[0][:4] == ["cosmosdb", "sql", "role", "assignment"]
             and call.args[0][4] == "create"
         ]
-        self.assertEqual(len(create_calls), 4)
+        self.assertEqual(len(create_calls), 1)
         # Every create call's --scope must reference exactly one container,
         # never the bare account root.
         for call in create_calls:
@@ -195,7 +195,7 @@ class ConfigurePanelRbacTests(unittest.TestCase):
             self.assertIn("/colls/", scope)
 
     def test_skips_already_existing_assignment(self) -> None:
-        environment = {**ENVIRONMENT_BASE, "DEPLOY_ADMINISTRATIVE_PANEL": "true"}
+        environment = {**ENVIRONMENT_BASE, "APPLICATION_MODE": "workflow"}
         frontend_principal = "11111111-0000-0000-0000-000000000001"
 
         def fake_run_az(arguments, required=True):
@@ -228,18 +228,15 @@ class ConfigurePanelRbacTests(unittest.TestCase):
         with patch.object(setup, "_run_az", side_effect=fake_run_az) as run_az:
             created = setup.configure_panel_rbac(environment)
 
-        # Only the frontend's first-container grant is already present; the
-        # other three grants (frontend/second-container,
-        # ingestion/first-container, ingestion/second-container) still get
-        # created.
-        self.assertEqual(created, 3)
+        # The only selected grant already exists; no duplicate or wider grant.
+        self.assertEqual(created, 0)
         create_calls = [
             call
             for call in run_az.call_args_list
             if call.args[0][:4] == ["cosmosdb", "sql", "role", "assignment"]
             and call.args[0][4] == "create"
         ]
-        self.assertEqual(len(create_calls), 3)
+        self.assertEqual(len(create_calls), 0)
 
 
 if __name__ == "__main__":

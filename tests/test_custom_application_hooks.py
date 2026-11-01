@@ -163,6 +163,7 @@ function azd {
                 end = source.index('\nif [ "$had_errors"', start)
                 prefix = r"""
 set -eu
+native_mode=false
 if command -v cygpath >/dev/null; then
     FAKE_ROOT="$(cygpath -u "$FAKE_ROOT")"
     FAKE_APP="$(cygpath -u "$FAKE_APP")"

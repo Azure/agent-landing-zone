@@ -161,7 +161,7 @@ locals {
       for key, app in azurerm_container_app.shell : key => {
         id                   = app.id
         name                 = app.name
-        fqdn                 = app.ingress[0].fqdn
+        fqdn                 = try(app.ingress[0].fqdn, "")
         principal_id         = var.useUAI ? azurerm_user_assigned_identity.compute["app:${key}"].principal_id : app.identity[0].principal_id
         identity_resource_id = var.useUAI ? azurerm_user_assigned_identity.compute["app:${key}"].id : ""
       }
@@ -347,14 +347,17 @@ resource "azurerm_container_app" "shell" {
     type         = var.useUAI ? "UserAssigned" : "SystemAssigned"
     identity_ids = var.useUAI ? [azurerm_user_assigned_identity.compute["app:${each.key}"].id] : []
   }
-  ingress {
-    external_enabled           = each.value.external
-    target_port                = each.value.target_port
-    transport                  = "auto"
-    allow_insecure_connections = false
-    traffic_weight {
-      percentage      = 100
-      latest_revision = true
+  dynamic "ingress" {
+    for_each = try(each.value.disable_ingress, false) ? [] : [each.value]
+    content {
+      external_enabled           = ingress.value.external
+      target_port                = ingress.value.target_port
+      transport                  = "auto"
+      allow_insecure_connections = false
+      traffic_weight {
+        percentage      = 100
+        latest_revision = true
+      }
     }
   }
   dynamic "dapr" {

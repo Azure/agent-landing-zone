@@ -16,7 +16,9 @@ import time
 from typing import Mapping
 from urllib.parse import urlsplit
 
-from config.deployment.composition import DeploymentMode, is_truthy, resolve_mode
+from config.deployment.composition import is_bundled_application, is_truthy, requires_hosted_foundation, resolve_mode
+from config.deployment.native import OrchestrationHost
+from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
 
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +35,7 @@ ENDPOINT_SUFFIXES = {
     "APP_CONFIG_ENDPOINT": ".azconfig.io",
     "AZURE_AI_PROJECT_ENDPOINT": ".services.ai.azure.com",
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": ".azurecr.io",
+    "DURABLE_TASK_SCHEDULER_ENDPOINT": ".durabletask.io",
 }
 _DNS_SCRIPT = (
     "import json, socket, sys; "
@@ -185,9 +188,18 @@ def check_stage(environment: Mapping[str, str], stage: str) -> int:
     keys = ["APP_CONFIG_ENDPOINT"]
     if stage == "hosted-build":
         keys = ["AZURE_CONTAINER_REGISTRY_ENDPOINT"]
-    elif stage == "pre-deploy" and resolve_mode(environment) is not DeploymentMode.CLASSIC:
+    elif stage == "pre-deploy" and requires_hosted_foundation(
+        environment, hosted_orchestration=is_bundled_application(environment)
+        and resolve_mode(environment) is OrchestrationHost.HOSTED,
+    ):
         keys.append("AZURE_AI_PROJECT_ENDPOINT")
     endpoints = [(key, environment.get(key) or "") for key in keys]
+    if stage == "pre-deploy" and is_bundled_application(environment) and resolve_application(environment).host == "container_apps":
+        # Validate the actual output before probing it. No constructed hostname,
+        # public-network fallback or RUN_FROM_JUMPBOX connectivity bypass.
+        scheduler_settings(environment)
+        backend = json.loads(environment["HOSTED_AGENT_DEPLOYMENT"])["durableTask"]
+        endpoints.append(("DURABLE_TASK_SCHEDULER_ENDPOINT", backend["endpoint"]))
     for key, endpoint in endpoints:
         if not endpoint.strip():
             raise PrivateNetworkError(

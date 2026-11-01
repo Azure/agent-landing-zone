@@ -187,11 +187,11 @@ def definition_placeholder_plan(
         load_selected_definition,
         validate_definition,
     )
-    from config.deployment.composition import DeploymentMode, resolve_mode, resolve_ingestion_selection
+    from config.deployment.composition import resolve_mode, resolve_ingestion_selection
 
     definition = load_selected_definition(environment)
     validate_definition(definition)
-    hosted = resolve_mode(environment) is not DeploymentMode.CLASSIC
+    hosted = resolve_mode(environment).value == "hosted"
     components = effective_components(
         definition, hosted_orchestration=hosted,
         deploy_ingestion=resolve_ingestion_selection(environment),

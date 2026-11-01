@@ -694,10 +694,10 @@ run "additional_settings_override_only_matching_label_and_keep_key_vault_referen
         value       = "{\"uri\":\"https://tfservices-vault.vault.azure.net/secrets/custom-credential\"}"
         contentType = "application/vnd.microsoft.appconfig.keyvaultref+json;charset=utf-8"
       },
-      { name = "CHAT_BACKEND", value = "orchestrator" },
+      { name = "ORCHESTRATION_HOST", value = "hosted" },
       { name = "HOSTED_AGENT_BASE_URL", value = "https://runtime.example.test" },
       { name = "HOSTED_AGENT_BASE_URL", value = "https://staging.example.test", label = "staging" },
-      { name = "PANEL_HISTORY_OWNER_BINDING_VALIDATED", value = "false" }
+      { name = "APPLICATION_MODE", value = "both" }
     ]
   }
   assert {
@@ -718,16 +718,32 @@ run "additional_settings_override_only_matching_label_and_keep_key_vault_referen
     condition = (
       azapi_resource.foundation_setting[jsonencode(["CUSTOM_CREDENTIAL", "agent-lz"])].body.properties.contentType == "application/vnd.microsoft.appconfig.keyvaultref+json;charset=utf-8" &&
       jsondecode(azapi_resource.foundation_setting[jsonencode(["CUSTOM_CREDENTIAL", "agent-lz"])].body.properties.value).uri == "https://tfservices-vault.vault.azure.net/secrets/custom-credential" &&
-      !contains(keys(azapi_resource.foundation_setting), jsonencode(["CHAT_BACKEND", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["ORCHESTRATION_HOST", "agent-lz"])) &&
       !contains(keys(azapi_resource.foundation_setting), jsonencode(["HOSTED_AGENT_BASE_URL", "agent-lz"])) &&
       azapi_resource.foundation_setting[jsonencode(["HOSTED_AGENT_BASE_URL", "staging"])].body.properties.value == "https://staging.example.test" &&
-      !contains(keys(azapi_resource.foundation_setting), jsonencode(["PANEL_HISTORY_OWNER_BINDING_VALIDATED", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["APPLICATION_MODE", "agent-lz"])) &&
       one([for setting in local.app_config_bootstrap.runtime_settings : setting.value if setting.name == "HOSTED_AGENT_BASE_URL"]) == "https://runtime.example.test" &&
       length(local.app_config_bootstrap.runtime_settings) == 3 &&
       length(local.app_config_bootstrap.foundation_owned_keys) == length(azapi_resource.foundation_setting)
     )
     error_message = "Key Vault references must stay references; runtime inputs must be explicitly handed off, never reset by provision or silently discarded."
   }
+}
+
+run "obsolete_topology_setting_is_rejected" {
+  command = plan
+  variables {
+    additionalAppConfigurationSettings = [{ name = "DEPLOYMENT_TOPOLOGY", value = "classic" }]
+  }
+  expect_failures = [var.additionalAppConfigurationSettings]
+}
+
+run "obsolete_preservation_setting_is_rejected_even_false" {
+  command = plan
+  variables {
+    additionalAppConfigurationSettings = [{ name = "PRESERVE_CLASSIC_RUNTIME", value = "false" }]
+  }
+  expect_failures = [var.additionalAppConfigurationSettings]
 }
 
 run "blob_iq_foundation_settings_preserve_typed_inputs" {

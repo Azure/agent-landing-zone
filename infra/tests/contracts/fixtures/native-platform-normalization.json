@@ -1,0 +1,575 @@
+{
+  "description": "ADR-0034 exact native DTS and worker-ingress delta from pre-native 951a1df26b1b01b3b6ec42c95f507b1a9ae9e3c8 to 86a19f0094810a189f0739c33c012bcf647aaa25, Azure CLI Bicep 0.42.1. Checked before existing adapters; original security fingerprints and non-native endpoint entries remain unchanged.",
+  "projection": {
+    "kind": "object",
+    "changes": {
+      "metadata": {
+        "kind": "object",
+        "changes": {
+          "_generator": {
+            "kind": "object",
+            "changes": {
+              "templateHash": {
+                "kind": "changed",
+                "before": "8825839436411291538",
+                "after": "17569006079893418708"
+              }
+            }
+          }
+        }
+      },
+      "outputs": {
+        "kind": "object",
+        "changes": {
+          "HOSTED_AGENT_DEPLOYMENT": {
+            "kind": "object",
+            "changes": {
+              "value": {
+                "kind": "object",
+                "changes": {
+                  "durableTask": {
+                    "kind": "added",
+                    "after": "[if(parameters('deployDurableTaskScheduler'), reference('durableTask').outputs.backend.value, null())]"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "parameters": {
+        "kind": "object",
+        "changes": {
+          "deployDurableTaskScheduler": {
+            "kind": "added",
+            "after": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Provision the native Container Apps execution backend. Application publishing remains outside infra."
+              }
+            }
+          },
+          "durableTaskHubName": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "defaultValue": "agent-lz",
+              "minLength": 3,
+              "maxLength": 64
+            }
+          },
+          "durableTaskSchedulerCapacity": {
+            "kind": "added",
+            "after": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1
+            }
+          },
+          "durableTaskSchedulerName": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "durableTaskSchedulerSku": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "defaultValue": "Consumption",
+              "allowedValues": [
+                "Consumption",
+                "Dedicated"
+              ]
+            }
+          },
+          "existingPrivateDnsZoneDurableTaskResourceId": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          }
+        }
+      },
+      "resources": {
+        "kind": "object",
+        "changes": {
+          "containerApps": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "disableIngress": {
+                        "kind": "added",
+                        "after": {
+                          "value": "[coalesce(tryGet(parameters('containerAppsList')[copyIndex()], 'disable_ingress'), false())]"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "durableTask": {
+            "kind": "added",
+            "after": {
+              "condition": "[parameters('deployDurableTaskScheduler')]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "durable-task",
+              "resourceGroup": "[variables('_applicationResourceGroupName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "name": {
+                    "value": "[coalesce(parameters('durableTaskSchedulerName'), format('dts-{0}', parameters('resourceToken')))]"
+                  },
+                  "taskHubName": {
+                    "value": "[parameters('durableTaskHubName')]"
+                  },
+                  "location": {
+                    "value": "[parameters('location')]"
+                  },
+                  "tags": {
+                    "value": "[variables('_tags')]"
+                  },
+                  "networkIsolation": {
+                    "value": "[variables('_networkIsolation')]"
+                  },
+                  "sku": {
+                    "value": "[parameters('durableTaskSchedulerSku')]"
+                  },
+                  "capacity": {
+                    "value": "[parameters('durableTaskSchedulerCapacity')]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.42.1.51946",
+                      "templateHash": "16422654222955581443"
+                    }
+                  },
+                  "parameters": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "taskHubName": {
+                      "type": "string",
+                      "defaultValue": "agent-lz"
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "type": "object",
+                      "defaultValue": {}
+                    },
+                    "networkIsolation": {
+                      "type": "bool",
+                      "defaultValue": false
+                    },
+                    "sku": {
+                      "type": "string",
+                      "defaultValue": "Consumption",
+                      "allowedValues": [
+                        "Consumption",
+                        "Dedicated"
+                      ]
+                    },
+                    "capacity": {
+                      "type": "int",
+                      "defaultValue": 1,
+                      "minValue": 1
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.DurableTask/schedulers",
+                      "apiVersion": "2026-02-01",
+                      "name": "[parameters('name')]",
+                      "location": "[parameters('location')]",
+                      "tags": "[parameters('tags')]",
+                      "properties": {
+                        "sku": {
+                          "name": "[parameters('sku')]",
+                          "capacity": "[parameters('capacity')]"
+                        },
+                        "ipAllowlist": [],
+                        "publicNetworkAccess": "[if(parameters('networkIsolation'), 'Disabled', 'Enabled')]"
+                      }
+                    },
+                    {
+                      "type": "Microsoft.DurableTask/schedulers/taskHubs",
+                      "apiVersion": "2026-02-01",
+                      "name": "[format('{0}/{1}', parameters('name'), parameters('taskHubName'))]",
+                      "properties": {},
+                      "dependsOn": [
+                        "[resourceId('Microsoft.DurableTask/schedulers', parameters('name'))]"
+                      ]
+                    }
+                  ],
+                  "outputs": {
+                    "backend": {
+                      "type": "object",
+                      "value": {
+                        "resourceId": "[resourceId('Microsoft.DurableTask/schedulers', parameters('name'))]",
+                        "endpoint": "[reference(resourceId('Microsoft.DurableTask/schedulers', parameters('name')), '2026-02-01').endpoint]",
+                        "taskHubName": "[parameters('taskHubName')]",
+                        "taskHubResourceId": "[resourceId('Microsoft.DurableTask/schedulers/taskHubs', parameters('name'), parameters('taskHubName'))]"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "durableTaskRoles": {
+            "kind": "added",
+            "after": {
+              "copy": {
+                "name": "durableTaskRoles",
+                "count": "[length(parameters('containerAppsList'))]"
+              },
+              "condition": "[and(and(parameters('deployDurableTaskScheduler'), variables('_deployContainerApps')), contains(createArray('frontend', 'orchestrator'), parameters('containerAppsList')[copyIndex()].service_name))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[format('durable-task-role-{0}', copyIndex())]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "name": {
+                    "value": "[format('durable-task-{0}', parameters('containerAppsList')[copyIndex()].service_name)]"
+                  },
+                  "roleAssignments": {
+                    "value": [
+                      {
+                        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('_1.roles').DurableTaskDataContributor.guid)]",
+                        "resourceId": "[reference('durableTask').outputs.backend.value.taskHubResourceId]",
+                        "principalId": "[if(variables('_useUAI'), reference(format('containerAppsUAI[{0}]', copyIndex())).outputs.principalId.value, reference(format('containerApps[{0}]', copyIndex())).outputs.systemAssignedMIPrincipalId.value)]",
+                        "principalType": "ServicePrincipal"
+                      }
+                    ]
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "languageVersion": "2.0",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.42.1.51946",
+                      "templateHash": "4447600592370161114"
+                    }
+                  },
+                  "definitions": {
+                    "roleAssignmentInfo": {
+                      "type": "object",
+                      "properties": {
+                        "roleDefinitionId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Role definition ID for the RBAC role to assign to the identity."
+                          }
+                        },
+                        "principalId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Principal ID of the identity to assign to."
+                          }
+                        },
+                        "resourceId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Resource ID to assing too."
+                          }
+                        },
+                        "principalType": {
+                          "type": "string",
+                          "allowedValues": [
+                            "Device",
+                            "ForeignGroup",
+                            "Group",
+                            "ServicePrincipal",
+                            "User"
+                          ],
+                          "metadata": {
+                            "description": "Type of principal to assign the role to."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "name": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "roleAssignments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/roleAssignmentInfo"
+                      },
+                      "defaultValue": [],
+                      "metadata": {
+                        "description": "Role assignments to create."
+                      }
+                    }
+                  },
+                  "resources": {
+                    "roleAssignment": {
+                      "copy": {
+                        "name": "roleAssignment",
+                        "count": "[length(parameters('roleAssignments'))]"
+                      },
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('role-{0}-{1}-{2}', take(parameters('name'), 31), uniqueString(parameters('name')), copyIndex())]",
+                      "subscriptionId": "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), subscription().subscriptionId, split(parameters('roleAssignments')[copyIndex()].resourceId, '/')[2])]",
+                      "resourceGroup": "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), resourceGroup().name, split(parameters('roleAssignments')[copyIndex()].resourceId, '/')[4])]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "roleAssignments": {
+                            "value": [
+                              "[parameters('roleAssignments')[copyIndex()]]"
+                            ]
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "languageVersion": "2.0",
+                          "contentVersion": "1.0.0.0",
+                          "definitions": {
+                            "roleAssignmentInfo": {
+                              "type": "object",
+                              "properties": {
+                                "resourceId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Resource ID for target role assingment."
+                                  }
+                                },
+                                "roleDefinitionId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Role definition ID for the RBAC role to assign to the identity."
+                                  }
+                                },
+                                "principalId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Principal ID of the identity to assign to."
+                                  }
+                                },
+                                "principalType": {
+                                  "type": "string",
+                                  "allowedValues": [
+                                    "Device",
+                                    "ForeignGroup",
+                                    "Group",
+                                    "ServicePrincipal",
+                                    "User"
+                                  ],
+                                  "metadata": {
+                                    "description": "Type of the principal ID."
+                                  }
+                                }
+                              },
+                              "metadata": {
+                                "description": "Role assignment information for an identity."
+                              }
+                            }
+                          },
+                          "parameters": {
+                            "roleAssignments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/definitions/roleAssignmentInfo"
+                              },
+                              "defaultValue": [],
+                              "metadata": {
+                                "description": "Role assignments to create for the resource."
+                              }
+                            }
+                          },
+                          "resources": {
+                            "assignment": {
+                              "copy": {
+                                "name": "assignment",
+                                "count": "[length(parameters('roleAssignments'))]"
+                              },
+                              "type": "Microsoft.Authorization/roleAssignments",
+                              "apiVersion": "2022-04-01",
+                              "name": "[guid(parameters('roleAssignments')[copyIndex()].principalId, parameters('roleAssignments')[copyIndex()].roleDefinitionId, parameters('roleAssignments')[copyIndex()].resourceId)]",
+                              "scope": "[if(or(empty(parameters('roleAssignments')[copyIndex()].resourceId), equals(toLower(parameters('roleAssignments')[copyIndex()].resourceId), toLower(resourceGroup().id))), '', parameters('roleAssignments')[copyIndex()].resourceId)]",
+                              "properties": {
+                                "principalId": "[parameters('roleAssignments')[copyIndex()].principalId]",
+                                "roleDefinitionId": "[parameters('roleAssignments')[copyIndex()].roleDefinitionId]",
+                                "principalType": "[parameters('roleAssignments')[copyIndex()].principalType]"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[format('containerApps[{0}]', copyIndex())]",
+                "[format('containerAppsUAI[{0}]', copyIndex())]",
+                "durableTask"
+              ]
+            }
+          },
+          "firewall": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "template": {
+                    "kind": "object",
+                    "changes": {
+                      "metadata": {
+                        "kind": "object",
+                        "changes": {
+                          "_generator": {
+                            "kind": "object",
+                            "changes": {
+                              "templateHash": {
+                                "kind": "changed",
+                                "before": "7977258170224867178",
+                                "after": "12606235335634393575"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "variables": {
+                        "kind": "object",
+                        "changes": {
+                          "_1._3": {
+                            "kind": "object",
+                            "changes": {
+                              "DurableTaskDataContributor": {
+                                "kind": "added",
+                                "after": {
+                                  "guid": "0ad04412-c4d5-4796-b79c-f76d14c8d402",
+                                  "key": "DurableTaskDataContributor"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "privateEndpoints": {
+            "kind": "object",
+            "changes": {
+              "dependsOn": {
+                "kind": "changed",
+                "before": [
+                  "appConfig",
+                  "containerEnv",
+                  "containerRegistry",
+                  "cosmosDBAccount",
+                  "keyVault",
+                  "privateDnsZones",
+                  "searchService",
+                  "searchServiceAIFoundry",
+                  "speechService",
+                  "storageAccount",
+                  "virtualNetwork"
+                ],
+                "after": [
+                  "appConfig",
+                  "containerEnv",
+                  "containerRegistry",
+                  "cosmosDBAccount",
+                  "durableTask",
+                  "keyVault",
+                  "privateDnsZones",
+                  "searchService",
+                  "searchServiceAIFoundry",
+                  "speechService",
+                  "storageAccount",
+                  "virtualNetwork"
+                ]
+              },
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "endpoints": {
+                        "kind": "object",
+                        "changes": {
+                          "value": {
+                            "kind": "changed",
+                            "before": "[concat(if(and(variables('_networkIsolation'), parameters('deployStorageAccount')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').storageAccountName), 'privateLinkServiceConnections', createArray(createObject('name', format('blobConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('storageAccount').outputs.resourceId.value, 'groupIds', createArray('blob')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'blob'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployCosmosDb')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').dbAccountName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('cosmosConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('cosmosDBAccount').outputs.resourceId.value, 'groupIds', createArray('Sql')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cosmos'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySearchService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').searchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchService').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), variables('_deployAiFoundrySearch')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').aiFoundrySearchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchAIFConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchServiceAIFoundry').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployKeyVault')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').keyVaultName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('kvConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('keyVault').outputs.resourceId.value, 'groupIds', createArray('vault')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'keyVault'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployAppConfig')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').appConfigName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('appConfigConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('appConfig').outputs.resourceId.value, 'groupIds', createArray('configurationStores')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'appConfig'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerEnv')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerEnvName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', 'ccaConnection', 'properties', createObject('privateLinkServiceId', reference('containerEnv').outputs.resourceId.value, 'groupIds', createArray('managedEnvironments')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'containerApps'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerRegistry')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerRegistryName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('{0}-registry-connection', variables('resourceNames').containerRegistryName), 'properties', createObject('privateLinkServiceId', reference('containerRegistry').outputs.resourceId.value, 'groupIds', createArray('registry')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'acr'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySpeechService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').speechServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('speechConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('speechService').outputs.resourceId.value, 'groupIds', createArray('account')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cognitiveServices'))), createArray()))]",
+                            "after": "[concat(if(and(variables('_networkIsolation'), parameters('deployDurableTaskScheduler')), createArray(createObject('name', format('pe-dts-{0}', parameters('resourceToken')), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', 'durableTaskConnection', 'properties', createObject('privateLinkServiceId', reference('durableTask').outputs.backend.value.resourceId, 'groupIds', createArray('scheduler')))), 'privateDnsZoneGroup', if(parameters('policyManagedPrivateDns'), null(), createObject('name', 'durableTaskDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'scheduler', 'privateDnsZoneResourceId', if(not(empty(parameters('existingPrivateDnsZoneDurableTaskResourceId'))), parameters('existingPrivateDnsZoneDurableTaskResourceId'), resourceId(variables('_dnsZonesSubscriptionId'), variables('_dnsZonesTargetRg'), 'Microsoft.Network/privateDnsZones', 'privatelink.durabletask.io')))))))), createArray()), if(and(variables('_networkIsolation'), parameters('deployStorageAccount')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').storageAccountName), 'privateLinkServiceConnections', createArray(createObject('name', format('blobConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('storageAccount').outputs.resourceId.value, 'groupIds', createArray('blob')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'blob'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployCosmosDb')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').dbAccountName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('cosmosConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('cosmosDBAccount').outputs.resourceId.value, 'groupIds', createArray('Sql')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cosmos'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySearchService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').searchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchService').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), variables('_deployAiFoundrySearch')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').aiFoundrySearchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchAIFConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchServiceAIFoundry').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployKeyVault')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').keyVaultName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('kvConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('keyVault').outputs.resourceId.value, 'groupIds', createArray('vault')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'keyVault'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployAppConfig')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').appConfigName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('appConfigConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('appConfig').outputs.resourceId.value, 'groupIds', createArray('configurationStores')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'appConfig'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerEnv')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerEnvName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', 'ccaConnection', 'properties', createObject('privateLinkServiceId', reference('containerEnv').outputs.resourceId.value, 'groupIds', createArray('managedEnvironments')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'containerApps'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerRegistry')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerRegistryName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('{0}-registry-connection', variables('resourceNames').containerRegistryName), 'properties', createObject('privateLinkServiceId', reference('containerRegistry').outputs.resourceId.value, 'groupIds', createArray('registry')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'acr'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySpeechService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').speechServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('speechConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('speechService').outputs.resourceId.value, 'groupIds', createArray('account')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cognitiveServices'))), createArray()))]"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "variables": {
+        "kind": "object",
+        "changes": {
+          "_1._3": {
+            "kind": "object",
+            "changes": {
+              "DurableTaskDataContributor": {
+                "kind": "added",
+                "after": {
+                  "guid": "0ad04412-c4d5-4796-b79c-f76d14c8d402",
+                  "key": "DurableTaskDataContributor"
+                }
+              }
+            }
+          },
+          "_dnsZonesList": {
+            "kind": "changed",
+            "before": "[if(variables('_deployPrivateDnsZones'), concat(if(variables('_byoZoneCogSvcs'), createArray(), createArray(createObject('dnsName', 'privatelink.cognitiveservices.azure.com', 'virtualNetworkLinkName', format('{0}-cogsvcs-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOpenAi'), createArray(), createArray(createObject('dnsName', 'privatelink.openai.azure.com', 'virtualNetworkLinkName', format('{0}-openai-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAiServices'), createArray(), createArray(createObject('dnsName', 'privatelink.services.ai.azure.com', 'virtualNetworkLinkName', format('{0}-aiservices-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneSearch'), createArray(), createArray(createObject('dnsName', 'privatelink.search.windows.net', 'virtualNetworkLinkName', format('{0}-search-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneCosmos'), createArray(), createArray(createObject('dnsName', 'privatelink.documents.azure.com', 'virtualNetworkLinkName', format('{0}-cosmos-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneBlob'), createArray(), createArray(createObject('dnsName', format('privatelink.blob.{0}', environment().suffixes.storage), 'virtualNetworkLinkName', format('{0}-blob-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneKeyVault'), createArray(), createArray(createObject('dnsName', 'privatelink.vaultcore.azure.net', 'virtualNetworkLinkName', format('{0}-kv-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAppConfig'), createArray(), createArray(createObject('dnsName', 'privatelink.azconfig.io', 'virtualNetworkLinkName', format('{0}-appcfg-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(and(parameters('deployContainerEnv'), not(variables('_byoZoneContainerApps'))), createArray(createObject('dnsName', format('privatelink.{0}.azurecontainerapps.io', parameters('location')), 'virtualNetworkLinkName', format('{0}-containerapps-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))), createArray()), if(and(parameters('deployContainerRegistry'), not(variables('_byoZoneAcr'))), createArray(createObject('dnsName', format('privatelink.{0}', parameters('acrDnsSuffix')), 'virtualNetworkLinkName', format('{0}-containerregistry-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))), createArray()), if(variables('_deployAmpls'), concat(if(variables('_byoZoneAppInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.applicationinsights.io', 'virtualNetworkLinkName', format('{0}-appi-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAzureMonitor'), createArray(), createArray(createObject('dnsName', 'privatelink.monitor.azure.com', 'virtualNetworkLinkName', format('{0}-azure-monitor-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOmsOpInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.oms.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-oms-opinsights-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOdsOpInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.ods.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-ods-opinsights-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAzureAutomation'), createArray(), createArray(createObject('dnsName', 'privatelink.agentsvc.azure.automation.net', 'virtualNetworkLinkName', format('{0}-azure-automation-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))))), createArray())), createArray())]",
+            "after": "[if(variables('_deployPrivateDnsZones'), concat(if(and(parameters('deployDurableTaskScheduler'), empty(parameters('existingPrivateDnsZoneDurableTaskResourceId'))), createArray(createObject('dnsName', 'privatelink.durabletask.io', 'virtualNetworkLinkName', format('{0}-durabletask-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))), createArray()), if(variables('_byoZoneCogSvcs'), createArray(), createArray(createObject('dnsName', 'privatelink.cognitiveservices.azure.com', 'virtualNetworkLinkName', format('{0}-cogsvcs-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOpenAi'), createArray(), createArray(createObject('dnsName', 'privatelink.openai.azure.com', 'virtualNetworkLinkName', format('{0}-openai-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAiServices'), createArray(), createArray(createObject('dnsName', 'privatelink.services.ai.azure.com', 'virtualNetworkLinkName', format('{0}-aiservices-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneSearch'), createArray(), createArray(createObject('dnsName', 'privatelink.search.windows.net', 'virtualNetworkLinkName', format('{0}-search-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneCosmos'), createArray(), createArray(createObject('dnsName', 'privatelink.documents.azure.com', 'virtualNetworkLinkName', format('{0}-cosmos-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneBlob'), createArray(), createArray(createObject('dnsName', format('privatelink.blob.{0}', environment().suffixes.storage), 'virtualNetworkLinkName', format('{0}-blob-std-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneKeyVault'), createArray(), createArray(createObject('dnsName', 'privatelink.vaultcore.azure.net', 'virtualNetworkLinkName', format('{0}-kv-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAppConfig'), createArray(), createArray(createObject('dnsName', 'privatelink.azconfig.io', 'virtualNetworkLinkName', format('{0}-appcfg-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(and(parameters('deployContainerEnv'), not(variables('_byoZoneContainerApps'))), createArray(createObject('dnsName', format('privatelink.{0}.azurecontainerapps.io', parameters('location')), 'virtualNetworkLinkName', format('{0}-containerapps-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))), createArray()), if(and(parameters('deployContainerRegistry'), not(variables('_byoZoneAcr'))), createArray(createObject('dnsName', format('privatelink.{0}', parameters('acrDnsSuffix')), 'virtualNetworkLinkName', format('{0}-containerregistry-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))), createArray()), if(variables('_deployAmpls'), concat(if(variables('_byoZoneAppInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.applicationinsights.io', 'virtualNetworkLinkName', format('{0}-appi-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAzureMonitor'), createArray(), createArray(createObject('dnsName', 'privatelink.monitor.azure.com', 'virtualNetworkLinkName', format('{0}-azure-monitor-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOmsOpInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.oms.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-oms-opinsights-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneOdsOpInsights'), createArray(), createArray(createObject('dnsName', 'privatelink.ods.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-ods-opinsights-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix'))))), if(variables('_byoZoneAzureAutomation'), createArray(), createArray(createObject('dnsName', 'privatelink.agentsvc.azure.automation.net', 'virtualNetworkLinkName', format('{0}-azure-automation-link{1}', variables('resourceNames').vnetName, variables('_dnsZonesLinkSuffix')))))), createArray())), createArray())]"
+          }
+        }
+      }
+    }
+  }
+}

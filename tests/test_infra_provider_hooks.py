@@ -263,13 +263,13 @@ elif module in ("config.deployment.terraform_groups", "config.deployment.resourc
         "create_resource_groups": True, "ownershipFile": str(ownership),
     }))
 elif module == "config.deployment.topology":
+    if "--describe" in args:
+        record("selection-validation")
+        print("{}")
+        sys.exit(0)
     record("topology")
-    assert os.environ["AZURE_RESOURCE_GROUP"] == "rg-ai"
-    assert os.environ["AZURE_APP_RESOURCE_GROUP"] == "rg-app"
-    assert os.environ["AZURE_NETWORK_RESOURCE_GROUP"] == "rg-net"
-    assert os.environ["CREATE_RESOURCE_GROUPS"] == "true"
-    print("DEPLOYMENT_TOPOLOGY=classic")
-    print("USE_FOUNDRY_HOSTED_AGENTS=false")
+    print("ORCHESTRATION_HOST=container_apps")
+    print("APPLICATION_MODE=conversational")
 elif module == "config.deployment.firewall":
     record("firewall")
     assert Path(argument("--input")) == root / "main.parameters.json"
@@ -284,8 +284,8 @@ elif module == "config.deployment.terraform_inputs":
     assert argument("--environment") == "-"
     assert Path(argument("--app-definition")) == root / "app-definition.json"
     incoming = json.load(sys.stdin)
-    assert incoming["DEPLOYMENT_TOPOLOGY"] == "classic"
-    assert incoming["USE_FOUNDRY_HOSTED_AGENTS"] == "false"
+    assert incoming["ORCHESTRATION_HOST"] == "container_apps"
+    assert incoming["APPLICATION_MODE"] == "conversational"
     assert incoming["AZURE_FIREWALL_SKU"] == "Basic"
     assert incoming["DEPLOY_AZURE_FIREWALL_MANAGEMENT_SUBNET"] == "true"
     assert incoming["DEPLOY_GATEWAY_SUBNET"] == "false"
@@ -432,7 +432,7 @@ def test_complete_hook_prepares_selected_inputs_and_short_circuits(
         command, cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=120
     )
     output = result.stdout + result.stderr
-    expected = ["appdefinition", "terraform_groups" if provider == "terraform" else "resource_groups",
+    expected = ["selection-validation", "appdefinition", "terraform_groups" if provider == "terraform" else "resource_groups",
                 "topology", "firewall"]
     if failure != "firewall":
         expected.append("inputs")

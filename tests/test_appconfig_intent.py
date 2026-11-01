@@ -23,13 +23,13 @@ ENVIRONMENT = {
     "USE_EXISTING_VNET": "false",
     "ENABLE_AGENTIC_RETRIEVAL": "false",
     "SIDE_BY_SIDE": "true",
-    "DEPLOYMENT_TOPOLOGY": "classic",
+    "ORCHESTRATION_HOST": "container_apps",
     "APP_CONFIG_ENDPOINT": "https://fixture.azconfig.io",
     "RESOURCE_TOKEN": "fixture",
 }
 AUTHORITY = {
-    "CHAT_BACKEND": "orchestrator",
-    "DEPLOYMENT_TOPOLOGY": "classic",
+    "ORCHESTRATION_HOST": "container_apps",
+    "APPLICATION_MODE": "conversational",
     "HOSTED_AGENT_BASE_URL": "",
     "HOSTED_AGENT_IMAGE_VERSION": "",
     "AZURE_RESOURCE_GROUP": "rg-fixture",
@@ -56,10 +56,10 @@ def by_name(entries):
 
 
 def test_ordinary_override_is_consumed_from_declared_source_on_fresh_runner(tmp_path):
-    loaded = resolved(tmp_path, [{"name": "HOSTED_HISTORY_MAX_ITEMS", "value": "50"}])
+    loaded = resolved(tmp_path, [{"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "50"}])
     published = by_name(intent.prepare_publication(loaded, AUTHORITY))
-    assert published["HOSTED_HISTORY_MAX_ITEMS"] == {
-        "name": "HOSTED_HISTORY_MAX_ITEMS", "value": "50",
+    assert published["HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS"] == {
+        "name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "50",
         "label": "agent-lz", "contentType": "text/plain",
     }
     assert "AZURE_RESOURCE_GROUP" not in published
@@ -89,7 +89,7 @@ def test_substitution_is_once_only_and_literals_metadata_survive(tmp_path):
     ("PANEL_OPERATOR_SURFACES_ENABLED", "true"),
 ])
 def test_explicit_cutover_and_evidence_conflicts_fail_before_writes(tmp_path, name, value):
-    with pytest.raises(ValueError, match="authority|protected"):
+    with pytest.raises(ValueError, match="authority|protected|obsolete"):
         loaded = resolved(tmp_path, [{"name": name, "value": value}])
         intent.prepare_publication(loaded, AUTHORITY)
 
@@ -102,18 +102,18 @@ def test_platform_identity_override_is_routed_to_existing_owner_or_rejected(tmp_
 
 
 @pytest.mark.parametrize("setting,match", [
-    ({"name": "CHAT_BACKEND", "value": "orchestrator", "contentType": "application/json"}, "contentType|protected"),
-    ({"name": "HOSTED_HISTORY_MAX_ITEMS", "value": "bad", "contentType": "application/json"}, "valid JSON"),
-    ({"name": "HOSTED_HISTORY_MAX_ITEMS", "value": "0"}, "between"),
+    ({"name": "APPLICATION_MODE", "value": "conversational", "contentType": "application/json"}, "contentType|protected"),
+    ({"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "bad", "contentType": "application/json"}, "valid JSON"),
+    ({"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "0"}, "positive integer"),
     ({"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "nonnumeric"}, "positive integer"),
-    ({"name": "PANEL_HISTORY_ENABLED", "value": "yes"}, "true or false"),
+    ({"name": "PANEL_HISTORY_ENABLED", "value": "yes"}, "obsolete"),
 ])
 def test_invalid_metadata_and_ordinary_values_fail(tmp_path, setting, match):
     with pytest.raises(ValueError, match=match):
         intent.prepare_publication(resolved(tmp_path, [setting]), AUTHORITY)
 
 
-@pytest.mark.parametrize("name", ["AUDIT_HMAC_KEY", "HOSTED_CONVERSATION_CAPABILITY_KEY", "HOSTED_HISTORY_MAX_ITEMS"])
+@pytest.mark.parametrize("name", ["AUDIT_HMAC_KEY", "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS"])
 def test_runtime_key_vault_references_are_never_flattened(tmp_path, name):
     with pytest.raises(ValueError, match="owner|protected"):
         loaded = resolved(tmp_path, [{
@@ -137,7 +137,7 @@ def test_label_identity_case_and_unknown_extensions_remain_foundation_owned(tmp_
 
 
 def test_canonical_panel_database_key_stays_foundation_owned():
-    setting = intent.Setting(name="PANEL_FEEDBACK_DATABASE_CONTAINER", value="custom", label="agent-lz", contentType="text/plain")
+    setting = intent.Setting(name="NATIVE_UI_METADATA_CONTAINER", value="custom", label="agent-lz", contentType="text/plain")
     loaded = intent.RuntimeIntent([setting], [setting], frozenset([setting["name"]]), frozenset())
     assert not intent.is_runtime(setting, loaded)
     assert setting["name"] not in by_name(intent.prepare_publication(loaded, AUTHORITY))
@@ -199,24 +199,24 @@ def test_cli_validates_everything_before_any_publication(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_cli_uses_selected_environment_preserves_ephemeral_gate_and_writes_metadata(tmp_path, monkeypatch):
+def test_cli_uses_only_selected_environment_and_writes_metadata(tmp_path, monkeypatch):
     args = main_context(monkeypatch, declaration(tmp_path, [
-        {"name": "HOSTED_HISTORY_MAX_ITEMS", "value": "50", "contentType": "application/json"},
+        {"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "50", "contentType": "application/json"},
     ]))
     seen = []
     monkeypatch.setenv("AZURE_APP_RESOURCE_GROUP", "ambient-wrong-group")
     monkeypatch.setenv("HOSTED_CUTOVER_COMPLETE", "false")
     def build(environment, **kwargs):
         assert "AZURE_APP_RESOURCE_GROUP" not in environment
-        assert environment["HOSTED_CUTOVER_COMPLETE"] == "false"
+        assert "HOSTED_CUTOVER_COMPLETE" not in environment
         return dict(AUTHORITY)
     monkeypatch.setattr(appconfig, "build_settings", build)
     monkeypatch.setattr(appconfig, "_run_az", lambda args, **kwargs: seen.append(args))
     assert appconfig.main(args) == 0
-    record = next(args for args in seen if args[args.index("--key") + 1] == "HOSTED_HISTORY_MAX_ITEMS")
+    record = next(args for args in seen if args[args.index("--key") + 1] == "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS")
     assert record[record.index("--content-type") + 1] == "application/json"
     assert record[record.index("--value") + 1] == "50"
-    assert seen[-1][seen[-1].index("--key") + 1] == "CHAT_BACKEND"
+    assert not any("CHAT_BACKEND" in args for args in seen)
     assert not any("SEARCH_RAG_INDEX_NAME" in args for args in seen)
 
 

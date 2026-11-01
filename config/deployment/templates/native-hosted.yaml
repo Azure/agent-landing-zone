@@ -1,0 +1,24 @@
+# Application publication, never an infrastructure deployment.
+# Values are rendered before azd's azure.ai.agent extension reads the service.
+name: agent-landing-zone-native-hosted
+services:
+  publication:
+    host: azure.ai.agent
+    project: .
+    language: docker
+    kind: hosted
+    docker:
+      remoteBuild: true
+    container:
+      resources:
+        cpu: "2"
+        memory: "4Gi"
+    protocols:
+      - protocol: responses
+        version: "2.0.0"
+    env:
+      APP_CONFIG_ENDPOINT: ${APP_CONFIG_ENDPOINT}
+      APP_CONFIG_TLS_COMPATIBILITY: "${APP_CONFIG_TLS_COMPATIBILITY=false}"
+      OTEL_EXPERIMENTAL_RESOURCE_DETECTORS: ""
+      APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: "true"
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "${HOSTED_AGENT_CAPTURE_MESSAGE_CONTENT=false}"

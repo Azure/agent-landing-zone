@@ -46,12 +46,16 @@ PROFILES: dict[str, CapabilityProfile] = {
     for profile in (
         CapabilityProfile(
             BASE_PROFILE,
-            "Implicit for every component: read configuration, pull images, read secrets.",
+            "Implicit for every component: read configuration and pull images; no secret access.",
             (
                 RoleAssignment("AppConfigurationDataReader", SCOPE_APP_CONFIG),
                 RoleAssignment("AcrPull", SCOPE_CONTAINER_REGISTRY),
-                RoleAssignment("KeyVaultSecretsUser", SCOPE_KEY_VAULT),
             ),
+        ),
+        CapabilityProfile(
+            "secret-reader",
+            "Resolve explicitly required Key Vault secrets. App Configuration access alone does not grant this.",
+            (RoleAssignment("KeyVaultSecretsUser", SCOPE_KEY_VAULT),),
         ),
         CapabilityProfile(
             "model-user",

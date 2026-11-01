@@ -186,7 +186,7 @@ try {
     Assert-Equal 'APIM Key Vault HTTPS outbound path' @($rule.name, $rule.properties.direction, $rule.properties.access, $rule.properties.protocol, $rule.properties.destinationPortRange, $rule.properties.destinationAddressPrefix) @('AllowKeyVaultOutbound', 'Outbound', 'Allow', 'Tcp', '443', 'AzureKeyVault')
     $appSubnet = "[if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), '')]"
     Assert-Equal 'AMPLS dedicated application subnet with no fallback' $t.resources.privateEndpointPrivateLinkScope.properties.parameters.subnetResourceId "[if(variables('_networkIsolation'), createObject('value', format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName'))), createObject('value', ''))]"
-    Assert-Equal 'Five application PE aggregator overrides remain dedicated' ([regex]::Matches($t.resources.privateEndpoints.properties.parameters.endpoints.value, [regex]::Escape($appSubnet.Trim('[', ']'))).Count) 5
+    Assert-Equal 'Six application PE aggregator overrides including DTS remain dedicated' ([regex]::Matches($t.resources.privateEndpoints.properties.parameters.endpoints.value, [regex]::Escape($appSubnet.Trim('[', ']'))).Count) 6
 
     $v = $t.resources.networkLayoutValidation.properties.template
     Assert-Equal 'Isolated validation only' $t.resources.networkLayoutValidation.condition "[variables('_networkIsolation')]"

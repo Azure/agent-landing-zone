@@ -253,7 +253,7 @@ class GovernanceSetupTests(TestCase):
 
     def test_rollback_contract_pins_validated_governance_component_pair(self):
         rollback = json.loads(
-            (REPO_ROOT / "config" / "deployment" / "rollback.json").read_text(
+            (REPO_ROOT / "tests" / "fixtures" / "historical-runtime-rollback.json").read_text(
                 encoding="utf-8"
             )
         )

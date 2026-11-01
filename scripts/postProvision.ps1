@@ -274,24 +274,19 @@ function Set-AgentLzAppConfiguration {
     $environmentName = Get-OptionalEnvValue 'AZURE_ENV_NAME' (Get-OptionalEnvValue 'ENVIRONMENT_NAME')
     $deploymentName = Get-OptionalEnvValue 'DEPLOYMENT_NAME'
     $release = Get-OptionalEnvValue 'RELEASE'
-    # ADR-0001 rev. 5: read back the deployment topology that scripts/preProvision
-    # already resolved and materialized into the azd environment (mirrored into
-    # process env above), rather than re-deriving the fresh/existing/sticky
-    # decision here. config.deployment.topology --describe performs no Azure CLI
-    # lookups; it is a pure read-back of DEPLOYMENT_TOPOLOGY / the legacy flag
-    # pair, so postProvision always agrees with preProvision's decision.
+    # Read canonical selection using the shared, Azure-read-free resolver.
     $topologyJson = Invoke-PythonModule -ModuleName 'config.deployment.topology' -Arguments @('--describe')
     if ($LASTEXITCODE -ne 0 -or -not $topologyJson) {
-        Write-Error "Failed to resolve the Agent Landing Zone deployment topology. Ensure scripts/preProvision ran successfully before postProvision."
+        Write-Error "Failed to resolve native application selection. Ensure scripts/preProvision ran successfully before postProvision."
         exit 1
     }
     $topologyInfo = ([string]$topologyJson).Trim() | ConvertFrom-Json
-    # The requested topology remains hosted throughout migration, while the
-    # shared resolver reports a classic effective runtime until both the
-    # immutable image and hosted endpoint exist.
-    $runtimeTopology = [string]$topologyInfo.runtime_topology
-    $hostedMode = $runtimeTopology -ne 'classic'
-    $administrativePanel = $runtimeTopology -eq 'hosted-panel'
+    if (-not $topologyInfo.bundled_application) {
+        Invoke-PythonModule -ModuleName 'config.deployment.appconfig'
+        if ($LASTEXITCODE -ne 0) { Write-Error "Custom application runtime settings could not be published."; exit $LASTEXITCODE }
+        return
+    }
+    $hostedMode = $topologyInfo.ORCHESTRATION_HOST -ceq 'hosted'
     $deployIngestion = [bool]$topologyInfo.deploy_ingestion_container_app
     $cosmosEnabled = [bool]$topologyInfo.deploy_cosmos_db
 
@@ -522,7 +517,8 @@ function Set-AgentLzAppConfiguration {
     $logAnalyticsResourceId = Get-OptionalEnvValue 'LOG_ANALYTICS_RESOURCE_ID' "$resourceGroupId/providers/Microsoft.OperationalInsights/workspaces/$logAnalyticsName"
 
     $frontendFqdn = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $frontendAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$frontendAppName FQDN" -Required
-    $orchestratorFqdn = if ($hostedMode) { '' } else { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $orchestratorAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$orchestratorAppName FQDN" -Required }
+    # The native Durable worker has no HTTP ingress in either application mode.
+    $orchestratorFqdn = ''
     $dataIngestFqdn = if ($deployIngestion) { Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $dataIngestAppName, '--query', 'properties.configuration.ingress.fqdn') -Description "$dataIngestAppName FQDN" -Required } else { '' }
 
     $frontendPrincipalId = Invoke-AzTsv -Arguments @('containerapp', 'show', '-g', $resourceGroup, '-n', $frontendAppName, '--query', 'identity.principalId') -Description "$frontendAppName principal id"
@@ -895,19 +891,6 @@ if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
 }
 
 #-------------------------------------------------------------------------------
-# 2) Hosted conversation continuity
-#-------------------------------------------------------------------------------
-if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
-    Write-Host "`n🔐 Publishing fail-closed delegated continuity defaults..."
-    Write-Host "🚀 Running config.continuity.setup..."
-    Invoke-PythonModule -ModuleName 'config.continuity.setup'
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "✅ Fail-closed delegated continuity defaults published."
-} else {
-    Write-Host "⏭️  Skipping hosted continuity setup (missing APP_CONFIG_ENDPOINT)."
-}
-
-#-------------------------------------------------------------------------------
 # 3) AI Foundry Setup
 #-------------------------------------------------------------------------------
 if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
@@ -954,9 +937,9 @@ if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
     Write-Host "🚀 Running config.panel.setup..."
     Invoke-PythonModule -ModuleName 'config.panel.setup'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "✅ Administrative panel Cosmos RBAC finished (no-op unless DEPLOY_ADMINISTRATIVE_PANEL=true)."
+    Write-Host "✅ Native frontend metadata Cosmos RBAC finished (no-op when metadata is not required)."
 } else {
-    Write-Host "⏭️  Skipping administrative panel Cosmos RBAC (missing APP_CONFIG_ENDPOINT)."
+    Write-Host "⏭️  Skipping native frontend metadata Cosmos RBAC (missing APP_CONFIG_ENDPOINT)."
 }
 
 #-------------------------------------------------------------------------------
