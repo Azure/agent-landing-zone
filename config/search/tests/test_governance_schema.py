@@ -141,6 +141,67 @@ class GovernanceSearchSchemaTests(unittest.TestCase):
 
         self.assertEqual(existing["fields"][0]["type"], "Edm.DateTimeOffset")
 
+    def test_existing_index_permission_enforcement_is_reconciled_without_rebuild(self):
+        desired = {
+            "name": "rag-index",
+            "permissionFilterOption": "enabled",
+            "fields": [
+                {
+                    "name": "metadata_security_user_ids",
+                    "type": "Collection(Edm.String)",
+                    "filterable": True,
+                    "permissionFilter": "userIds",
+                }
+            ],
+        }
+        for current_option in (None, "disabled", "enabled"):
+            with self.subTest(current_option=current_option):
+                existing = {
+                    **desired,
+                    "semantic": {"configurations": [{"name": "operator-owned"}]},
+                }
+                if current_option is None:
+                    del existing["permissionFilterOption"]
+                else:
+                    existing["permissionFilterOption"] = current_option
+                with patch.object(
+                    setup, "get_search_resource", return_value=(existing, '"etag"')
+                ):
+                    updates = setup.prepare_index_updates(
+                        {"indexes": [desired]},
+                        Mock(),
+                        "https://search.search.windows.net",
+                        "2025-05-01-preview",
+                    )
+                _, body, added_fields, etag, if_none_match = updates[0]
+                self.assertEqual(added_fields, [])
+                self.assertEqual(etag, '"etag"')
+                self.assertIsNone(if_none_match)
+                self.assertEqual(existing.get("permissionFilterOption"), current_option)
+                if current_option == "enabled":
+                    self.assertIsNone(body)
+                else:
+                    self.assertEqual(body["permissionFilterOption"], "enabled")
+                    self.assertEqual(body["semantic"], existing["semantic"])
+
+    def test_incompatible_permission_annotation_blocks_upgrade(self):
+        existing = {
+            "fields": [
+                {"name": "users", "type": "Collection(Edm.String)", "filterable": True}
+            ]
+        }
+        desired = {
+            "permissionFilterOption": "enabled",
+            "fields": [
+                {
+                    **existing["fields"][0],
+                    "permissionFilter": "userIds",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "permissionFilter"):
+            setup.merge_additive_index_schema(existing, desired)
+
     def test_existing_index_is_updated_with_put_and_never_deleted(self):
         credential = Mock()
         existing = {

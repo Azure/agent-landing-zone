@@ -1,7 +1,7 @@
 # general
 
 azure-identity==1.26.0
-azure-appconfiguration==1.9.0
+azure-appconfiguration==1.10.0
 
 # app container apps
 
@@ -14,12 +14,12 @@ azure-mgmt-cognitiveservices==13.6.0
 # search
 
 requests==2.34.2
-azure-keyvault-secrets==4.11.2
+azure-keyvault-secrets==4.11.3
 jinja2==3.1.6
 
 # platform outputs contract validation
 
-jsonschema==4.23.0
+jsonschema==4.26.0
 
 # application definitions
 

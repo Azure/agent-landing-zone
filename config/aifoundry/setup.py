@@ -36,7 +36,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
-from azure.core.exceptions import ClientAuthenticationError
+from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
 from azure.appconfiguration import AzureAppConfigurationClient
 from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
 from azure.mgmt.cognitiveservices.models import (
@@ -46,6 +46,8 @@ from azure.mgmt.cognitiveservices.models import (
     RaiBlocklistItemProperties
 )
 from .keyvault import KeyVaultClient
+from config.deployment.resource_groups import resource_group_for
+from config.deployment.context import bound_resource_id
 
 # ── Constants ─────────────────────────────────────────
 REQUIRED_ENV_VARS = ["APP_CONFIG_ENDPOINT"]
@@ -80,15 +82,30 @@ def cfg(client: AzureAppConfigurationClient, key: str, label: str = 'agent-lz', 
     """Fetch a single value from App Configuration; exit if missing or empty."""
     try:
         setting = client.get_configuration_setting(key=key, label=label)
+    except ResourceNotFoundError:
+        if not required:
+            return ""
+        logging.error("❗️ Key '%s' not found in App Configuration", key)
+        sys.exit(1)
     except Exception as e:
         logging.error("❗️ Could not fetch key '%s': %s", key, e)
-        if required:
-            sys.exit(1)
-        return ""
+        sys.exit(1)
     if required and (setting is None or not setting.value):
         logging.error("❗️ Key '%s' not found or empty in App Configuration", key)
         sys.exit(1)
     return setting.value
+
+
+def foundry_resource_group(client: AzureAppConfigurationClient) -> str:
+    context = {
+        "AZURE_RESOURCE_GROUP": cfg(client, "AZURE_RESOURCE_GROUP"),
+        "AZURE_FOUNDRY_RESOURCE_GROUP": cfg(client, "AZURE_FOUNDRY_RESOURCE_GROUP", required=False),
+    }
+    group = resource_group_for(context, "foundry")
+    declared = (os.environ.get("AZURE_RESOURCE_GROUP") or "").strip()
+    if declared and group.lower() != declared.lower():
+        raise ValueError("App Configuration Foundry destination conflicts with the deployment environment.")
+    return group
 
 # ── JSON File Utilities ───────────────────────────────
 def load_and_replace(path: str, replacements: Dict[str, str]) -> Dict[str, Any]:
@@ -142,18 +159,30 @@ def add_ai_foundry_account_api_key_to_key_vault(
     account_name: str,
     vault_uri: str,
     secret_name: str
-) -> None:
-    """Fetches the AI Foundry Account API key and stores it in Azure Key Vault."""
+) -> bool:
+    """Store an evaluation API key only when the account allows local authentication."""
     try:
+        account = mgmt_client.accounts.get(resource_group, account_name)
+        if account.properties.disable_local_auth is True:
+            logging.info(
+                "Local authentication is disabled for account %s; "
+                "evaluation API-key injection is not applicable. Use Microsoft Entra ID.",
+                account_name,
+            )
+            return False
         logging.info("🔑 Fetching AI Foundry Account API key for account %s ...", account_name)
         keys = mgmt_client.accounts.list_keys(resource_group, account_name)
         api_key = keys.key1
+        if not api_key:
+            raise ValueError("The Foundry account returned an empty evaluation API key.")
         logging.info("🔒 Storing API key in Key Vault at %s ...", vault_uri)
         kv_client = KeyVaultClient(vault_uri)
         kv_client.set_secret(secret_name, api_key)
         logging.info("✅ Secret %s set successfully in Key Vault.", secret_name)
+        return True
     except Exception as e:
         logging.error("❗️ Failed to set secret in Key Vault: %s", e)
+        sys.exit(1)
 
 # ── Blocklist Logic ──────────────────────────────────
 def configure_blocklist(client: CognitiveServicesManagementClient, resource_group: str, account_name: str, bl_def: Dict[str, Any], bl_name: str) -> None:
@@ -268,8 +297,16 @@ def main() -> None:
     # The token will be obtained when actually needed by the App Configuration client
     app_conf = AzureAppConfigurationClient(endpoint, cred)
     subscription_id = cfg(app_conf, "SUBSCRIPTION_ID")
-    resource_group = cfg(app_conf, "AZURE_RESOURCE_GROUP")
+    resource_group = foundry_resource_group(app_conf)
     account_name = cfg(app_conf, "AI_FOUNDRY_ACCOUNT_NAME")
+    account_id = cfg(app_conf, "AI_FOUNDRY_ACCOUNT_RESOURCE_ID", required=False)
+    if account_id:
+        context = bound_resource_id(account_id, {
+            "AZURE_SUBSCRIPTION_ID": subscription_id,
+            "AZURE_RESOURCE_GROUP": resource_group,
+        }, "Microsoft.CognitiveServices/accounts", area="application")
+        if context.name.lower() != account_name.lower():
+            raise ValueError("Foundry account name and ARM ID conflict.")
     logging.info(f"Loaded: subscriptionId={subscription_id}, resourceGroupName={resource_group}")
     logging.info(f"Loaded: aiFoundryAccountName={account_name}")
     # Determine deployment name from list
@@ -316,14 +353,16 @@ def main() -> None:
     # Store API key in Key Vault
     logging.info("🔑 Adding AI Foundry Account API Key to Key Vault …")
     key_vault_uri = cfg(app_conf, "KEY_VAULT_URI")
-    add_ai_foundry_account_api_key_to_key_vault(
+    secret_stored = add_ai_foundry_account_api_key_to_key_vault(
         client,
         resource_group,
         account_name,
         key_vault_uri,
         SECRET_NAME
     )
-    logging.info("✅ RAI blocklist, policy, deployment association, and secret injection complete.")
+    logging.info("✅ RAI blocklist, policy, and deployment association complete.")
+    if secret_stored:
+        logging.info("✅ Evaluation API-key injection complete.")
 
 if __name__ == "__main__":
     main()

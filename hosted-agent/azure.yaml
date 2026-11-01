@@ -51,6 +51,8 @@ services:
         version: "1.0.0"
     env:
       APP_CONFIG_ENDPOINT: ${APP_CONFIG_ENDPOINT}
+      KEY_VAULT_URI: ${KEY_VAULT_URI}
+      APP_CONFIG_TLS_COMPATIBILITY: "${APP_CONFIG_TLS_COMPATIBILITY=false}"
       # APPLICATIONINSIGHTS_CONNECTION_STRING intentionally omitted: it is a reserved env var
       # name for Foundry hosted agents (all FOUNDRY_*/AGENT_* vars, plus this one, are reserved
       # per the container-image-spec) and the Create Agent API rejects it if present. The

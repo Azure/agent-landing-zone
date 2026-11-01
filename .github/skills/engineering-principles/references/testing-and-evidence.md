@@ -7,6 +7,12 @@ Choose validation according to the changed boundary:
 - Setup modules and adapters: integration-style tests with mocked Azure
   boundaries.
 - PowerShell or shell hooks: syntax plus behavioral parity checks.
+- Infrastructure: assess Bicep-to-Terraform and Terraform-to-Bicep parity for
+  every change. Run the relevant checks for both implementations and their
+  shared lifecycle; preserve Terraform's committed lock and module pins.
+  Report counterpart changes or justified non-impact, approved differences
+  and unverified scenarios. Compare behavior/contracts rather than generated
+  names, and never describe compilation, mocks or a plan as deployed parity.
 - Multi-repository changes: validate the exact commit or tag combination that
   will be pinned in `manifest.json`.
 - Identity and document authorization: negative tests proving an unauthorized

@@ -1,12 +1,14 @@
 ---
 name: documentation-consistency
-description: Keeps GPT-RAG user and operator documentation aligned with shipped behavior. Use for features, configuration keys, deployment parameters, defaults, component pins, operations, or breaking changes.
+description: Keeps Agent Landing Zone user and operator documentation aligned with shipped behavior. Use for features, configuration keys, deployment parameters, defaults, component pins, operations, or breaking changes.
 ---
 
-# GPT-RAG documentation consistency
+# Agent Landing Zone documentation consistency
 
-User-facing documentation lives on the `docs` branch of `Azure/agent-landing-zone` and is
-published at https://azure.github.io/agent-landing-zone/.
+User-facing documentation lives on `main` in `Azure/AI-Landing-Zones` and is
+published at https://azure.github.io/AI-Landing-Zones/agent-landing-zone/
+(ADR-0014). Current product pages describe the latest shipped behavior;
+do not add release-comparison blocks or version-gating sidebars.
 
 1. Identify the user or operator behavior that changed.
 2. Search the documentation source for the feature, configuration key,

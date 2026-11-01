@@ -5,7 +5,7 @@
 {% set work_iq_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (WORK_IQ_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (WORK_IQ_KNOWLEDGE_SOURCE_NAME | default('', true)) %}
 {% set fabric_iq_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (FABRIC_IQ_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (FABRIC_IQ_KNOWLEDGE_SOURCE_NAME | default('', true)) and (FABRIC_IQ_WORKSPACE_ID | default('', true)) and (FABRIC_IQ_ONTOLOGY_ID | default('', true)) %}
 {% set fabric_data_agent_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (FABRIC_DATA_AGENT_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME | default('', true)) and (FABRIC_DATA_AGENT_WORKSPACE_ID | default('', true)) and (FABRIC_DATA_AGENT_DATA_AGENT_ID | default('', true)) %}
-{% set sharepoint_indexed_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (SHAREPOINT_INDEXED_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME | default('', true)) and (SHAREPOINT_INDEXED_INDEX_NAME | default('', true)) and (SHAREPOINT_INDEXED_SITE_URL | default('', true)) and (SHAREPOINT_INDEXED_TENANT_ID | default('', true)) %}
+{% set sharepoint_indexed_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (SHAREPOINT_INDEXED_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME | default('', true)) and (SHAREPOINT_INDEXED_SITE_URL | default('', true)) and (SHAREPOINT_INDEXED_TENANT_ID | default('', true)) %}
 {% set web_grounding_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (WEB_GROUNDING_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME | default('', true)) %}
 {% set web_allowed_domains = [] %}
 {% for _d in (WEB_GROUNDING_ALLOWED_DOMAINS | default('', true)).replace(';', ',').replace('\n', ',').split(',') %}
@@ -18,11 +18,12 @@
 {% set foundry_iq_mcp_sources = FOUNDRY_IQ_MCP_SOURCES_JSON if (FOUNDRY_IQ_MCP_SOURCES_JSON is iterable and FOUNDRY_IQ_MCP_SOURCES_JSON is not string and FOUNDRY_IQ_MCP_SOURCES_JSON is not mapping) else [] %}
 {% set foundry_iq_mcp_enabled = RETRIEVAL_BACKEND == 'foundry_iq' and (FOUNDRY_IQ_MCP_ENABLED | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] and (foundry_iq_mcp_sources | length) > 0 %}
 {% set foundry_iq_mcp_reasoning_effort = FOUNDRY_IQ_MCP_REASONING_EFFORT | default('low', true) %}
+{% set requires_planning_model = foundry_iq_mcp_enabled or fabric_iq_enabled or fabric_data_agent_enabled %}
 {
   "indexes": [
     {
       "name": "{{SEARCH_RAG_INDEX_NAME}}",
-      "permissionFilterOption": "disabled",
+      "permissionFilterOption": "enabled",
       "description": "RAG index for document retrieval. Contains chunked documents with content, metadata, and vectors for semantic search.",
       "fields": [
         { "name": "id",                             "type": "Edm.String",               "key": true,  "searchable": true,  "retrievable": true, "filterable": true, "analyzer": "keyword" },
@@ -445,6 +446,13 @@
       "name": "{{WORK_IQ_KNOWLEDGE_SOURCE_NAME}}",
       "kind": "workIQ",
       "description": "Microsoft 365 Work IQ knowledge source (grounds retrieval on the signed-in user's Microsoft 365 context).",
+      "workIQParameters": {
+        "entraAppAuthentication": {
+          "applicationId": {{ WORK_IQ_APPLICATION_ID | default('') | tojson }},
+          "federatedCredentialId": {{ WORK_IQ_FEDERATED_CREDENTIAL_ID | default('') | tojson }}{% if WORK_IQ_TENANT_ID | default('') %},
+          "tenantId": {{ WORK_IQ_TENANT_ID | tojson }}{% endif %}
+        }
+      },
       "encryptionKey": null
     }
     {% endif %}
@@ -476,11 +484,31 @@
     {
       "name": "{{SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME}}",
       "kind": "indexedSharePoint",
-      "description": "SharePoint Indexed knowledge source (grounds retrieval on a pre-built AI Search index of a SharePoint site via Microsoft Graph app-only auth).",
+      "description": "Native indexed SharePoint source with delegated query-time document permissions.",
       "indexedSharePointParameters": {
-        "indexName": "{{SHAREPOINT_INDEXED_INDEX_NAME}}",
-        "siteUrl": "{{SHAREPOINT_INDEXED_SITE_URL}}",
-        "tenantId": "{{SHAREPOINT_INDEXED_TENANT_ID}}"
+        "connectionString": {{ ('SharePointOnlineEndpoint=' ~ SHAREPOINT_INDEXED_SITE_URL ~ ';ApplicationId=' ~ (SHAREPOINT_INDEXED_APPLICATION_ID | default('')) ~ ';FederatedCredentialApplicationId=' ~ (SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID | default('')) ~ ';TenantId=' ~ SHAREPOINT_INDEXED_TENANT_ID) | tojson }},
+        "containerName": "defaultSiteLibrary",
+        "query": null,
+        "ingestionParameters": {
+          "networkAccessMode": "{% if (NETWORK_ISOLATION | default('false') | string | lower) in ['true', '1', 'yes', 'y', 't'] %}private{% else %}public{% endif %}",
+          "identity": {% if SEARCH_SERVICE_UAI_RESOURCE_ID is defined and SEARCH_SERVICE_UAI_RESOURCE_ID %}{
+            "@odata.type": "#Microsoft.Azure.Search.DataUserAssignedIdentity",
+            "userAssignedIdentity": "{{SEARCH_SERVICE_UAI_RESOURCE_ID}}"
+          }{% else %}null{% endif %},
+          "embeddingModel": {% if EMBEDDING_MODEL_INFO %}{
+            "kind": "azureOpenAI",
+            "azureOpenAIParameters": {
+              "resourceUri": "{{EMBEDDING_MODEL_INFO.endpoint}}",
+              "deploymentId": "{{EMBEDDING_MODEL_INFO.deployment_name}}",
+              "modelName": "{{EMBEDDING_MODEL_INFO.model_name}}"
+            }
+          }{% else %}null{% endif %},
+          "chatCompletionModel": null,
+          "disableImageVerbalization": false,
+          "ingestionSchedule": null,
+          "ingestionPermissionOptions": ["userIds", "groupIds"],
+          "contentExtractionMode": "minimal"
+        }
       },
       "encryptionKey": null
     }
@@ -540,7 +568,7 @@
         { "name": "{{WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME}}" }{% endif %}{% if foundry_iq_mcp_enabled %}{% for mcp_src in foundry_iq_mcp_sources %},
         { "name": {{ mcp_src.name | tojson }} }{% endfor %}{% endif %}
       ],
-      "models": {% if foundry_iq_mcp_enabled %}[
+      "models": {% if requires_planning_model %}[
         {
           "kind": "azureOpenAI",
           "azureOpenAIParameters": {
@@ -551,7 +579,7 @@
         }
       ]{% else %}[]{% endif %},
       "encryptionKey": null,
-      "retrievalReasoningEffort": { "kind": "{% if foundry_iq_mcp_enabled %}{{foundry_iq_mcp_reasoning_effort}}{% else %}minimal{% endif %}" }
+      "retrievalReasoningEffort": { "kind": "{% if foundry_iq_mcp_enabled %}{{foundry_iq_mcp_reasoning_effort}}{% elif requires_planning_model %}low{% else %}minimal{% endif %}" }
     }
   ]{% else %}[]{% endif %}
 }

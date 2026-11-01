@@ -47,7 +47,11 @@ agents are not created at this stage.
 
 ### `azd up` (full stack)
 
-Runs `azd provision` and then `azd deploy`, with every step above in order.
+First runs `preup`: read-only definition validation and environment-binding
+comparison (`python -m config.appdefinition --validate --check-binding`).
+An invalid definition or mismatched application stops before azd's deployment
+pipeline can initialize a resource group. It then runs `azd provision` and
+`azd deploy`, with every step above in order.
 With no `AGENTLZ_APP_DEFINITION`, it deploys the default trio exactly as the
 current release does.
 
@@ -78,6 +82,11 @@ current release does.
 ## Failure behavior (FR-016)
 
 - Fail closed **before** any Azure change, with one actionable message.
+- The `preup` guard enforces that boundary for `azd up`. Standalone
+  `azd provision` can initialize its resource group before `preprovision`;
+  run `azd hooks run preup` first when requiring the same no-write boundary.
+  A rejected definition after an empty resource-group write is not strict
+  no-Azure-change acceptance evidence.
 - Definition errors include a JSON pointer (for example `/components/1/source`).
 - Re-running the same command after a fix is idempotent and converges.
 - No automatic rollback and no silent fallback to the default trio.

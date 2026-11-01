@@ -33,7 +33,6 @@ If this change depends on pull requests in other repositories within the solutio
 - [ ] [agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator)
 - [ ] [agent-app-ingestion](https://github.com/Azure/agent-app-ingestion)
 - [ ] [agent-app-ui](https://github.com/Azure/agent-app-ui)
-- [ ] [gpt-rag-mcp](https://github.com/azure/gpt-rag-mcp)
 
 ## Does this require changes to project documentation?
 

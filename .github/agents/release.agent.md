@@ -1,10 +1,10 @@
 ---
 name: release
-description: Prepares and validates GPT-RAG multi-repository releases. Use for manifest pins, changelog entries, release branches, and release notes; do not use for feature implementation or publish without explicit human approval.
+description: Prepares and validates Agent Landing Zone multi-repository releases. Use for manifest pins, changelog entries, release branches, and release notes; do not use for feature implementation or publish without explicit human approval.
 tools: ["read", "search", "edit", "execute"]
 ---
 
-# GPT-RAG release
+# Agent Landing Zone release
 
 Follow `AGENTS.md`, the complete release rules in
 `.github/copilot-instructions.md`, and the `multi-repo-release` skill.

@@ -41,10 +41,13 @@ Zones brand. Use `agent-lz` (labels) or `agentlz` / `AGENTLZ_` (identifiers).
    and both environment prefixes (`AGENTLZ_`, then `GPT_RAG_`) for one release.
 2. The umbrella switches to writing only `agent-lz` / `AGENTLZ_`.
 3. `manifest.json` moves its pins to the renamed component releases.
+4. Completed in v4.2.0: components dropped the legacy `gpt-rag` label read
+   (orchestrator v5.2.0, UI v3.2.0, ingestion v3.1.1) and read only `agent-lz`.
 
 **Rollback** runs in reverse: restore the previous manifest pins, then the
-previous umbrella writer, then the previous component releases. Because
-components dual-read, steps 2 and 3 can roll back independently.
+previous umbrella writer, then the previous component releases. Since step 4,
+components read only `agent-lz`, so rolling the umbrella back to a `gpt-rag`
+writer also requires restoring component releases older than step 4.
 
 ## Naming scan (R17)
 
@@ -58,7 +61,6 @@ fails on any match outside the allow-list below.
 - Architecture decision records under `docs/adr/`.
 - The transition statement ("Agent Landing Zone, formerly GPT-RAG").
 - This naming map.
-- Dual-read compatibility code from step 1 above, until it is removed.
 
 **Temporary entries** (permitted in `v4.0.0-preview.1`; the Phase 2 work
 removes them, so the same test enforces the full rename for `v4.0.0`):
@@ -84,39 +86,53 @@ folders). The scan covers git-tracked files for `gpt-rag`, `GPT-RAG`,
 identifiers use `agent-lz-*` (Search indexes, labels) and `agent-app-*`
 (container images), which the scan never flags.
 
-Permanent entries (historical records, specifications, this map, the scanner):
+Permanent entries (historical records, specifications, versioned contracts,
+legacy-compatibility tests, this map, the scanner):
 
 ```naming-allow-permanent
 CHANGELOG.md
+README.md
 docs/adr/**
 docs/release-notes/**
 **/RELEASE_NOTES*.md
 specs/**
-contracts/naming-map.md
-tests/test_naming_inventory.py
-```
-
-Temporary entries (current pre-rename state; Phase 2 work removes each glob as
-the files are renamed, and the list must be empty for `v4.0.0`). `infra/**`
-covers the AI Landing Zone source incorporated in-repository with its upstream
-names (ADR-0015); T089 cleans it:
-
-```naming-allow-temporary
 .artifacts/**
-.github/**
-.specify/**
-AGENTS.md
-README.md
-CONTRIBUTING.md
-azure.yaml
-main.parameters.json
-manifest.json
-config/**
+.specify/memory/constitution.md
+.github/copilot-instructions.md
+.github/skills/multi-repo-release/SKILL.md
+contracts/naming-map.md
 contracts/*.json
 contracts/README.md
-docs/pull_request_template.md
-hosted-agent/**
+tests/fixtures/historical-runtime-rollback.json
+config/governance/tests/test_setup.py
+config/panel/tests/test_operator_contract.py
+config/panel/tests/test_settings.py
+tests/test_naming_inventory.py
+config/continuity/setup.py
+config/continuity/tests/test_setup.py
+tests/test_deployment_modes.py
+tests/test_release_contracts.py
+```
+
+Temporary entries. `infra/**` covers the AI Landing Zone source incorporated
+in-repository with its upstream names (ADR-0015). `config/continuity/setup.py`
+is permanent because it recognizes the legacy custom role name and renames it
+in place. `Azure/gpt-rag-mcp` is a legacy repository, not renamed and no longer
+listed in the issue templates.
+
+```naming-allow-temporary
 infra/**
-scripts/**
-tests/**
+```
+
+### Exact-line inherited package compatibility
+
+The native source gate and cross-component test must address the UI's actual
+inherited Python package. This is not a new product identifier or permission to
+introduce legacy names elsewhere. The scanner accepts only the complete source
+line below in its exact repository-relative file (ignoring indentation); adding
+another token or moving the line to another file still fails.
+
+```naming-allow-exact-lines
+config/deployment/native_deploy.py | entrypoint = path / "src/gpt_rag_ui/config/native.py"
+tests/test_native_component_binding.py | ui = importlib.import_module("gpt_rag_ui.clients.native_durable")
 ```

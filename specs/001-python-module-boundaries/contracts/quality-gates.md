@@ -123,7 +123,7 @@ exception-type expressions are flagged for review, not certified safe by
 guessing. It is a syntax policy, not arbitrary runtime type inference.
 
 Each broad handler, even one logging/re-raising and therefore exempt from
-BLE001, requires an exact approved [ExceptionJustification](../data-model.md#exceptionjustification).
+BLE001, requires an exact technically validated [ExceptionJustification](../data-model.md#exceptionjustification).
 No automatic exemption for logs, cleanup, decorator functions, or SDK boundaries.
 
 Required component-specific failure scenarios:
@@ -141,7 +141,7 @@ contract permits it; it must not change primary operation success/failure.
 Tests assert outcomes and safe diagnostics, not whether a particular `except`
 spelling appears in implementation.
 
-## Q5. CI trust, required execution and approvals
+## Q5. CI trust, required execution and technical exception validation
 
 Use `pull_request` with read-only permissions and no deployment credentials or
 secrets. Never run PR code with privileged `pull_request_target`. Pin actions
@@ -161,7 +161,8 @@ dependency is not passed. An artifact alone is not authoritative; check both
 actual job result and matching fresh artifact. Report uploader success is not
 quality success.
 
-Bootstrap separately: merge reviewed policy/checker files, run a clean reference
+Bootstrap separately: incorporate policy/checker files through the protected-policy
+adoption path, run a clean reference
 PR, then have a repository administrator configure rules requiring `quality-gate`
 and the existing tests before accepting enforcement as delivered. Do not infer
 required checks from a branch's `protected` boolean.
@@ -171,16 +172,31 @@ code. It discovers new files independently and automatically covers new modules.
 It may accept mechanically proven monotonic scope additions, debt retirement
 and unambiguous one-to-one move mappings; candidate settings cannot weaken the
 base. Compare policy-relevant pyproject fields, not unrelated packaging metadata.
-Other candidate policy modifications are separately reported and tested; they
-cannot self-approve by editing `review` or emitting a passing result. Changes to
-checker scripts, workflows, tool pins, records and CODEOWNERS require actual
-maintainer code-owner review of the latest head, with stale approvals invalidated
-and bypass restricted. An administrative, auditable override may accept an
-explicit policy-change PR; it must not become the normal green path or run
-untrusted code with privileged credentials.
+Exception registry changes are not automatically blocking policy changes.
+The protected evaluator technically validates candidate records: exact handler
+and caught-type fingerprints, documented boundary/outcome/diagnostics,
+unexpired expiry and stage, and passing exact-source bound behavior evidence.
+`active` means eligible for technical validation, not independent approval;
+`review` is provenance, never approval authority. Proposed or retired records,
+unresolved catches, stale sites and missing/failed/skipped evidence cannot
+authorize handlers. Only the exact validated site may exempt BLE001.
 
-Policy activation records must show repository rules/settings and review
-evidence. A proposed JSON approval string is evidence metadata, not authority.
+Other candidate policy modifications remain separately reported and tested.
+Checker scripts, evidence runner, aggregator, workflows, tool pins/settings,
+typing baseline, policy and CODEOWNERS retain protected-base integrity.
+Candidate code cannot lower that minimum by emitting a passing result.
+No mandatory independent/latest-head human review is imposed by Q5.
+Existing repository review settings are separate and are not changed here.
+Authorized protected-policy adoption is still necessary for checker changes;
+the old protected evaluator will block this migration until incorporation.
+Do not disable CI, fabricate approval or use privileged PR execution.
+Diagnostics describe protected-policy differences, not a request for reviewers
+or an administrative statement. `CODEOWNERS` is ownership routing, not a Q5
+independent-approval requirement.
+See ADR-0020 for adoption, fitness functions and rollback.
+
+Policy activation records must show repository rules/settings and execution
+evidence. A JSON approval string is evidence metadata, not authority.
 If those repository controls cannot be configured, report enforcement blocked.
 
 ## Q6. Minimum acceptance fixtures
@@ -205,11 +221,12 @@ to prove real merge eligibility once required checks are configured.
 | Uninventoried variable dynamic import | Fail policy review |
 | Bare, aliased, tuple or exception-group broad handler | Fail absent exact justification |
 | Logged or re-raised broad handler without record | Fail despite BLE001 exemption |
-| Approved narrow boundary with its failure test | Pass only for matching source site |
+| Candidate active narrow boundary with its passing bound failure test | Pass only for matching source site; no independent approval needed |
 | Stale/unused/overbroad justification; missing behavior test | Fail |
 | Checker crash/config parse error/tool timeout | Error; never pass |
 | Missing/skipped/neutral test job; stale or wrong-SHA artifact | Aggregate fails |
-| PR edits baseline/checker/CODEOWNERS to bless its own regression | Ordinary route remains blocked pending enforced policy review |
+| Registry-only update with exact unexpired records and passing bound evidence | Pass technical validation; no automatic policy-change finding |
+| PR edits baseline/checker/CODEOWNERS to bless its own regression | Ordinary route remains blocked pending authorized protected-policy adoption |
 
 Mutation fixtures use disposable temporary source trees, not persistent changes
 to runtime files. No new test framework is required.

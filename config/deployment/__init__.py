@@ -1,1 +1,1 @@
-"""GPT-RAG deployment-mode composition."""
+"""Agent Landing Zone deployment-mode composition."""

@@ -28,7 +28,7 @@ from config.deployment.hosted_image import (
 
 BASE_DIGEST = "sha256:" + ("a" * 64)
 HOSTED_DIGEST = "sha256:" + ("b" * 64)
-BASE_IMAGE_REF = f"myregistry.azurecr.io/gpt-rag-orchestrator@{BASE_DIGEST}"
+BASE_IMAGE_REF = f"myregistry.azurecr.io/agent-app-orchestrator@{BASE_DIGEST}"
 SOURCE_COMMIT = "eaa787340c27d8df5bb550147e95c5ecd02ad385"
 
 
@@ -59,7 +59,7 @@ class RenderHostedDockerfileTests(unittest.TestCase):
 
     def test_rejects_mutable_tag_only_base_image(self) -> None:
         with self.assertRaises(ValueError):
-            render_hosted_dockerfile("myregistry.azurecr.io/gpt-rag-orchestrator:v3.9.0")
+            render_hosted_dockerfile("myregistry.azurecr.io/agent-app-orchestrator:v3.9.0")
 
     def test_rejects_empty_startup_command(self) -> None:
         with self.assertRaises(ValueError):
@@ -70,7 +70,7 @@ class BuildAcrBuildArgsTests(unittest.TestCase):
     def test_builds_expected_argv_without_agent_pool(self) -> None:
         args = build_acr_build_args(
             registry="myregistry",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
             dockerfile_path="/tmp/x/Dockerfile",
             context_dir="/tmp/x",
@@ -84,7 +84,7 @@ class BuildAcrBuildArgsTests(unittest.TestCase):
                 "--registry",
                 "myregistry",
                 "--image",
-                "gpt-rag-orchestrator:v3.9.0-hosted",
+                "agent-app-orchestrator:v3.9.0-hosted",
                 "--file",
                 "/tmp/x/Dockerfile",
                 "/tmp/x",
@@ -95,7 +95,7 @@ class BuildAcrBuildArgsTests(unittest.TestCase):
     def test_appends_agent_pool_when_provided(self) -> None:
         args = build_acr_build_args(
             registry="myregistry",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
             dockerfile_path="/tmp/x/Dockerfile",
             context_dir="/tmp/x",
@@ -107,7 +107,7 @@ class BuildAcrBuildArgsTests(unittest.TestCase):
     def test_requires_registry_image_name_and_tag(self) -> None:
         base_kwargs = dict(
             registry="myregistry",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
             dockerfile_path="/tmp/x/Dockerfile",
             context_dir="/tmp/x",
@@ -146,7 +146,7 @@ class ResolvePushedDigestTests(unittest.TestCase):
 
         digest = resolve_pushed_digest(
             registry="myregistry",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
         )
 
@@ -162,7 +162,7 @@ class ResolvePushedDigestTests(unittest.TestCase):
                 "--name",
                 "myregistry",
                 "--image",
-                "gpt-rag-orchestrator:v3.9.0-hosted",
+                "agent-app-orchestrator:v3.9.0-hosted",
                 "--query",
                 "digest",
                 "-o",
@@ -183,7 +183,7 @@ class ResolvePushedDigestTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             resolve_pushed_digest(
                 registry="myregistry",
-                image_name="gpt-rag-orchestrator",
+                image_name="agent-app-orchestrator",
                 image_tag="v3.9.0-hosted",
             )
 
@@ -209,7 +209,7 @@ class RunAcrBuildAndWaitTests(unittest.TestCase):
                         "status": "Succeeded",
                         "outputImages": [
                             {
-                                "repository": "gpt-rag-orchestrator",
+                                "repository": "agent-app-orchestrator",
                                 "tag": "v3.9.0-hosted",
                                 "digest": BASE_DIGEST,
                             }
@@ -223,7 +223,7 @@ class RunAcrBuildAndWaitTests(unittest.TestCase):
         digest = run_acr_build_and_wait(
             ["az", "acr", "build"],
             registry="myregistry",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
             poll_interval=0,
         )
@@ -262,7 +262,7 @@ class RunAcrBuildAndWaitTests(unittest.TestCase):
             run_acr_build_and_wait(
                 ["az", "acr", "build"],
                 registry="myregistry",
-                image_name="gpt-rag-orchestrator",
+                image_name="agent-app-orchestrator",
                 image_tag="v3.9.0-hosted",
                 poll_interval=0,
             )
@@ -281,7 +281,7 @@ class BuildHostedImageTests(unittest.TestCase):
         digest = build_hosted_image(
             registry="myregistry",
             base_image_ref=BASE_IMAGE_REF,
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             image_tag="v3.9.0-hosted",
             agent_pool="build-pool",
         )
@@ -294,7 +294,7 @@ class BuildHostedImageTests(unittest.TestCase):
         self.assertIn("build-pool", build_args)
         self.assertEqual("myregistry", mock_build.call_args.kwargs["registry"])
         self.assertEqual(
-            "gpt-rag-orchestrator",
+            "agent-app-orchestrator",
             mock_build.call_args.kwargs["image_name"],
         )
         self.assertEqual(
@@ -399,7 +399,7 @@ class PrepareHostedImageTests(unittest.TestCase):
             image_version=None,
             registry="myregistry",
             registry_endpoint="myregistry.azurecr.io",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             source_repo="https://github.com/Azure/agent-app-orchestrator.git",
             source_ref="v3.10.0",
             source_commit=SOURCE_COMMIT,
@@ -445,7 +445,7 @@ class PrepareHostedImageTests(unittest.TestCase):
             image_version=None,
             registry="myregistry",
             registry_endpoint="myregistry.azurecr.io",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             source_repo="https://github.com/Azure/agent-app-orchestrator.git",
             source_ref="v3.10.0",
             source_commit=SOURCE_COMMIT,
@@ -481,7 +481,7 @@ class PrepareHostedImageTests(unittest.TestCase):
             image_version=HOSTED_DIGEST,
             registry="",
             registry_endpoint="",
-            image_name="gpt-rag-orchestrator",
+            image_name="agent-app-orchestrator",
             source_repo="",
             source_ref="",
             source_commit="",
@@ -498,7 +498,7 @@ class PrepareHostedImageTests(unittest.TestCase):
                 image_version="v3.10.0",
                 registry="",
                 registry_endpoint="",
-                image_name="gpt-rag-orchestrator",
+                image_name="agent-app-orchestrator",
                 source_repo="",
                 source_ref="",
                 source_commit="",

@@ -32,6 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'infra/ModelQuota.ps1')
 
 $script:FailureCount = 0
 $script:WarningCount = 0
@@ -140,6 +141,30 @@ function Get-NormalizedLocation {
     return ($Location -replace '\s+', '').ToLowerInvariant()
 }
 
+function Test-DelegatedSubnetProviders {
+    param([Parameter(Mandatory = $true)]$Parameters)
+
+    if (-not (Get-DeploymentFlag -Parameters $Parameters -Name 'networkIsolation' -DefaultValue $false)) { return }
+    if (-not (Get-DeploymentFlag -Parameters $Parameters -Name 'deploySubnets' -DefaultValue $true)) { return }
+    $delegations = @(@(
+        @{ Flag = 'deployPowerPlatformSubnet'; Namespace = 'Microsoft.PowerPlatform' }
+        @{ Flag = 'deployAiGatewaySubnet'; Namespace = 'Microsoft.Web' }
+    ) | Where-Object { Get-DeploymentFlag -Parameters $Parameters -Name $_.Flag -DefaultValue $true })
+    if ($delegations.Count -eq 0) { return }
+    $targetSubscription = $SubscriptionId
+    if (Get-DeploymentFlag -Parameters $Parameters -Name 'useExistingVNet' -DefaultValue $false) {
+        $vnetId = Get-ParameterValue -Parameters $Parameters -Name 'existingVnetResourceId' -DefaultValue ''
+        if ($vnetId -notmatch '^/subscriptions/([^/]+)/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+$') {
+            Write-PreflightCheck -Status FAIL -Name 'subnet-providers' -Message 'A valid existingVnetResourceId is required to verify delegated-subnet providers.'
+            return
+        }
+        $targetSubscription = $matches[1]
+    }
+    foreach ($entry in $delegations) {
+        Test-ProviderRegistration -Namespace $entry.Namespace -TargetSubscriptionId $targetSubscription
+    }
+}
+
 function Invoke-AzJson {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
@@ -160,19 +185,26 @@ function Invoke-AzJson {
 }
 
 function Get-Provider {
-    param([Parameter(Mandatory = $true)][string]$Namespace)
+    param(
+        [Parameter(Mandatory = $true)][string]$Namespace,
+        [string]$TargetSubscriptionId = $SubscriptionId
+    )
 
-    if ($script:ProviderCache.ContainsKey($Namespace)) { return $script:ProviderCache[$Namespace] }
+    $cacheKey = "$TargetSubscriptionId/$Namespace"
+    if ($script:ProviderCache.ContainsKey($cacheKey)) { return $script:ProviderCache[$cacheKey] }
 
     $args = @('provider', 'show', '--namespace', $Namespace, '--expand', 'resourceTypes/locations')
-    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) { $args += @('--subscription', $SubscriptionId) }
+    if (-not [string]::IsNullOrWhiteSpace($TargetSubscriptionId)) { $args += @('--subscription', $TargetSubscriptionId) }
     $provider = Invoke-AzJson -Arguments $args
-    $script:ProviderCache[$Namespace] = $provider
+    $script:ProviderCache[$cacheKey] = $provider
     return $provider
 }
 
 function Test-ProviderRegistration {
-    param([Parameter(Mandatory = $true)][string]$Namespace)
+    param(
+        [Parameter(Mandatory = $true)][string]$Namespace,
+        [string]$TargetSubscriptionId = $SubscriptionId
+    )
 
     if ($SkipAzureCliChecks) {
         Write-PreflightCheck -Status WARN -Name "provider:$Namespace" -Message 'skipped because SkipAzureCliChecks is set.'
@@ -180,7 +212,7 @@ function Test-ProviderRegistration {
     }
 
     try {
-        $provider = Get-Provider -Namespace $Namespace
+        $provider = Get-Provider -Namespace $Namespace -TargetSubscriptionId $TargetSubscriptionId
         if ($provider.registrationState -eq 'Registered') {
             Write-PreflightCheck -Status PASS -Name "provider:$Namespace" -Message 'registered.'
         } else {
@@ -443,14 +475,19 @@ function Test-ModelReadiness {
         $usageList = @()
     }
 
+    $existing = @(Get-ExistingModelDeployments -Location $Location -SubscriptionId $SubscriptionId -ReadAzureJson {
+        param([string[]]$Arguments)
+        Invoke-AzJson -Arguments $Arguments -AllowFailure
+    } -OnWarning {
+        param([string]$Message)
+        Write-PreflightCheck -Status WARN -Name 'models:existing-target' -Message $Message
+    })
     foreach ($deployment in @($Models)) {
         $model = $deployment.model
         $modelName = $model.name
         $modelVersion = $model.version
         $skuName = $deployment.sku.name
-        $capacity = [double]$deployment.sku.capacity
         $checkName = "model:$modelName"
-
         $available = @($modelList | Where-Object {
             $_.model.name -eq $modelName -and
             ([string]::IsNullOrWhiteSpace($modelVersion) -or $_.model.version -eq $modelVersion) -and
@@ -463,18 +500,31 @@ function Test-ModelReadiness {
             Write-PreflightCheck -Status FAIL -Name $checkName -Message "$modelName $modelVersion with sku $skuName is not listed in $Location."
         }
 
-        $usageName = "OpenAI.$skuName.$modelName"
+    }
+
+    try {
+        $requests = @(Get-ModelQuotaRequirements -Models $Models -ExistingDeployments $existing)
+    } catch {
+        Write-PreflightCheck -Status FAIL -Name 'models:quota' -Message $_.Exception.Message
+        return
+    }
+    foreach ($request in $requests) {
+        $usageName = $request.QuotaName
         $quota = @($usageList | Where-Object { $_.name.value -eq $usageName } | Select-Object -First 1)
         if ($quota.Count -eq 0) {
-            Write-PreflightCheck -Status WARN -Name "${checkName}:quota" -Message "quota item $usageName was not returned."
+            Write-PreflightCheck -Status WARN -Name "models:quota:$usageName" -Message "quota item $usageName was not returned."
             continue
         }
 
         $remaining = [double]$quota[0].limit - [double]$quota[0].currentValue
-        if ($remaining -ge $capacity) {
-            Write-PreflightCheck -Status PASS -Name "${checkName}:quota" -Message "$remaining quota units remaining; deployment requests $capacity."
+        $requested = $request.DesiredCapacity
+        $credit = $request.ExistingCredit
+        $additional = $request.AdditionalCapacity
+        $message = "$remaining quota units remaining; desired $requested, verified existing credit $credit, additional allocation $additional."
+        if ($additional -eq 0 -or $remaining -ge $additional) {
+            Write-PreflightCheck -Status PASS -Name "models:quota:$usageName" -Message $message
         } else {
-            Write-PreflightCheck -Status FAIL -Name "${checkName}:quota" -Message "$remaining quota units remaining; deployment requests $capacity."
+            Write-PreflightCheck -Status FAIL -Name "models:quota:$usageName" -Message $message
         }
     }
 }
@@ -570,6 +620,7 @@ if ($deployJumpbox) { [void]$providerNamespaces.Add('Microsoft.Compute') }
 foreach ($namespace in $providerNamespaces) {
     Test-ProviderRegistration -Namespace $namespace
 }
+Test-DelegatedSubnetProviders -Parameters $parameters
 
 if (-not [string]::IsNullOrWhiteSpace($primaryLocation)) {
     if ($deployAiFoundry) { Test-ProviderLocation -Namespace 'Microsoft.CognitiveServices' -ResourceType 'accounts' -Location $aiFoundryLocation -DisplayName 'location:ai-foundry' }

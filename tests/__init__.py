@@ -1,1 +1,1 @@
-"""GPT-RAG contract tests."""
+"""Agent Landing Zone contract tests."""

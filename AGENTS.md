@@ -1,4 +1,4 @@
-# GPT-RAG agent operating contract
+# Agent Landing Zone agent operating contract
 
 This file is the stable, repository-wide contract for engineering agents.
 Detailed procedures belong in `.github/skills/`, and file-specific rules belong
@@ -22,7 +22,7 @@ uncertainty and obtain a human decision.
 
 ## What this repository is
 
-GPT-RAG is an enterprise-grade Retrieval-Augmented Generation solution
+Agent Landing Zone is an enterprise-grade Retrieval-Augmented Generation solution
 accelerator on Azure. It provides architecture and deployment assets for
 secure, scalable, observable AI applications using Azure AI Foundry, Azure
 OpenAI, Azure AI Search, Azure Container Apps, Azure App Configuration, Key
@@ -39,11 +39,11 @@ and deployment modes.
 This repository is the platform and configuration core of a multi-repository
 solution:
 
-- `manifest.json` is the authoritative GPT-RAG release manifest and pins the
+- `manifest.json` is the authoritative Agent Landing Zone release manifest and pins the
   runtime component repositories and versions.
 - `manifest.json` `infra.source` (`repo`, `tag`, `commit`) records the AI
   Landing Zone release that `infra/` was incorporated from.
-- `main.parameters.json` defines the GPT-RAG deployment topology and
+- `main.parameters.json` defines the Agent Landing Zone deployment topology and
   parameters.
 - Runtime application code lives in the component repositories referenced by
   `manifest.json`; do not duplicate it here.
@@ -51,6 +51,9 @@ solution:
   changes, keep `infra.source` accurate when re-synchronizing from upstream,
   and keep it foundation-only; application deployment stays outside it
   (ADR-0016).
+- `infra/bicep/main.bicep` and `infra/terraform/` are co-maintained implementations
+  of the same platform capabilities (ADR-0028). `infra.source` records Bicep
+  provenance, not the local Terraform composition or its dependency pins.
 
 Read current component names and versions from `manifest.json`. Never copy
 version tables into agent instructions because they become stale.
@@ -61,6 +64,9 @@ version tables into agent instructions because they become stale.
   Foundry, Container Apps, Search, governance, and related Azure services.
 - `scripts/`: cross-platform `azd` lifecycle hooks. PowerShell and shell
   implementations must remain behaviorally aligned.
+- `scripts/infra/`: infrastructure helpers called by lifecycle hooks and checks.
+- `infra/bicep/` and `infra/terraform/`: provider-specific foundation source.
+- `infra/shared/`: naming and RBAC catalogs consumed by both providers.
 - `util/`: operational and prerequisite utilities.
 - `contracts/`: shared, versioned schemas and their integrity metadata.
 - `docs/adr/`: architectural decisions for this platform repository.
@@ -71,8 +77,8 @@ version tables into agent instructions because they become stale.
 - `.github/instructions/`: path-specific implementation rules.
 
 The engineering agents and skills in `.github/` help evolve and operate the
-GPT-RAG repositories. They are not definitions of agents executed by the
-GPT-RAG product.
+Agent Landing Zone repositories. They are not definitions of agents executed by the
+Agent Landing Zone product.
 
 ## How to work
 
@@ -97,13 +103,28 @@ GPT-RAG product.
 - Use tools with the least privilege necessary. Never commit credentials,
   tokens, personal data, or private validation environment names.
 
+## Bidirectional infrastructure parity
+
+Every infrastructure change must assess both Bicep-to-Terraform and
+Terraform-to-Bicep impact, including fixes, defaults and shared lifecycle
+changes. Update both affected implementations in the same coordinated change;
+if the counterpart needs no change, explain why and provide regression evidence.
+
+Compare supported behavior and contracts, not implementation details or
+byte-identical generated names. Include inputs/defaults, ownership, outputs,
+identity/RBAC, networking, App Configuration and the complete azd lifecycle.
+Validate the relevant checks for both providers and affected hooks. Document
+necessary provider-specific differences and obtain maintainer approval; never
+silently omit an option or describe mocked tests as deployed parity. Principle
+VI of the [constitution](.specify/memory/constitution.md) is authoritative.
+
 ## Cross-repository and Azure changes
 
 - A runtime configuration key is a cross-repository contract. Add or update
   its infrastructure parameter, publish it to Azure App Configuration with
   label `agent-lz`, and update every consuming component in the same coordinated
-  change. During the transition, components read both `agent-lz` and the legacy
-  `gpt-rag` label, preferring `agent-lz`.
+  change. Components read only the `agent-lz` label; the legacy label
+  transition completed in v4.2.0.
 - Prefer managed identity for service-to-service authentication and Key Vault
   references for secrets.
 - Preserve document-level authorization, RBAC, and OBO behavior whenever a
@@ -140,7 +161,7 @@ decision under `docs/adr/` before implementing broad or high-risk changes.
 
 ## Branching, releases, and documentation
 
-The existing GPT-RAG-specific rules are mandatory and remain in
+The existing repository-specific rules are mandatory and remain in
 `.github/copilot-instructions.md`, including:
 
 - feature and release branch flow;

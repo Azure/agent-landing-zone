@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Propose a new capability or improvement for GPT-RAG
+about: Propose a new capability or improvement for Agent Landing Zone
 title: "[Feature] Short, outcome-focused title"
 labels: enhancement, needs-triage
 assignees: ""
@@ -24,7 +24,6 @@ assignees: ""
 
 ## Components
 - **Components (check all that apply):**
-  - [ ] gpt-rag-orchestrator
-  - [ ] gpt-rag-ingestion
-  - [ ] gpt-rag-ui
-  - [ ] gpt-rag-mcp
+  - [ ] agent-app-orchestrator
+  - [ ] agent-app-ingestion
+  - [ ] agent-app-ui

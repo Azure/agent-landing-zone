@@ -98,6 +98,37 @@ def test_cli_dry_run_writes_nothing(monkeypatch, capsys):
     assert "AGENTLZ_PLATFORM_OUTPUTS" in json.loads(capsys.readouterr().out)
 
 
+def test_cli_discovers_and_publishes_container_identity_when_map_is_absent(monkeypatch, capsys):
+    for key, value in ENVIRONMENT.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv(outputs.IDENTITIES_ENV)
+    monkeypatch.setenv("AGENTLZ_APP_DEFINITION", str(REPO_ROOT / "samples" / "custom-app" / "containerapp"))
+    with mock.patch("config.appdefinition.roles.discover_component_identities",
+                    return_value={"web": UI_CLIENT_ID}) as discover, mock.patch.object(outputs, "publish") as publish:
+        assert outputs.main([]) == 0
+    discover.assert_called_once()
+    settings = publish.call_args.args[1]
+    assert json.loads(settings[outputs.PLATFORM_OUTPUTS_KEY])["identities"] == [
+        {"component": "web", "clientId": UI_CLIENT_ID}
+    ]
+    assert settings["AGENTLZ_IDENTITY_WEB_CLIENT_ID"] == UI_CLIENT_ID
+
+
+def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, capsys):
+    from config.appdefinition.roles import RoleAssignmentError
+
+    for key, value in ENVIRONMENT.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv(outputs.IDENTITIES_ENV)
+    monkeypatch.setenv("AGENTLZ_APP_DEFINITION", str(REPO_ROOT / "samples" / "custom-app" / "containerapp"))
+    with mock.patch("config.appdefinition.roles.discover_component_identities",
+                    side_effect=RoleAssignmentError("Expected exactly one identity")), \
+            mock.patch.object(outputs, "publish") as publish:
+        assert outputs.main([]) == 1
+    publish.assert_not_called()
+    assert "Expected exactly one identity" in capsys.readouterr().err
+
+
 def test_repo_root_detected_by_markers_not_folder_name(tmp_path):
     root = tmp_path / "any-folder-name"
     nested = root / "config" / "deployment"

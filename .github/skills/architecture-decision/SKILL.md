@@ -1,9 +1,9 @@
 ---
 name: architecture-decision
-description: Conducts and records a verifiable GPT-RAG architectural decision. Use when a choice alters repositories, boundaries, contracts, identity, data, deployment topology, or operation with meaningful reversal cost.
+description: Conducts and records a verifiable Agent Landing Zone architectural decision. Use when a choice alters repositories, boundaries, contracts, identity, data, deployment topology, or operation with meaningful reversal cost.
 ---
 
-# GPT-RAG architectural decision
+# Agent Landing Zone architectural decision
 
 1. Load the relevant `engineering-principles` references.
 2. Define context, constraints, affected repositories, and up to five

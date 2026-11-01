@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import copy
+import json
+import os
 import subprocess
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from config.deployment.composition import hosted_startup_command_sha256
 from config.deployment.hosted_prepare import (
     persist_digest,
     prepare_environment,
+    main,
 )
 from config.deployment.private_network import PrivateNetworkError
 
@@ -19,7 +27,7 @@ OLD_COMMIT = "1" * 40
 MANIFEST = {
     "components": [
         {
-            "name": "gpt-rag-orchestrator",
+            "name": "agent-app-orchestrator",
             "repo": "https://github.com/Azure/agent-app-orchestrator.git",
             "tag": "v3.10.0",
             "commit": SOURCE_COMMIT,
@@ -30,8 +38,7 @@ MANIFEST = {
 
 def hosted_environment(**overrides: str) -> dict[str, str]:
     environment = {
-        "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
-        "HOSTED_AGENT_PREPARED": "true",
+        "ORCHESTRATION_HOST": "hosted",
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://agent/.default",
         "AZURE_AI_PROJECT_ENDPOINT": "https://project.example.test",
         "AZURE_AI_PROJECT_RESOURCE_ID": "/subscriptions/s/resourceGroups/r/providers/Microsoft.CognitiveServices/accounts/a/projects/p",
@@ -40,16 +47,53 @@ def hosted_environment(**overrides: str) -> dict[str, str]:
         "NETWORK_ISOLATION": "false",
     }
     environment.update(overrides)
+    environment.setdefault("HOSTED_AGENT_DEPLOYMENT", json.dumps({
+        "foundry": {
+            "projectResourceId": environment["AZURE_AI_PROJECT_RESOURCE_ID"],
+            "projectEndpoint": environment["AZURE_AI_PROJECT_ENDPOINT"],
+        },
+        "containerRegistry": {"endpoint": environment["AZURE_CONTAINER_REGISTRY_ENDPOINT"]},
+    }))
     return environment
 
 
 class PrepareEnvironmentTests(unittest.TestCase):
     @patch("config.deployment.hosted_prepare.prepare_hosted_image")
-    def test_classic_topology_is_a_no_build_noop(
+    def test_foundation_handoff_not_retired_boolean_is_the_readiness_guard(self, prepare):
+        for handoff in ("", "{}", json.dumps({
+            "foundry": {"projectResourceId": "wrong", "projectEndpoint": "wrong"},
+            "containerRegistry": {"endpoint": "wrong"},
+        })):
+            with self.subTest(handoff=handoff):
+                with self.assertRaisesRegex(ValueError, "HOSTED_AGENT_DEPLOYMENT|provisioned|binding mismatch"):
+                    prepare_environment(hosted_environment(HOSTED_AGENT_DEPLOYMENT=handoff), MANIFEST)
+        prepare.assert_not_called()
+
+    @patch("config.deployment.hosted_prepare.resolve_az_command", return_value="az")
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image", return_value=NEW_DIGEST)
+    def test_foundry_split_never_moves_acr_builds_and_declared_registry_id_wins(self, prepare, resolve):
+        subscription = "11111111-1111-1111-1111-111111111111"
+        for declared, expected in (("", "rg-test"), (
+            f"/subscriptions/{subscription}/resourceGroups/rg-registry/providers/Microsoft.ContainerRegistry/registries/registry",
+            "rg-registry",
+        )):
+            environment = hosted_environment(
+                AZURE_SUBSCRIPTION_ID=subscription,
+                AZURE_RESOURCE_GROUP="rg-foundry",
+                AZURE_APP_RESOURCE_GROUP="rg-test",
+                AZURE_NETWORK_RESOURCE_GROUP="rg-network",
+                AZURE_CONTAINER_REGISTRY_RESOURCE_ID=declared,
+            )
+            with self.subTest(declared=bool(declared)):
+                prepare_environment(environment, MANIFEST)
+                self.assertEqual(expected, prepare.call_args.kwargs["resource_group"])
+
+    @patch("config.deployment.hosted_prepare.prepare_hosted_image")
+    def test_container_apps_does_not_build_a_hosted_image(
         self, mock_prepare: MagicMock
     ) -> None:
         digest, source_commit = prepare_environment(
-            {"DEPLOYMENT_TOPOLOGY": "classic"},
+            {"ORCHESTRATION_HOST": "container_apps"},
             MANIFEST,
         )
 
@@ -90,7 +134,7 @@ class PrepareEnvironmentTests(unittest.TestCase):
         mock_prepare: MagicMock,
     ) -> None:
         with self.assertRaisesRegex(
-            ValueError, "Custom HOSTED_AGENT_STARTUP_COMMAND"
+            ValueError, "official hosting entrypoint"
         ):
             prepare_environment(
                 hosted_environment(
@@ -158,7 +202,7 @@ class PrepareEnvironmentTests(unittest.TestCase):
         self, mock_check: MagicMock,
     ) -> None:
         environment = hosted_environment(
-            NETWORK_ISOLATION="true", AZURE_CONTAINER_REGISTRY_ENDPOINT="",
+            NETWORK_ISOLATION="true",
         )
         for overrides, command_digest, source in (
             ({}, DIGEST, None),
@@ -176,7 +220,7 @@ class PrepareEnvironmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare_environment(environment, MANIFEST, image_version_override="latest")
         self.assertEqual((None, None), prepare_environment(
-            {"DEPLOYMENT_TOPOLOGY": "classic", "NETWORK_ISOLATION": "true"}, MANIFEST,
+            {"ORCHESTRATION_HOST": "container_apps", "NETWORK_ISOLATION": "true"}, MANIFEST,
         ))
         mock_check.assert_not_called()
 
@@ -251,7 +295,7 @@ class PrepareEnvironmentTests(unittest.TestCase):
         original_environment = hosted_environment()
 
         with self.assertRaisesRegex(
-            ValueError, "Custom HOSTED_AGENT_STARTUP_COMMAND"
+            ValueError, "official hosting entrypoint"
         ):
             prepare_environment(
                 hosted_environment(
@@ -366,6 +410,35 @@ class PersistDigestTests(unittest.TestCase):
         self.assertEqual(SOURCE_COMMIT, commands[1][source_index + 1])
         self.assertEqual(64, len(commands[2][startup_index + 1]))
         self.assertEqual(DIGEST, commands[3][final_digest_index + 1])
+
+
+def deployment_environment(**overrides: str) -> dict[str, str]:
+    environment = hosted_environment(AZURE_ENV_NAME="test", DEPLOY_HOSTED_AGENT="false")
+    environment["HOSTED_AGENT_DEPLOYMENT"] = json.dumps({
+        "enabled": False,
+        "agent": None,
+        "foundry": {
+            "projectResourceId": environment["AZURE_AI_PROJECT_RESOURCE_ID"],
+            "projectEndpoint": environment["AZURE_AI_PROJECT_ENDPOINT"],
+            "projectPrincipalId": "project-principal",
+            "agentSubnetResourceId": "agent-subnet",
+        },
+        "containerRegistry": {
+            "endpoint": environment["AZURE_CONTAINER_REGISTRY_ENDPOINT"],
+            "resourceId": "registry-id",
+        },
+        "privateBuild": {"required": False, "acrTaskAgentPoolName": ""},
+        "workloadEgress": {"networkIsolation": False, "managedFirewallPolicyId": ""},
+    })
+    environment.update(overrides)
+    return environment
+
+
+class NativePublicationBoundaryTests(unittest.TestCase):
+    def test_preparation_does_not_expose_the_retired_infrastructure_deploy_handoff(self):
+        from config.deployment import hosted_prepare, native_deploy
+        self.assertFalse(hasattr(hosted_prepare, "prepare_deployment"))
+        self.assertTrue(callable(native_deploy.deploy_hosted))
 
 
 if __name__ == "__main__":

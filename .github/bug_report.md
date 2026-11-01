@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem with GPT-RAG or its components
+about: Report a problem with Agent Landing Zone or its components
 title: "[Bug] Short, specific title"
 labels: bug, needs-triage
 assignees: ""
@@ -12,11 +12,11 @@ assignees: ""
 <!-- One or two sentences describing the problem. -->
 
 ## Affected Release and Components
-- **GPT-RAG release/tag:** `vX.Y.Z`
+- **Agent Landing Zone release/tag:** `vX.Y.Z`
 - **Components involved** (check all) **and their image tag/commit**:
-  - [ ] gpt-rag-orchestrator — version/tag: `...`
-  - [ ] gpt-rag-ingestion — version/tag: `...`
-  - [ ] gpt-rag-ui — version/tag: `...`
+  - [ ] agent-app-orchestrator — version/tag: `...`
+  - [ ] agent-app-ingestion — version/tag: `...`
+  - [ ] agent-app-ui — version/tag: `...`
 
 ## Deployment Context
 - **Install type:** Fresh install / Upgrade (from `vA.B.C` → `vX.Y.Z`)

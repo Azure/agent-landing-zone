@@ -13,8 +13,8 @@ cannot create GPT-RAG resources or the child-resource role assignments emitted
 by the pinned landing-zone Bicep.
 
 The revised boundary is one fixed azd environment,
-`gptrag-evaluation`, mapped to one pre-created resource group,
-`rg-gptrag-evaluation`, in subscription
+`agentlz-evaluation`, mapped to one pre-created resource group,
+`rg-agentlz-evaluation`, in subscription
 `9788a92c-2f71-4629-8173-7ad449cb50e1`. The agent must not deploy to another
 resource group or receive subscription-scope Reader, Contributor, Owner, or
 role-assignment permissions.
@@ -30,14 +30,14 @@ Prioritized characteristics and measures are:
 
 1. **Scope confinement:** every direct role assignment on the coding-agent
    identity has the exact scope
-   `/subscriptions/9788a92c-2f71-4629-8173-7ad449cb50e1/resourceGroups/rg-gptrag-evaluation`.
+   `/subscriptions/9788a92c-2f71-4629-8173-7ad449cb50e1/resourceGroups/rg-agentlz-evaluation`.
 2. **Credential security:** token issuance uses GitHub OIDC with no client
    secret or password credential.
 3. **Deployment completeness:** the identity can create, update, delete, and
    assign the resource-level roles required by the pinned GPT-RAG Bicep inside
    the evaluation resource group.
 4. **Deterministic targeting:** setup creates or selects only azd environment
-   `gptrag-evaluation` and writes `AZURE_RESOURCE_GROUP=rg-gptrag-evaluation`.
+   `agentlz-evaluation` and writes `AZURE_RESOURCE_GROUP=rg-agentlz-evaluation`.
 5. **Observable safety:** an OIDC What-If must succeed and contain no
    subscription-scope, cross-resource-group, or delete operation before the
    configuration is accepted.
@@ -98,17 +98,17 @@ Use Option B. Keep `mi-gpt-rag-copilot-agent` in its identity resource group,
 `rg-gpt-rag-copilot-agent`, and assign its service principal exactly:
 
 - Contributor at
-  `/subscriptions/9788a92c-2f71-4629-8173-7ad449cb50e1/resourceGroups/rg-gptrag-evaluation`;
+  `/subscriptions/9788a92c-2f71-4629-8173-7ad449cb50e1/resourceGroups/rg-agentlz-evaluation`;
 - Role Based Access Control Administrator at the same scope.
 
 Do not retain subscription Reader or grant subscription Contributor, Owner,
 User Access Administrator, or Role Based Access Control Administrator.
-Pre-create `rg-gptrag-evaluation` in `eastus`, a region supported by the pinned
+Pre-create `rg-agentlz-evaluation` in `eastus`, a region supported by the pinned
 GPT-RAG Content Understanding configuration, before assigning the roles.
 
 The setup workflow uses GitHub's default OIDC subject format, delegates azd
 authentication to the Azure CLI OIDC session, and creates only local azd
-environment `gptrag-evaluation`. It pins the subscription, tenant, locations,
+environment `agentlz-evaluation`. It pins the subscription, tenant, locations,
 principal type, standard network mode, and empty cross-resource-group inputs.
 Azure RBAC is the enforcement boundary if a task changes the local azd values.
 
@@ -128,7 +128,7 @@ justification to broaden the agent identity.
 - The agent can execute the complete resource-group deployment, including the
   role assignments required by post-provision data-plane configuration.
 - Azure rejects resource operations and role assignments outside
-  `rg-gptrag-evaluation`.
+  `rg-agentlz-evaluation`.
 - The fixed environment and group make cost review, cleanup, and audit
   straightforward.
 
@@ -150,12 +150,12 @@ justification to broaden the agent identity.
 1. Confirm the pinned infrastructure is resource-group scoped and enumerate its
    role assignments and cross-resource-group options.
 2. Verify required resource providers are registered, then create the empty
-   `rg-gptrag-evaluation` resource group in `eastus`.
+   `rg-agentlz-evaluation` resource group in `eastus`.
 3. Add Contributor and Role Based Access Control Administrator at only that
    resource-group scope.
 4. Remove the previous subscription Reader assignment.
 5. Update the setup workflow to create/select azd environment
-   `gptrag-evaluation`, bind it to `rg-gptrag-evaluation`, set
+   `agentlz-evaluation`, bind it to `rg-agentlz-evaluation`, set
    `AZURE_PRINCIPAL_TYPE=ServicePrincipal`, and disable cross-group inputs.
 6. Run an OIDC-authenticated `azd provision --preview --no-prompt`. Accept only
    a What-If confined to the fixed resource group with no delete.
@@ -179,7 +179,7 @@ the environment mapping or pinned deployment inputs without widening scope.
 - Its only direct Azure assignments are Contributor and Role Based Access
   Control Administrator at the exact evaluation resource-group scope.
 - The GitHub setup run proves OIDC login and writes azd environment
-  `gptrag-evaluation` with `AZURE_RESOURCE_GROUP=rg-gptrag-evaluation`.
+  `agentlz-evaluation` with `AZURE_RESOURCE_GROUP=rg-agentlz-evaluation`.
 - An OIDC-authenticated What-If completes without subscription or cross-group
   deployment, role assignment, or delete.
 - Required providers are registered without granting the agent provider

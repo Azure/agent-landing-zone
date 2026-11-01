@@ -3,6 +3,8 @@
 from contextlib import redirect_stdout
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -34,6 +36,29 @@ def sse(*events):
 
 
 class HostedSmokeTests(unittest.TestCase):
+    def test_custom_responses_json_and_raw_http(self):
+        response = json.dumps(completion()["response"])
+        hosted.validate_responses_smoke_output(response)
+        hosted.validate_responses_smoke_output("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + response)
+        hosted.validate_responses_smoke_output(sse(completion()))
+        for body in ("HTTP/1.1 403 Forbidden\n\n" + response,
+                     json.dumps(completion("")), '{"object":"response","status":"failed"}',
+                     '{"object":"response","status":"completed","error":{"message":"PRIVATE-MARKER"}}'):
+            with self.subTest(body=body), self.assertRaises(ValueError) as caught:
+                hosted.validate_responses_smoke_output(body)
+            self.assertNotIn("PRIVATE-MARKER", str(caught.exception))
+
+    def test_custom_protocol_is_read_from_selected_service(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual("responses", hosted.service_protocol(root / "samples/custom-app/hosted/azure.yaml", "agent"))
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "azure.yaml"
+            project.write_text("services:\n  agent:\n    protocols:\n      - protocol: invocations\n", encoding="utf-8")
+            self.assertEqual("invocations", hosted.service_protocol(project, "agent"))
+            project.write_text("services:\n  agent:\n    protocols:\n      - protocol: a2a\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                hosted.service_protocol(project, "agent")
+
     def test_successful_completed_greeting_sse_not_exact_marker(self):
         hosted.validate_smoke_output("Invoking agent...\n" + sse(
             {"type": "response.output_text.delta", "delta": "Hello!"},

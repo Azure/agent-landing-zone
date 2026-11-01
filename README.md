@@ -23,41 +23,37 @@ Secure, enterprise-ready landing zone for deploying AI agent applications on Mic
 [![Docs](https://img.shields.io/badge/docs-AI%20Landing%20Zones-0078D4.svg)](https://azure.github.io/AI-Landing-Zones/)
 [![Azure Developer CLI](https://img.shields.io/badge/azd-compatible-0078D4.svg)](https://learn.microsoft.com/azure/developer/azure-developer-cli/)
 
-**GPT-RAG is now Agent Landing Zone.** It is the former GPT-RAG Solution Accelerator, renamed and matured.
-
 > [!NOTE]
-> Version 4.0.0 supports new deployments only. Existing GPT-RAG deployments are not upgraded in place; to move to Agent Landing Zone, redeploy into a new environment. Existing GPT-RAG environments can keep running on their GPT-RAG release, whose tags stay available.
+> **GPT-RAG has evolved into Agent Landing Zone.** Same project, broader scope: infrastructure and applications for enterprise agents on Azure. For Agent Landing Zone, use the [current documentation](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/). For older GPT-RAG deployments, refer to the [legacy documentation](https://azure.github.io/agent-landing-zone/).
 
 ## Architecture
 
-![Zero Trust Architecture](media/architecture_zero_trust.png)
+Standalone reference architecture for private-network deployments. Resource
+selection and reuse depend on deployment settings. Select the image to open the
+full-resolution PNG. For Platform Hub and AI Gateway combinations, see the
+[reference architectures](https://azure.github.io/AI-Landing-Zones/#reference-architectures).
+
+[![Standalone Agent Landing Zone architecture](media/AI-Landing-Zone-without-platform.png?v=aa651551c880)](media/AI-Landing-Zone-without-platform.png?v=aa651551c880)
 
 ## Deploy
 
-Choose one of two options:
-
-| Option | Commands | What you get |
-|---|---|---|
-| Full stack | `azd up` | Infrastructure plus the UI, orchestrator, and ingestion applications. |
-| Infrastructure only | `azd provision`, then `azd deploy` later | The landing zone infrastructure now; deploy applications when you are ready. |
-
-To deploy your own application instead of the default components, describe it in `app-definition.json`. See `samples/custom-app` for an example.
-
-Prerequisites, network-isolated deployment, and configuration are covered in the [central documentation](#documentation).
+- [Full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/) — Deploy the infrastructure and default agent application.
+- [Infrastructure only](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-infra-only/) — Provision the foundation without deploying application images.
+- [Custom applications](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/build-your-own-app/) — Deploy your own application on the foundation.
 
 ## Components
 
 Component versions for this release are pinned in [manifest.json](manifest.json).
 
-| Component | Repository | Version |
-|---|---|---|
-| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) | see `manifest.json` |
-| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) | see `manifest.json` |
-| Ingestion | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) | see `manifest.json` |
+| Component | Repository |
+|---|---|
+| UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) |
+| Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) |
+| Ingestion (optional) | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) |
 
 ## Documentation
 
-The full documentation lives in the Agent Landing Zone section of the [AI Landing Zones documentation site](https://azure.github.io/AI-Landing-Zones/). <!-- TODO: replace with the direct Agent Landing Zone section URL once published. -->
+The full documentation lives in the Agent Landing Zone section of the [AI Landing Zones documentation site](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/).
 
 ## Contributing
 

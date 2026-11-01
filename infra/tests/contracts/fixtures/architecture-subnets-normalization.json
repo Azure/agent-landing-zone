@@ -1,0 +1,618 @@
+{
+  "description": "ADR-0027 exact deploying subnet delta from origin/develop 9ab6ceb0028101f2c85d1fb484eaf89d7de6d5c9, Azure CLI Bicep 0.42.1. Applied before existing scope adapters; no historical hashes are replaced.",
+  "projection": {
+    "kind": "object",
+    "changes": {
+      "parameters": {
+        "kind": "object",
+        "changes": {
+          "aiGatewaySubnetName": {
+            "kind": "added",
+            "after": { "type": "string", "defaultValue": "ai-gateway-subnet" }
+          },
+          "aiGatewaySubnetPrefix": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "defaultValue": "192.168.5.0/24",
+              "metadata": { "description": "APIM Standard v2/Premium v2 outbound integration subnet, /27 or larger. Does not deploy APIM or private endpoints." }
+            }
+          },
+          "applicationPeSubnetName": {
+            "kind": "object",
+            "changes": {
+              "defaultValue": { "kind": "changed", "before": "", "after": "application-pe-subnet" },
+              "metadata": {
+                "kind": "object",
+                "changes": {
+                  "description": {
+                    "kind": "changed",
+                    "before": "Optional separate subnet for application private endpoints. Set with applicationPeSubnetPrefix; empty retains the legacy shared PE subnet, independently of resource-group count.",
+                    "after": "Dedicated application private endpoint subnet. Creation ownership is independent of its consumers; there is no shared Foundry subnet fallback."
+                  }
+                }
+              }
+            }
+          },
+          "applicationPeSubnetPrefix": {
+            "kind": "object",
+            "changes": {
+              "defaultValue": { "kind": "changed", "before": "", "after": "192.168.3.128/26" },
+              "metadata": {
+                "kind": "object",
+                "changes": {
+                  "description": {
+                    "kind": "changed",
+                    "before": "IPv4 CIDR for the optional application PE subnet. Set with applicationPeSubnetName; must be non-overlapping inside the workload VNet. No delegation is applied.",
+                    "after": "IPv4 CIDR for the application PE subnet. Must be non-overlapping inside the workload VNet. No delegation is applied."
+                  }
+                }
+              }
+            }
+          },
+          "deployAcaEnvironmentSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the Container Apps environment subnet." } }
+          },
+          "deployAgentSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the Agent Service subnet; does not control Foundry association." } }
+          },
+          "deployAiFoundrySubnet": {
+            "kind": "object",
+            "changes": {
+              "metadata": {
+                "kind": "object",
+                "changes": {
+                  "description": {
+                    "kind": "changed",
+                    "before": "Deploy Azure AI Foundry agent subnet.",
+                    "after": "Associate Azure AI Foundry Agent Service with agentSubnetName. Subnet creation is independently controlled by deployAgentSubnet."
+                  }
+                }
+              }
+            }
+          },
+          "deployAiGatewaySubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the AI Gateway delegated integration subnet only; requires deployNsgs." } }
+          },
+          "deployAppGatewaySubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the Application Gateway subnet without deploying a gateway." } }
+          },
+          "deployApplicationPeSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the dedicated application private endpoint subnet." } }
+          },
+          "deployAzureBastionSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage AzureBastionSubnet without deploying Bastion." } }
+          },
+          "deployAzureFirewallSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage AzureFirewallSubnet without deploying a firewall." } }
+          },
+          "deployDevopsBuildAgentsSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the build-agent subnet without deploying build agents." } }
+          },
+          "deployGatewaySubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage GatewaySubnet without deploying a VPN/ExpressRoute gateway." } }
+          },
+          "deployJumpboxSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the jumpbox subnet without deploying a VM." } }
+          },
+          "deployPeSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the Foundry and grounding private endpoint subnet." } }
+          },
+          "deployPowerPlatformSubnet": {
+            "kind": "added",
+            "after": { "type": "bool", "defaultValue": true, "metadata": { "description": "Create/manage the Power Platform delegated subnet only." } }
+          },
+          "gatewaySubnetName": {
+            "kind": "object",
+            "changes": { "defaultValue": { "kind": "changed", "before": "gateway-subnet", "after": "GatewaySubnet" } }
+          },
+          "powerPlatformSubnetName": {
+            "kind": "added",
+            "after": { "type": "string", "defaultValue": "powerplatform-subnet" }
+          },
+          "powerPlatformSubnetPrefix": {
+            "kind": "added",
+            "after": {
+              "type": "string",
+              "defaultValue": "192.168.4.0/24",
+              "metadata": { "description": "Power Platform capacity default, configurable for environment demand. Delegation does not associate an environment." }
+            }
+          }
+        }
+      },
+      "variables": {
+        "kind": "object",
+        "changes": {
+          "_separateApplicationPeSubnet": {
+            "kind": "removed",
+            "before": "[not(empty(parameters('applicationPeSubnetName')))]"
+          },
+          "selectedSubnetDefinitions": {
+            "kind": "added",
+            "after": "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]"
+          },
+          "subnetDefinitions": {
+            "kind": "added",
+            "after": [
+              {
+                "purpose": "agent",
+                "create": "[parameters('deployAgentSubnet')]",
+                "required": "[and(parameters('deployAiFoundry'), parameters('deployAiFoundrySubnet'))]",
+                "name": "[parameters('agentSubnetName')]",
+                "addressPrefix": "[parameters('agentSubnetPrefix')]",
+                "delegation": "Microsoft.App/environments",
+                "serviceEndpoints": ["Microsoft.CognitiveServices"]
+              },
+              {
+                "purpose": "pe",
+                "create": "[parameters('deployPeSubnet')]",
+                "required": "[or(or(or(or(or(or(parameters('deployAiFoundry'), parameters('deployStorageAccount')), parameters('deploySearchService')), parameters('deploySpeechService')), variables('_deployAiFoundryStorage')), variables('_deployAiFoundrySearch')), parameters('deployCosmosDb'))]",
+                "name": "[parameters('peSubnetName')]",
+                "addressPrefix": "[parameters('peSubnetPrefix')]",
+                "serviceEndpoints": ["Microsoft.AzureCosmosDB"],
+                "delegation": ""
+              },
+              {
+                "purpose": "gateway",
+                "create": "[parameters('deployGatewaySubnet')]",
+                "required": false,
+                "name": "[parameters('gatewaySubnetName')]",
+                "addressPrefix": "[parameters('gatewaySubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "bastion",
+                "create": "[parameters('deployAzureBastionSubnet')]",
+                "required": "[variables('_deployBastion')]",
+                "name": "[parameters('azureBastionSubnetName')]",
+                "addressPrefix": "[parameters('azureBastionSubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "firewall",
+                "create": "[parameters('deployAzureFirewallSubnet')]",
+                "required": "[parameters('deployAzureFirewall')]",
+                "name": "[parameters('azureFirewallSubnetName')]",
+                "addressPrefix": "[parameters('azureFirewallSubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "appGateway",
+                "create": "[parameters('deployAppGatewaySubnet')]",
+                "required": "[variables('_publicIngressEnabled')]",
+                "name": "[parameters('azureAppGatewaySubnetName')]",
+                "addressPrefix": "[parameters('azureAppGatewaySubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "jumpbox",
+                "create": "[parameters('deployJumpboxSubnet')]",
+                "required": "[variables('_deployJumpbox')]",
+                "name": "[parameters('jumpboxSubnetName')]",
+                "addressPrefix": "[parameters('jumpboxSubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "acaEnvironment",
+                "create": "[parameters('deployAcaEnvironmentSubnet')]",
+                "required": "[or(parameters('deployContainerEnv'), parameters('deployCosmosDb'))]",
+                "name": "[parameters('acaEnvironmentSubnetName')]",
+                "addressPrefix": "[parameters('acaEnvironmentSubnetPrefix')]",
+                "delegation": "Microsoft.App/environments",
+                "serviceEndpoints": ["Microsoft.AzureCosmosDB"]
+              },
+              {
+                "purpose": "devopsBuildAgents",
+                "create": "[parameters('deployDevopsBuildAgentsSubnet')]",
+                "required": "[variables('_deployAcrTaskAgentPool')]",
+                "name": "[parameters('devopsBuildAgentsSubnetName')]",
+                "addressPrefix": "[parameters('devopsBuildAgentsSubnetPrefix')]",
+                "delegation": "",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "applicationPe",
+                "create": "[parameters('deployApplicationPeSubnet')]",
+                "required": "[or(or(or(or(or(parameters('deployCosmosDb'), parameters('deployKeyVault')), parameters('deployAppConfig')), parameters('deployContainerEnv')), parameters('deployContainerRegistry')), variables('_deployAmpls'))]",
+                "name": "[parameters('applicationPeSubnetName')]",
+                "addressPrefix": "[parameters('applicationPeSubnetPrefix')]",
+                "serviceEndpoints": ["Microsoft.AzureCosmosDB"],
+                "delegation": ""
+              },
+              {
+                "purpose": "powerPlatform",
+                "create": "[parameters('deployPowerPlatformSubnet')]",
+                "required": false,
+                "name": "[parameters('powerPlatformSubnetName')]",
+                "addressPrefix": "[parameters('powerPlatformSubnetPrefix')]",
+                "delegation": "Microsoft.PowerPlatform/enterprisePolicies",
+                "serviceEndpoints": []
+              },
+              {
+                "purpose": "aiGateway",
+                "create": "[parameters('deployAiGatewaySubnet')]",
+                "required": false,
+                "name": "[parameters('aiGatewaySubnetName')]",
+                "addressPrefix": "[parameters('aiGatewaySubnetPrefix')]",
+                "delegation": "Microsoft.Web/serverFarms",
+                "serviceEndpoints": []
+              }
+            ]
+          }
+        }
+      },
+      "resources": {
+        "kind": "object",
+        "changes": {
+          "aiGatewayNsg": {
+            "kind": "added",
+            "after": {
+              "condition": "[and(and(and(variables('_networkIsolation'), parameters('deploySubnets')), parameters('deployAiGatewaySubnet')), parameters('deployNsgs'))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "aiGatewayNsgDeployment",
+              "subscriptionId": "[if(parameters('useExistingVNet'), variables('varExistingVnetSubscriptionId'), subscription().subscriptionId)]",
+              "resourceGroup": "[if(parameters('useExistingVNet'), variables('varExistingVnetResourceGroupName'), variables('_networkResourceGroupName'))]",
+              "properties": {
+                "expressionEvaluationOptions": { "scope": "inner" },
+                "mode": "Incremental",
+                "parameters": {
+                  "name": { "value": "[format('nsg-{0}-{1}', if(parameters('useExistingVNet'), variables('varExistingVnetName'), variables('resourceNames').vnetName), parameters('aiGatewaySubnetName'))]" },
+                  "location": { "value": "[parameters('location')]" }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": { "_generator": { "name": "bicep", "version": "0.42.1.51946", "templateHash": "17360097983753207882" } },
+                  "parameters": {
+                    "name": { "type": "string", "metadata": { "description": "NSG for APIM Standard v2/Premium v2 outbound VNet integration." } },
+                    "location": { "type": "string" }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Network/networkSecurityGroups",
+                      "apiVersion": "2024-07-01",
+                      "name": "[parameters('name')]",
+                      "location": "[parameters('location')]",
+                      "properties": {
+                        "securityRules": [
+                          {
+                            "name": "AllowKeyVaultOutbound",
+                            "properties": {
+                              "description": "APIM outbound HTTPS access to Azure Key Vault.",
+                              "priority": 100,
+                              "direction": "Outbound",
+                              "access": "Allow",
+                              "protocol": "Tcp",
+                              "sourcePortRange": "*",
+                              "destinationPortRange": "443",
+                              "sourceAddressPrefix": "VirtualNetwork",
+                              "destinationAddressPrefix": "AzureKeyVault"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "outputs": { "id": { "type": "string", "value": "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('name'))]" } }
+                }
+              }
+            }
+          },
+          "networkLayoutValidation": {
+            "kind": "changed",
+            "beforeFixture": "scoped-resource-groups-normalization.json#/projection/changes/resources/changes/networkLayoutValidation/after",
+            "after": {
+              "condition": "[variables('_networkIsolation')]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "subnetLayoutValidation",
+              "properties": {
+                "expressionEvaluationOptions": { "scope": "inner" },
+                "mode": "Incremental",
+                "parameters": {
+                  "subnetDefinitions": { "value": "[map(variables('subnetDefinitions'), lambda('subnet', createObject('purpose', lambdaVariables('subnet').purpose, 'name', lambdaVariables('subnet').name, 'addressPrefix', lambdaVariables('subnet').addressPrefix, 'create', and(parameters('deploySubnets'), lambdaVariables('subnet').create), 'required', lambdaVariables('subnet').required)))]" },
+                  "vnetAddressPrefixes": { "value": "[parameters('vnetAddressPrefixes')]" },
+                  "useExistingVNet": { "value": "[parameters('useExistingVNet')]" },
+                  "deployNsgs": { "value": "[parameters('deployNsgs')]" }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "languageVersion": "2.0",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": { "_generator": { "name": "bicep", "version": "0.42.1.51946", "templateHash": "4743828885958927161" } },
+                  "functions": [
+                    {
+                      "namespace": "__bicep",
+                      "members": {
+                        "cidrStart": {
+                          "parameters": [{ "type": "string", "name": "prefix" }],
+                          "output": {
+                            "type": "int",
+                            "value": "[reduce(split(parseCidr(parameters('prefix')).network, '.'), 0, lambda('value', 'octet', add(mul(lambdaVariables('value'), 256), int(lambdaVariables('octet')))))]"
+                          }
+                        },
+                        "cidrEnd": {
+                          "parameters": [{ "type": "string", "name": "prefix" }],
+                          "output": {
+                            "type": "int",
+                            "value": "[reduce(split(parseCidr(parameters('prefix')).broadcast, '.'), 0, lambda('value', 'octet', add(mul(lambdaVariables('value'), 256), int(lambdaVariables('octet')))))]"
+                          }
+                        },
+                        "alignedIpv4": {
+                          "parameters": [{ "type": "string", "name": "prefix" }],
+                          "output": {
+                            "type": "bool",
+                            "value": "[if(equals(length(split(parameters('prefix'), '/')), 2), and(and(and(equals(length(split(split(parameters('prefix'), '/')[0], '.')), 4), equals(split(parameters('prefix'), '/')[0], parseCidr(parameters('prefix')).network)), greaterOrEquals(int(split(parameters('prefix'), '/')[1]), 0)), lessOrEquals(int(split(parameters('prefix'), '/')[1]), 29)), false())]"
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "parameters": {
+                    "subnetDefinitions": {
+                      "type": "array",
+                      "metadata": { "description": "Explicit subnet selections and enabled consumer requirements. No resource IDs or runtime resource properties." }
+                    },
+                    "vnetAddressPrefixes": { "type": "array" },
+                    "useExistingVNet": { "type": "bool" },
+                    "deployNsgs": { "type": "bool" }
+                  },
+                  "variables": {
+                    "relevant": "[filter(parameters('subnetDefinitions'), lambda('subnet', or(lambdaVariables('subnet').create, lambdaVariables('subnet').required)))]",
+                    "selected": "[filter(parameters('subnetDefinitions'), lambda('subnet', lambdaVariables('subnet').create))]",
+                    "names": "[map(variables('relevant'), lambda('subnet', toLower(lambdaVariables('subnet').name)))]",
+                    "namesValid": "[empty(filter(variables('relevant'), lambda('subnet', or(or(or(empty(lambdaVariables('subnet').name), greater(length(lambdaVariables('subnet').name), 80)), contains(lambdaVariables('subnet').name, '/')), contains(lambdaVariables('subnet').name, ' ')))))]",
+                    "namesUnique": "[equals(length(variables('names')), length(union(variables('names'), variables('names'))))]",
+                    "reservedNames": { "gateway": "GatewaySubnet", "bastion": "AzureBastionSubnet", "firewall": "AzureFirewallSubnet" },
+                    "reservedNamesValid": "[empty(filter(variables('relevant'), lambda('subnet', if(contains(variables('reservedNames'), lambdaVariables('subnet').purpose), not(equals(lambdaVariables('subnet').name, variables('reservedNames')[lambdaVariables('subnet').purpose])), contains(createArray('gatewaysubnet', 'azurebastionsubnet', 'azurefirewallsubnet'), toLower(lambdaVariables('subnet').name))))))]",
+                    "prefixesPresent": "[empty(filter(variables('relevant'), lambda('subnet', empty(lambdaVariables('subnet').addressPrefix))))]",
+                    "prefixesValid": "[if(variables('prefixesPresent'), empty(filter(variables('selected'), lambda('subnet', not(__bicep.alignedIpv4(lambdaVariables('subnet').addressPrefix))))), false())]",
+                    "vnetPrefixesValid": "[if(parameters('useExistingVNet'), true(), and(not(empty(parameters('vnetAddressPrefixes'))), empty(filter(parameters('vnetAddressPrefixes'), lambda('prefix', not(__bicep.alignedIpv4(lambdaVariables('prefix'))))))))]",
+                    "rangesValid": "[and(variables('prefixesValid'), variables('vnetPrefixesValid'))]",
+                    "overlaps": "[if(variables('rangesValid'), not(empty(filter(variables('selected'), lambda('subnet', not(empty(filter(variables('selected'), lambda('other', and(and(not(equals(lambdaVariables('subnet').name, lambdaVariables('other').name)), lessOrEquals(__bicep.cidrStart(lambdaVariables('subnet').addressPrefix), __bicep.cidrEnd(lambdaVariables('other').addressPrefix))), greaterOrEquals(__bicep.cidrEnd(lambdaVariables('subnet').addressPrefix), __bicep.cidrStart(lambdaVariables('other').addressPrefix))))))))))), false())]",
+                    "contained": "[if(and(not(parameters('useExistingVNet')), variables('rangesValid')), empty(filter(variables('selected'), lambda('subnet', empty(filter(parameters('vnetAddressPrefixes'), lambda('prefix', and(greaterOrEquals(__bicep.cidrStart(lambdaVariables('subnet').addressPrefix), __bicep.cidrStart(lambdaVariables('prefix'))), lessOrEquals(__bicep.cidrEnd(lambdaVariables('subnet').addressPrefix), __bicep.cidrEnd(lambdaVariables('prefix')))))))))), true())]",
+                    "aiGatewayValid": "[if(variables('prefixesValid'), empty(filter(variables('selected'), lambda('subnet', and(equals(lambdaVariables('subnet').purpose, 'aiGateway'), or(greater(int(split(lambdaVariables('subnet').addressPrefix, '/')[1]), 27), not(parameters('deployNsgs'))))))), false())]",
+                    "consumersHaveSubnets": "[or(parameters('useExistingVNet'), empty(filter(parameters('subnetDefinitions'), lambda('subnet', and(lambdaVariables('subnet').required, not(lambdaVariables('subnet').create))))))]",
+                    "byoNsgsProtected": "[or(or(not(parameters('useExistingVNet')), empty(variables('selected'))), parameters('deployNsgs'))]"
+                  },
+                  "resources": {},
+                  "outputs": {
+                    "validated": {
+                      "type": "bool",
+                      "value": "[if(or(or(not(variables('namesValid')), not(variables('namesUnique'))), not(variables('reservedNamesValid'))), fail('Subnet names must be nonempty, unique, valid names and use the exact reserved GatewaySubnet, AzureBastionSubnet and AzureFirewallSubnet names for those purposes.'), if(or(or(not(variables('prefixesPresent')), not(variables('prefixesValid'))), not(variables('vnetPrefixesValid'))), fail('Required subnet prefixes must be nonempty; managed subnet and new VNet prefixes must be aligned IPv4 CIDRs with prefix length 0 through 29.'), if(or(variables('overlaps'), not(variables('contained'))), fail('Managed subnet CIDRs must not overlap and must be contained in the new VNet address space.'), if(not(variables('aiGatewayValid')), fail('Managed AI Gateway integration requires a /27 or larger subnet and deployNsgs=true.'), if(not(variables('consumersHaveSubnets')), fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.'), if(not(variables('byoNsgsProtected')), fail('Managed BYO subnet writes require deployNsgs=true to protect NSG associations.'), true()))))))]"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "privateEndpoints": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "endpoints": {
+                        "kind": "object",
+                        "changes": {
+                          "value": {
+                            "kind": "changed",
+                            "beforeFixture": "foundry-root-normalization.json#/projection/changes/resources/changes/privateEndpoints/changes/properties/changes/parameters/changes/endpoints/changes/value/after",
+                            "after": "[concat(if(and(variables('_networkIsolation'), parameters('deployStorageAccount')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').storageAccountName), 'privateLinkServiceConnections', createArray(createObject('name', format('blobConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('storageAccount').outputs.resourceId.value, 'groupIds', createArray('blob')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'blob'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployCosmosDb')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').dbAccountName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('cosmosConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('cosmosDBAccount').outputs.resourceId.value, 'groupIds', createArray('Sql')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cosmos'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySearchService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').searchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchService').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), variables('_deployAiFoundrySearch')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').aiFoundrySearchServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('searchAIFConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('searchServiceAIFoundry').outputs.resourceId.value, 'groupIds', createArray('searchService')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'search'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployKeyVault')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').keyVaultName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('kvConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('keyVault').outputs.resourceId.value, 'groupIds', createArray('vault')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'keyVault'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployAppConfig')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').appConfigName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('appConfigConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('appConfig').outputs.resourceId.value, 'groupIds', createArray('configurationStores')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'appConfig'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerEnv')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerEnvName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', 'ccaConnection', 'properties', createObject('privateLinkServiceId', reference('containerEnv').outputs.resourceId.value, 'groupIds', createArray('managedEnvironments')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'containerApps'))), createArray()), if(and(variables('_networkIsolation'), parameters('deployContainerRegistry')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').containerRegistryName), 'subnetResourceId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), ''), 'privateLinkServiceConnections', createArray(createObject('name', format('{0}-registry-connection', variables('resourceNames').containerRegistryName), 'properties', createObject('privateLinkServiceId', reference('containerRegistry').outputs.resourceId.value, 'groupIds', createArray('registry')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'acr'))), createArray()), if(and(variables('_networkIsolation'), parameters('deploySpeechService')), createArray(createObject('name', format('{0}{1}', variables('_1.abbrs').networking.privateEndpoint, variables('resourceNames').speechServiceName), 'privateLinkServiceConnections', createArray(createObject('name', format('speechConnection{0}', if(parameters('useExistingVNet'), '-byon', '')), 'properties', createObject('privateLinkServiceId', reference('speechService').outputs.resourceId.value, 'groupIds', createArray('account')))), 'privateDnsZoneGroup', tryGet(variables('_peDnsZoneGroups'), 'cognitiveServices'))), createArray()))]"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "cosmosDBAccount": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "virtualNetworkSubnetIds": {
+                        "kind": "changed",
+                        "beforeFixture": "scoped-resource-groups-normalization.json#/projection/changes/resources/changes/cosmosDBAccount/changes/properties/changes/parameters/changes/virtualNetworkSubnetIds/after",
+                        "after": "[if(variables('_networkIsolation'), createObject('value', union(createArray(if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('peSubnetName')), ''), if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('acaEnvironmentSubnetName')), '')), createArray(if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName')), '')))), createObject('value', createArray()))]"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "privateEndpointPrivateLinkScope": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "subnetResourceId": {
+                        "kind": "changed",
+                        "beforeFixture": "scoped-resource-groups-normalization.json#/projection/changes/resources/changes/privateEndpointPrivateLinkScope/changes/properties/changes/parameters/changes/subnetResourceId/after",
+                        "after": "[if(variables('_networkIsolation'), createObject('value', format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('applicationPeSubnetName'))), createObject('value', ''))]"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "componentFlagValidation": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "existingSubnetNsgAssociationsAreProtected": {
+                        "kind": "object",
+                        "changes": {
+                          "value": {
+                            "kind": "changed",
+                            "before": "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), not(parameters('deployNsgs'))))]",
+                            "after": "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), not(empty(variables('selectedSubnetDefinitions')))), not(parameters('deployNsgs'))))]"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "virtualNetworkSubnets": {
+            "kind": "object",
+            "changes": {
+              "condition": {
+                "kind": "changed",
+                "before": "[and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs'))]",
+                "after": "[and(and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs')), not(empty(variables('selectedSubnetDefinitions'))))]"
+              },
+              "dependsOn": {
+                "kind": "changed",
+                "before": ["appGwNsg", "bastionNsg", "natGateway", "networkLayoutValidation", "routeTable", "virtualNetwork"],
+                "after": ["aiGatewayNsg", "appGwNsg", "bastionNsg", "componentFlagValidation", "natGateway", "networkLayoutValidation", "routeTable", "virtualNetwork"]
+              },
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "subnets": {
+                        "kind": "object",
+                        "changes": {
+                          "value": {
+                            "kind": "changed",
+                            "before": "[concat(createArray(createObject('name', parameters('agentSubnetName'), 'addressPrefix', parameters('agentSubnetPrefix'), 'delegation', 'Microsoft.App/environments', 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'serviceEndpoints', createArray('Microsoft.CognitiveServices')), createObject('name', parameters('peSubnetName'), 'addressPrefix', parameters('peSubnetPrefix'), 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'serviceEndpoints', createArray('Microsoft.AzureCosmosDB'), 'delegation', ''), createObject('name', parameters('gatewaySubnetName'), 'addressPrefix', parameters('gatewaySubnetPrefix'), 'delegation', '', 'serviceEndpoints', createArray()), createObject('name', parameters('azureBastionSubnetName'), 'addressPrefix', parameters('azureBastionSubnetPrefix'), 'networkSecurityGroupResourceId', if(and(variables('_deployBastion'), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, ''), 'delegation', '', 'serviceEndpoints', createArray()), createObject('name', parameters('azureFirewallSubnetName'), 'addressPrefix', parameters('azureFirewallSubnetPrefix'), 'delegation', '', 'serviceEndpoints', createArray()), createObject('name', parameters('azureAppGatewaySubnetName'), 'addressPrefix', parameters('azureAppGatewaySubnetPrefix'), 'networkSecurityGroupResourceId', if(variables('_publicIngressEnabled'), reference('appGwNsg').outputs.id.value, ''), 'delegation', '', 'serviceEndpoints', createArray()), createObject('name', parameters('jumpboxSubnetName'), 'addressPrefix', parameters('jumpboxSubnetPrefix'), 'natGatewayResourceId', if(variables('_deployNatGateway'), reference('natGateway').outputs.resourceId.value, if(variables('_hasExistingNatGateway'), parameters('existingNatGatewayResourceId'), '')), 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'delegation', '', 'serviceEndpoints', createArray()), createObject('name', parameters('acaEnvironmentSubnetName'), 'addressPrefix', parameters('acaEnvironmentSubnetPrefix'), 'delegation', 'Microsoft.App/environments', 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'serviceEndpoints', createArray('Microsoft.AzureCosmosDB')), createObject('name', parameters('devopsBuildAgentsSubnetName'), 'addressPrefix', parameters('devopsBuildAgentsSubnetPrefix'), 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'delegation', '', 'serviceEndpoints', createArray())), if(variables('_separateApplicationPeSubnet'), createArray(createObject('name', parameters('applicationPeSubnetName'), 'addressPrefix', parameters('applicationPeSubnetPrefix'), 'routeTableResourceId', if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), 'serviceEndpoints', createArray('Microsoft.AzureCosmosDB'), 'delegation', '')), createArray()))]",
+                            "after": "[map(variables('selectedSubnetDefinitions'), lambda('subnet', createObject('name', lambdaVariables('subnet').name, 'addressPrefix', lambdaVariables('subnet').addressPrefix, 'delegation', lambdaVariables('subnet').delegation, 'serviceEndpoints', lambdaVariables('subnet').serviceEndpoints, 'networkSecurityGroupResourceId', if(and(and(equals(lambdaVariables('subnet').purpose, 'bastion'), variables('_deployBastion')), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, if(and(equals(lambdaVariables('subnet').purpose, 'appGateway'), variables('_publicIngressEnabled')), reference('appGwNsg').outputs.id.value, if(and(equals(lambdaVariables('subnet').purpose, 'aiGateway'), parameters('deployNsgs')), reference('aiGatewayNsg').outputs.id.value, ''))), 'routeTableResourceId', if(contains(createArray('agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'), lambdaVariables('subnet').purpose), if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), ''), 'natGatewayResourceId', if(equals(lambdaVariables('subnet').purpose, 'jumpbox'), if(variables('_deployNatGateway'), reference('natGateway').outputs.resourceId.value, if(variables('_hasExistingNatGateway'), parameters('existingNatGatewayResourceId'), '')), ''))))]"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "template": {
+                    "kind": "object",
+                    "changes": {
+                      "resources": {
+                        "kind": "array",
+                        "count": 3,
+                        "changes": {
+                          "1": {
+                            "kind": "object",
+                            "changes": {
+                              "condition": {
+                                "kind": "changed",
+                                "before": "[and(parameters('deploySubnets'), parameters('deployNsgs'))]",
+                                "after": "[and(and(and(parameters('deploySubnets'), parameters('deployNsgs')), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[copyIndex()].name))), empty(coalesce(tryGet(parameters('subnets')[copyIndex()], 'networkSecurityGroupResourceId'), '')))]"
+                              }
+                            }
+                          },
+                          "2": {
+                            "kind": "object",
+                            "changes": {
+                              "properties": {
+                                "kind": "object",
+                                "changes": {
+                                  "template": {
+                                    "kind": "object",
+                                    "changes": {
+                                      "resources": {
+                                        "kind": "array",
+                                        "count": 1,
+                                        "changes": {
+                                          "0": {
+                                            "kind": "object",
+                                            "changes": {
+                                              "properties": {
+                                                "kind": "object",
+                                                "changes": {
+                                                  "addressPrefix": {
+                                                    "kind": "changed",
+                                                    "before": "[parameters('addressPrefix')]",
+                                                    "after": "[if(variables('gatewayAttachmentsAreSafe'), parameters('addressPrefix'), fail('GatewaySubnet must not have an NSG, route table or delegation.'))]"
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      "variables": {
+                                        "kind": "added",
+                                        "after": {
+                                          "gatewayAttachmentsAreSafe": "[or(not(equals(last(split(parameters('name'), '/')), 'GatewaySubnet')), and(and(empty(parameters('networkSecurityGroupId')), empty(parameters('routeTableId'))), empty(parameters('delegations'))))]"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "variables": {
+                        "kind": "object",
+                        "changes": {
+                          "invalidNsgSubnets": {
+                            "kind": "changed",
+                            "before": ["AzureFirewallSubnet", "AppGatewaySubnet", "AzureBastionSubnet"],
+                            "after": ["AzureFirewallSubnet", "AppGatewaySubnet", "AzureBastionSubnet", "GatewaySubnet"]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "virtualNetwork": {
+            "kind": "object",
+            "changes": {
+              "dependsOn": {
+                "kind": "changed",
+                "before": ["appGwNsg", "bastionNsg", "natGateway", "networkLayoutValidation", "routeTable"],
+                "after": ["aiGatewayNsg", "appGwNsg", "bastionNsg", "natGateway", "networkLayoutValidation", "routeTable"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "projection": {
+    "kind": "object",
+    "changes": {
+      "resources": {
+        "kind": "object",
+        "changes": {
+          "aiFoundry": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "aiModelDeployments": {
+                        "kind": "changed",
+                        "before": "[if(not(empty(parameters('modelDeploymentList'))), createObject('value', parameters('modelDeploymentList')), createObject('value', createArray(createObject('model', createObject('format', 'OpenAI', 'name', 'gpt-5-nano', 'version', '2025-08-07'), 'name', 'gpt-5-nano', 'sku', createObject('name', 'GlobalStandard', 'capacity', 40)), createObject('model', createObject('format', 'OpenAI', 'name', 'text-embedding-3-large', 'version', '1'), 'name', 'text-embedding-3-large', 'sku', createObject('name', 'Standard', 'capacity', 10)))))]",
+                        "after": "[if(not(empty(parameters('modelDeploymentList'))), createObject('value', parameters('modelDeploymentList')), createObject('value', createArray(createObject('model', createObject('format', 'OpenAI', 'name', 'gpt-5-nano', 'version', '2025-08-07'), 'name', 'gpt-5-nano', 'sku', createObject('name', 'GlobalStandard', 'capacity', 40)), createObject('model', createObject('format', 'OpenAI', 'name', 'text-embedding-3-large', 'version', '1'), 'name', 'text-embedding-3-large', 'sku', createObject('name', 'GlobalStandard', 'capacity', 10)))))]"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

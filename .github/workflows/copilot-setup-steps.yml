@@ -15,10 +15,10 @@ jobs:
       contents: read
       id-token: write
     env:
-      AZURE_ENV_NAME: gptrag-evaluation
-      AZURE_RESOURCE_GROUP: rg-gptrag-evaluation
+      AZURE_ENV_NAME: agentlz-evaluation
+      AZURE_RESOURCE_GROUP: rg-agentlz-evaluation
       AZURE_LOCATION: eastus
-      AZURE_PRINCIPAL_ID: f4be7297-7532-4582-b0b5-53e7413879dd
+      AZURE_PRINCIPAL_ID: 5950eb6f-8c8d-4713-ab6c-5e9303f7790e
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,7 +37,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Configure fixed GPT-RAG evaluation environment
+      - name: Configure fixed Agent Landing Zone evaluation environment
         shell: bash
         run: |
           set -euo pipefail
@@ -82,7 +82,7 @@ jobs:
             "DEPLOY_AZURE_FIREWALL=false" \
             "DEPLOY_SUBNETS=false" \
             "SIDE_BY_SIDE=false" \
-            "GPT_RAG_REGIONAL_PREFLIGHT_SKIP=true" \
+            "AGENTLZ_REGIONAL_PREFLIGHT_SKIP=true" \
             "LZ_PREFLIGHT_REGIONAL_SKIP=true" \
             "AZURE_PE_RESOURCE_GROUP_NAME=" \
             "EXISTING_VNET_RESOURCE_ID=" \

@@ -41,7 +41,8 @@ Prioritized characteristics:
   Dapr, API key, otherwise 401.
 - Post-provision publishes, in classic mode, with label `agent-lz`:
   - `ORCHESTRATOR_AUTH_AUDIENCE`: environment override, else the UI's
-    user-assigned identity client ID.
+    user-assigned identity client ID, else `https://management.azure.com`
+    when the UI has only a system-assigned identity.
   - `ORCHESTRATOR_ALLOWED_CALLER_IDS`: environment override, else the UI's
     user-assigned identity principal ID, else its system-assigned principal ID.
 - `useCAppAPIKey` defaults to `false` and remains gated off for hosted
@@ -50,9 +51,11 @@ Prioritized characteristics:
 ## Consequences
 
 - Default deployments have no shared secret between UI and orchestrator.
-- With only a system-assigned identity, no audience is derived; keyless auth
-  stays disabled unless `ORCHESTRATOR_AUTH_AUDIENCE` is set or the API key
-  fallback is enabled.
+- With only a system-assigned identity (the default), the audience falls back
+  to the Azure Resource Manager audience so keyless auth works out of the box.
+  That token is broad; the caller object ID check is what binds it to the UI.
+  For hardening, set `ORCHESTRATOR_AUTH_AUDIENCE` to a dedicated app
+  registration or attach a user-assigned identity to the UI.
 - Requires compatible component versions: Azure/agent-app-orchestrator#370
   and Azure/agent-app-ui#118. The manifest pin is updated after both merge.
 

@@ -10,12 +10,12 @@ assignees: ''
 ## Summary
 
 ## Affected Release and Components
-- **GPT-RAG release/tag:** `vX.Y.Z`
+- **Agent Landing Zone release/tag:** `vX.Y.Z`
 - **Components involved** (check all) **and their image tag/commit**:
-  - [ ] gpt-rag-orchestrator — version/tag: `...`
-  - [ ] gpt-rag-ingestion — version/tag: `...`
-  - [ ] gpt-rag-ui — version/tag: `...`
-  - [ ] gpt-rag-mcp — version/tag: `...`
+  - [ ] agent-app-orchestrator — version/tag: `...`
+  - [ ] agent-app-ingestion — version/tag: `...`
+  - [ ] agent-app-ui — version/tag: `...`
+  - [ ] agent-landing-zone (infra) — version/tag: `...`
 
 ## Deployment Context
 - **Install type:** Fresh install / Upgrade (from `vA.B.C` → `vX.Y.Z`)

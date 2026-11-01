@@ -73,7 +73,7 @@ def test_definition_plan_uses_effective_containerapp_components_and_service_tags
     # to frontend/dataingest. A hosted orchestrator gets no Container App.
     images = {"frontend": "cr.azurecr.io/ui:1", "orchestrator": "cr.azurecr.io/orch:1"}
     classic = definition_placeholder_plan(
-        {"DEPLOYMENT_TOPOLOGY": "classic", "AGENTLZ_APP_DEFINITION": ""}, images
+        {"ORCHESTRATION_HOST": "container_apps", "DEPLOY_INGESTION_CONTAINER_APP": "true", "AGENTLZ_APP_DEFINITION": ""}, images
     )
     assert classic == {
         "ui": "cr.azurecr.io/ui:1",
@@ -81,13 +81,13 @@ def test_definition_plan_uses_effective_containerapp_components_and_service_tags
         "ingestion": PLACEHOLDER_IMAGE,
     }
     hosted = definition_placeholder_plan(
-        {"DEPLOYMENT_TOPOLOGY": "hosted-no-panel", "AGENTLZ_APP_DEFINITION": ""}, images
+        {"ORCHESTRATION_HOST": "hosted", "DEPLOY_INGESTION_CONTAINER_APP": "true", "AGENTLZ_APP_DEFINITION": ""}, images
     )
     assert hosted == {"ui": "cr.azurecr.io/ui:1", "ingestion": PLACEHOLDER_IMAGE}
 
 
 def test_cli_reports_plan_and_fails_closed_on_invalid_definition(tmp_path, caplog):
-    environment = {"DEPLOYMENT_TOPOLOGY": "classic", "AZURE_RESOURCE_GROUP": "rg", "AGENTLZ_APP_DEFINITION": ""}
+    environment = {"ORCHESTRATION_HOST": "container_apps", "DEPLOY_INGESTION_CONTAINER_APP": "true", "AZURE_RESOURCE_GROUP": "rg", "AGENTLZ_APP_DEFINITION": ""}
     stdout = io.StringIO()
     with patch.dict("os.environ", environment), patch.object(
         existing_images, "discover_existing_images", return_value={"dataingest": "cr.azurecr.io/ing:2"}

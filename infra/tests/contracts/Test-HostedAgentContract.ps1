@@ -12,7 +12,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep'),
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep'),
     [string]$FixtureFile = (Join-Path $PSScriptRoot 'fixtures\hosted-agent-resource-graph.json')
 )
 
@@ -124,6 +124,9 @@ try {
         throw "Bicep compilation failed with exit code $LASTEXITCODE."
     }
     $template = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -Depth 100
+    . (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
+    $legacyGraph = ConvertTo-HistoricalFoundationGraph (ConvertTo-LegacyResourceGroupGraph $template) $MainFile |
+        ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
 
     Write-Host "Hosted-agent resource contract (baseline $($fixture.mergeBase))" -ForegroundColor Cyan
 
@@ -134,6 +137,12 @@ try {
         else {
             Add-Pass "$parameterName defaults to false."
         }
+    }
+    if ($template.parameters.grantHostedAgentProjectManager.type -ne 'bool' -or
+        $template.parameters.grantHostedAgentProjectManager.defaultValue -ne $true) {
+        Add-Failure 'Operator Project Manager gate must be a compatible boolean defaulting to true.'
+    } else {
+        Add-Pass 'Operator Project Manager gate preserves legacy foundation defaults.'
     }
 
     $prerequisiteExpression = [string]$template.variables._hostedAgentPrerequisitesEnabled
@@ -155,7 +164,7 @@ try {
         $allowedPostBaselineMutations |
             Select-Object -Unique
     )
-    $actualNames = @($template.resources.PSObject.Properties.Name)
+    $actualNames = @($legacyGraph.resources.PSObject.Properties.Name)
     $missingNames = @($expectedNames | Where-Object { $_ -notin $actualNames })
     $addedNames = @($actualNames | Where-Object { $_ -notin $expectedNames })
     if ($missingNames.Count -gt 0 -or $addedNames.Count -gt 0) {
@@ -177,7 +186,7 @@ try {
         if ($entry.Name -in $allowedPostBaselineMutations) { continue }
         $useNormalizedHash = $normalizedResourceHashes.ContainsKey($entry.Name)
         $expectedHash = $useNormalizedHash ? $normalizedResourceHashes[$entry.Name] : $entry.Value
-        $actualHash = Get-ObjectHash -Value $template.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
+        $actualHash = Get-ObjectHash -Value $legacyGraph.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
         if ($actualHash -ne $expectedHash) {
             Add-Failure "Pre-existing resource '$($entry.Name)' changed (expected $expectedHash, got $actualHash)."
         }
@@ -194,9 +203,9 @@ try {
     $crossServiceJson = $template.resources.assignCrossServiceRoles | ConvertTo-Json -Depth 100 -Compress
     foreach ($check in @(
             @{
-                Name = 'Executor receives Foundry Project Manager when preparation or deployment is selected.'
+                Name = 'Executor receives Foundry Project Manager only when its independent grant gate and Hosted preparation are selected.'
                 Json = $executorJson
-                Required = @("variables('_hostedAgentPrerequisitesEnabled')", 'AzureAIProjectManager')
+                Required = @("variables('_hostedAgentPrerequisitesEnabled')", "parameters('grantHostedAgentProjectManager')", 'AzureAIProjectManager')
             },
             @{
                 Name = 'Foundry project identity receives a registry-mode-compatible pull role when preparation or deployment is selected.'
@@ -211,6 +220,11 @@ try {
         else {
             Add-Pass $check.Name
         }
+    }
+    if ($crossServiceJson.Contains("parameters('grantHostedAgentProjectManager')")) {
+        Add-Failure 'Operator grant gate must never suppress project managed identity registry pull.'
+    } else {
+        Add-Pass 'Project managed identity registry pull is independent of operator grants.'
     }
 
     $source = Get-Content -LiteralPath $MainFile -Raw

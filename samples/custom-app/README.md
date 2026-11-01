@@ -23,5 +23,5 @@ Both read the platform outputs contract (`AGENTLZ_PLATFORM_OUTPUTS`, label
    hosts exactly one application.
 
 Rules: no lifecycle hooks, no remote URLs, no role names; permissions come only
-from capability profiles. See "Build your own application" in the Agent
-Landing Zone section of the AI Landing Zones documentation for the full guide.
+from capability profiles. See [Custom applications](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/build-your-own-app/)
+for the folder layout, source pinning, and hosted greeting protocol requirements.

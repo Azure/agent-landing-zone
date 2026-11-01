@@ -9,6 +9,7 @@ Prerequisites:
 - The following keys must be present in App Configuration (label: agent-lz):
     - SUBSCRIPTION_ID
     - AZURE_RESOURCE_GROUP
+    - AZURE_APP_RESOURCE_GROUP (optional; defaults to AZURE_RESOURCE_GROUP)
     - CONTAINER_REGISTRY_NAME
     - USE_UAI
     - CONTAINER_APPS (JSON list)
@@ -34,6 +35,9 @@ from azure.identity import (
 )
 from azure.appconfiguration import AzureAppConfigurationClient
 from azure.mgmt.appcontainers import ContainerAppsAPIClient
+from azure.core.exceptions import ResourceNotFoundError
+
+from config.deployment.resource_groups import resource_group_for
 
 
 POLL_TIMEOUT_SECONDS = int(os.getenv("CONTAINER_APP_POLL_TIMEOUT_SECONDS", "600"))
@@ -145,18 +149,22 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
             
             return value
         except Exception as e:
+            if not required and isinstance(e, ResourceNotFoundError):
+                return None
             if attempt == max_retries - 1:
                 logging.error(f"Failed to fetch '{key}' after {max_retries} attempts: {e}")
-                if required:
-                    sys.exit(1)
-                return None
+                sys.exit(1)
             else:
                 logging.warning(f"Attempt {attempt + 1}/{max_retries} failed for '{key}': {e}. Retrying...")
                 time.sleep(2)
 
 
-def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential):
-    """Update a single container app registry configuration."""
+def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential,
+                                *, preserve_other_registries: bool = False):
+    """Update registry auth; custom callers can retain unrelated registries.
+
+    The default retains the existing bundled setup behavior.
+    """
     start_time = time.time()
     logging.info(f"[{name}] Starting Container App update process")
     logging.debug(f"[{name}] Parameters: subscription={subscription_id}, rg={resource_group}, acr={acr_server}")
@@ -188,7 +196,11 @@ def update_single_container_app(subscription_id, resource_group, name, acr_serve
 
         # Update registry configuration
         logging.info(f"[{name}] Updating registry configuration with identity: {desired_identity}")
-        app.configuration.registries = [
+        retained = [
+            reg for reg in (app.configuration.registries or [])
+            if (reg.get("server") if isinstance(reg, dict) else getattr(reg, "server", None)) != acr_server
+        ] if preserve_other_registries else []
+        app.configuration.registries = retained + [
             {"server": acr_server, "identity": desired_identity}
         ]
         
@@ -249,7 +261,12 @@ def main():
     # Read global settings
     logging.info("Fetching configuration from App Configuration...")
     subscription_id = get_config_value(appconfig, "SUBSCRIPTION_ID")
-    resource_group = get_config_value(appconfig, "AZURE_RESOURCE_GROUP")
+    resource_group = resource_group_for({
+        "AZURE_RESOURCE_GROUP": get_config_value(appconfig, "AZURE_RESOURCE_GROUP"),
+        "AZURE_APP_RESOURCE_GROUP": get_config_value(
+            appconfig, "AZURE_APP_RESOURCE_GROUP", required=False,
+        ) or "",
+    }, "application")
     acr_name = get_config_value(appconfig, "CONTAINER_REGISTRY_NAME")
     use_uai = get_config_value(appconfig, "USE_UAI")
     acr_server = f"{acr_name}.azurecr.io"

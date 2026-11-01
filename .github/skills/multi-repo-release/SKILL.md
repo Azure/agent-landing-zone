@@ -1,9 +1,9 @@
 ---
 name: multi-repo-release
-description: Prepares and validates GPT-RAG umbrella and multi-repository releases. Use whenever work involves release preparation, semantic versions, release branches, manifest or component pins, changelog release entries, tags, GitHub Release notes, or AI Landing Zone release alignment.
+description: Prepares and validates Agent Landing Zone umbrella and multi-repository releases. Use whenever work involves release preparation, semantic versions, release branches, manifest or component pins, changelog release entries, tags, GitHub Release notes, or AI Landing Zone release alignment.
 ---
 
-# GPT-RAG multi-repository release
+# Agent Landing Zone multi-repository release
 
 Read `.github/copilot-instructions.md` completely before changing a release
 artifact. Its branching, versioning, changelog, and release-note requirements
@@ -16,6 +16,11 @@ are authoritative.
 3. Read every runtime component tag from `manifest.json` `components[]` and the
    infrastructure provenance from `infra.source` (`repo`, `tag`, `commit`);
    never copy a previous version table.
+   Align the bundled `app-definition.json` source commits and the exact
+   component-pin review in
+   `infra/tests/contracts/fixtures/incorporated-foundation-normalization.json`
+   in the same change. Run the release gate against the real loaded application
+   definition, not just the manifest values.
 4. `infra/` is repository-owned source (no submodule). Keep `manifest.json`
    `infra.source` equal to the AI Landing Zone release the in-repository
    `infra/` was incorporated from, and validate the exact `infra/` tree being

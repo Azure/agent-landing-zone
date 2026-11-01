@@ -5,6 +5,10 @@
 **Owners:** Agent Landing Zone maintainers<br>
 **Approver:** Paulo (maintainer)
 
+**Partial supersession:** [ADR-0028](ADR-0028-integrated-terraform-composition.md)
+supersedes the external Terraform location and synchronization requirement.
+The Bicep incorporation and provenance decision remains in effect.
+
 ## Context
 
 `infra/` is a read-only git submodule of `Azure/bicep-ptn-aiml-landing-zone`,
@@ -70,6 +74,12 @@ Prioritized characteristics and measures:
   this repository; it detects Bicep changes and opens a Terraform sync PR
   against `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone` that requires
   human review. The Terraform module is not renamed (R5, FR-010c).
+
+  **Maintenance update:** The automatic parity-PR workflow has since been
+  retired before ADR-0028. ADR-0028 also retires the inherited external
+  assessment/publication pipeline in favor of product-owned Terraform
+  composition and local contract/parity review.
+
 - Infrastructure validation workflows run from this repository (FR-010c).
 - Keep current module usage; AVM adoption is out of scope (R6).
 - `Azure/bicep-ptn-aiml-landing-zone` stays available with history and tags

@@ -3,7 +3,7 @@
 Mirrors ``config.continuity.settings``: every key here is safe to publish
 unconditionally (App Configuration label ``agent-lz``) because it is inert
 unless ``DEPLOY_ADMINISTRATIVE_PANEL`` and ``PANEL_HISTORY_ENABLED`` are both
-``true`` (see ADR-0004 and the merged ``gpt-rag-ui`` ``panel_config.py``,
+``true`` (see ADR-0004 and the merged ``agent-app-ui`` ``panel_config.py``,
 which this module's key names and defaults match exactly -- no duplicate or
 invented keys).
 
@@ -20,7 +20,7 @@ functional and never itself returns an error for the unmet gate.
 
 ``PANEL_OPERATOR_SURFACES_ENABLED``, ``PANEL_OPERATOR_APP_ROLE``, and
 ``PANEL_OPERATOR_GROUP_ID`` mirror the exact key names and safe defaults the
-merged ``gpt-rag-ingestion`` operator-facing overview/corpus-curation
+merged ``agent-app-ingestion`` operator-facing overview/corpus-curation
 surfaces consume (PR #274, merge ``5569dd6af3ecb317e1037108cb21859f1b2185a1``
 -- see ``api/panel_operator.py``'s ``_require_gate_enabled`` and
 ``dependencies.operator_role_or_group_configured``/

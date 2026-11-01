@@ -10,7 +10,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +32,14 @@ function Test-Contains {
     else {
         Write-Host "  [PASS] $Name" -ForegroundColor Green
     }
+}
+
+function Test-ExactExpression([string]$Name, [string]$Actual, [string]$Expected) {
+    if ($Actual -cne $Expected) {
+        $failures.Add("$Name -- unsupported compiled expression.") | Out-Null
+        Write-Host "  [FAIL] $Name -- expected $Expected; got $Actual" -ForegroundColor Red
+    }
+    else { Write-Host "  [PASS] $Name" -ForegroundColor Green }
 }
 
 try {
@@ -70,14 +78,9 @@ try {
                 "parameters('deployAppConfig')",
                 "parameters('appRuntimeConfigurationMode')"
             )
-        Test-Contains -Name 'BYO subnet/NSG protection validation expression' `
+        Test-ExactExpression -Name 'BYO subnet/NSG protection evaluates actual selected writes' `
             -Actual ([string]$validation.properties.parameters.existingSubnetNsgAssociationsAreProtected.value) `
-            -Required @(
-                "parameters('networkIsolation')",
-                "parameters('useExistingVNet')",
-                "parameters('deploySubnets')",
-                "parameters('deployNsgs')"
-            )
+            -Expected "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), not(empty(variables('selectedSubnetDefinitions')))), not(parameters('deployNsgs'))))]"
         Test-Contains -Name 'Validation module fail messages' `
             -Actual ([string]$validation.properties.template.outputs.validated.value) `
             -Required @(
@@ -108,13 +111,12 @@ try {
             "parameters('deployAppConfig')",
             "variables('_runtimeConfigIsAppConfig')"
         )
-    Test-Contains -Name 'Defensive existing-subnet update gate' `
+    Test-ExactExpression -Name 'Selected subnet set includes global and isolation precedence' `
+        -Actual ([string]$template.variables.selectedSubnetDefinitions) `
+        -Expected "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]"
+    Test-ExactExpression -Name 'Defensive existing-subnet update gate' `
         -Actual ([string]$template.resources.virtualNetworkSubnets.condition) `
-        -Required @(
-            "parameters('useExistingVNet')",
-            "parameters('deploySubnets')",
-            "parameters('deployNsgs')"
-        )
+        -Expected "[and(and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs')), not(empty(variables('selectedSubnetDefinitions'))))]"
     Test-Contains -Name 'Container Apps private DNS follows environment deployment' `
         -Actual ([string]$template.variables._dnsZonesList) `
         -Required @("and(parameters('deployContainerEnv'), not(variables('_byoZoneContainerApps')))")
@@ -131,10 +133,50 @@ try {
         -Actual ($template.resources.aiFoundry | ConvertTo-Json -Compress -Depth 100) `
         -Required @("parameters('aiFoundryDisableLocalAuth')")
 
+    if ($template.parameters.deployCosmosDb.defaultValue -cne $false) {
+        $failures.Add('Application Cosmos must default false.') | Out-Null
+    }
+    Test-ExactExpression -Name 'Cosmos UAI follows application Cosmos deployment' `
+        -Actual ([string]$template.resources.cosmosUAI.condition) `
+        -Expected "[and(variables('_useUAI'), parameters('deployCosmosDb'))]"
+    foreach ($symbol in @(
+        'cosmosDBAccount', 'cosmosSqlDatabase',
+        'assignCosmosDBCosmosDbBuiltInDataContributorExecutor',
+        'assignCosmosDBCosmosDbBuiltInDataContributorContainerApps',
+        'assignCosmosDBCosmosDbBuiltInDataContributorTestVm',
+        'cosmosConfigKeyVaultPopulate'
+    )) {
+        Test-Contains -Name "$symbol follows application Cosmos deployment" `
+            -Actual ([string]$template.resources.$symbol.condition) `
+            -Required @("parameters('deployCosmosDb')")
+    }
+    $containerSettings = @($template.variables.copy | Where-Object name -CEQ '_databaseContainerNamesSettings')
+    if ($containerSettings.Count -ne 1) {
+        $failures.Add('Canonical Cosmos container settings must have one compiled loop.') | Out-Null
+    } else {
+        Test-ExactExpression -Name 'Canonical Cosmos container settings follow application deployment' `
+            -Actual ([string]$containerSettings[0].count) `
+            -Expected "[length(if(parameters('deployCosmosDb'), parameters('databaseContainersList'), createArray()))]"
+    }
+    $databaseBootstrap = @($template.variables._containerRuntimeEnv | Where-Object name -in @('DATABASE_ACCOUNT_NAME', 'DATABASE_NAME'))
+    if ($databaseBootstrap.Count -ne 2) {
+        $failures.Add('Both application database bootstrap names must be present.') | Out-Null
+    }
+    foreach ($entry in $databaseBootstrap) {
+        Test-Contains -Name "$($entry.name) bootstrap follows application Cosmos deployment" `
+            -Actual ([string]$entry.value) `
+            -Required @("parameters('deployCosmosDb')")
+    }
+    if ([string]$template.variables.varAfCosmosCfgComplete -match "parameters\('deployCosmosDb'\)") {
+        $failures.Add('Foundry Cosmos must not depend on the application Cosmos flag.') | Out-Null
+    }
+
     $parametersFile = Join-Path (Split-Path -Parent $MainFile) 'main.parameters.json'
     $parameterValues = (Get-Content -LiteralPath $parametersFile -Raw | ConvertFrom-Json -Depth 100).parameters
+    Test-ExactExpression -Name 'Application Cosmos defaults off with an explicit azd opt-in' `
+        -Actual ([string]$parameterValues.deployCosmosDb.value) `
+        -Expected '${DEPLOY_COSMOS_DB=false}'
     $expectedEnvironmentMappings = [ordered]@{
-        deployCosmosDb            = '${DEPLOY_COSMOS_DB=true}'
         deployContainerApps       = '${DEPLOY_CONTAINER_APPS=true}'
         deployContainerRegistry   = '${DEPLOY_CONTAINER_REGISTRY=true}'
         deployContainerEnv        = '${DEPLOY_CONTAINER_ENV=true}'
@@ -142,9 +184,15 @@ try {
         aiFoundryDisableLocalAuth = '${AI_FOUNDRY_DISABLE_LOCAL_AUTH=true}'
     }
     foreach ($entry in $expectedEnvironmentMappings.GetEnumerator()) {
-        $actual = [string]$parameterValues.($entry.Key).value
-        if ($actual -ne $entry.Value) {
-            $failures.Add("$($entry.Key) must map to '$($entry.Value)'; got '$actual'.") | Out-Null
+        $binding = $parameterValues.($entry.Key)
+        $actual = if ($null -ne $binding) { $binding.value } else { $template.parameters.($entry.Key).defaultValue }
+        # The incorporated parameter files retain literal true strings, and
+        # omitted inputs use native Bicep defaults. An upstream azd alias is
+        # also supported, but false/renamed aliases must never pass this gate.
+        $compatible = ($actual -is [bool] -and $actual) -or
+            ($actual -is [string] -and ($actual -ceq 'true' -or $actual -ceq $entry.Value))
+        if (-not $compatible) {
+            $failures.Add("$($entry.Key) must retain its true default or exact '$($entry.Value)' mapping; got '$actual'.") | Out-Null
             Write-Host "  [FAIL] $($entry.Key) environment mapping" -ForegroundColor Red
         }
         else {

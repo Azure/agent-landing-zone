@@ -23,11 +23,11 @@ by ``config.panel.settings``):
   resolved topology; see ``tests/test_deployment_modes.py``).
 - ``DATABASE_ACCOUNT_NAME`` / ``DATABASE_NAME`` / ``STORAGE_ACCOUNT_NAME`` --
   published unconditionally by the AI Landing Zone submodule for every
-  topology (``infra/main.bicep``), regardless of the panel.
+  topology (``infra/bicep/main.bicep``), regardless of the panel.
 - ``DATA_INGEST_APP_APIKEY`` -- the reserved per-app ``<APP>_APIKEY`` Key
   Vault reference the AI Landing Zone submodule publishes automatically for
   every ``containerAppsList`` entry; republishing it here would create a
-  duplicate key-value and fail deployment (see ``infra/main.bicep``'s
+  duplicate key-value and fail deployment (see ``infra/bicep/main.bicep``'s
   ``additionalAppConfigurationSettings`` description).
 - ``JOBS_LOG_CONTAINER`` -- ingestion's existing per-file-log blob control
   store container name (defaults to ``"jobs"`` in ``tools/admin.py`` /

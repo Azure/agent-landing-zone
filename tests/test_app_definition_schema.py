@@ -194,7 +194,8 @@ TRIO_CANONICAL = {"ui": "FRONTEND_APP", "orchestrator": "ORCHESTRATOR_APP", "ing
 
 class CapabilityProfileTests(unittest.TestCase):
     EXPECTED = {
-        "base": {"AppConfigurationDataReader", "AcrPull", "KeyVaultSecretsUser"},
+        "base": {"AppConfigurationDataReader", "AcrPull"},
+        "secret-reader": {"KeyVaultSecretsUser"},
         "model-user": {"CognitiveServicesUser", "CognitiveServicesOpenAIUser"},
         "retrieval-reader": {"SearchIndexDataReader", "StorageBlobDataReader"},
         "conversation-store": {"CosmosDBBuiltInDataContributor"},
@@ -220,8 +221,16 @@ class CapabilityProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             expand_profiles(["owner"])
 
+    def test_bundled_ui_can_check_native_download_permissions_without_search_write(self) -> None:
+        definition = load_definition(ROOT / "app-definition.json", repo_root=ROOT)
+        ui = next(component for component in definition.document["components"] if component["name"] == "ui")
+        roles = set(role_names(ui["profiles"]))
+        self.assertIn("SearchIndexDataReader", roles)
+        self.assertNotIn("SearchIndexDataContributor", roles)
+        self.assertNotIn("SearchServiceContributor", roles)
+
     def test_trio_profiles_reproduce_current_role_assignments(self) -> None:
-        """T099 parity checklist: profiles == containerAppsList roles per app."""
+        """Default profiles match seed capabilities, not legacy/feature-owned grants."""
         parameters = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
         current = {
             app["canonical_name"]: set(app["roles"])
@@ -232,7 +241,15 @@ class CapabilityProfileTests(unittest.TestCase):
         for component in trio.document["components"]:
             canonical = TRIO_CANONICAL[component["name"]]
             with self.subTest(component=component["name"], app=canonical):
-                self.assertEqual(current[canonical], set(role_names(component["profiles"])))
+                expected = current[canonical] - {"KeyVaultSecretsUser"}
+                if component["name"] == "orchestrator":
+                    # Native execution state is not the legacy checkpoint store.
+                    expected -= {"CosmosDBBuiltInDataContributor"}
+                    self.assertNotIn("conversation-store", component["profiles"])
+                self.assertEqual(
+                    expected,
+                    set(role_names(component["profiles"])),
+                )
         self.assertEqual(set(TRIO_CANONICAL.values()), set(current))
 
 
@@ -248,10 +265,15 @@ class BundledDefinitionTests(unittest.TestCase):
             self.assertEqual(pins[component["name"]], component["source"]["commit"])
 
     def test_bundled_source_drift_from_manifest_fails(self) -> None:
-        document = copy.deepcopy(self.trio.document)
-        document["components"][0]["source"]["commit"] = "c" * 40
-        drifted = AppDefinition(self.trio.path, document, bundled=True)
-        self.assertIn("/components/0/source/commit", {i.pointer for i in collect_issues(drifted, ROOT)})
+        for index in (0, 1):
+            with self.subTest(component=index):
+                document = copy.deepcopy(self.trio.document)
+                document["components"][index]["source"]["commit"] = "c" * 40
+                drifted = AppDefinition(self.trio.path, document, bundled=True)
+                self.assertIn(
+                    f"/components/{index}/source/commit",
+                    {i.pointer for i in collect_issues(drifted, ROOT)},
+                )
 
     def test_hosted_mode_turns_orchestrator_into_hosted_agent(self) -> None:
         classic = {c["name"]: c for c in effective_components(self.trio, hosted_orchestration=False)}
