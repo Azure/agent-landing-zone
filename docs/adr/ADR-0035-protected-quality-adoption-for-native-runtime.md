@@ -1,6 +1,6 @@
 # ADR-0035: Retire the frozen-base quality policy self-lock
 
-**Status:** Accepted maintainer decision, implementation and activation pending<br>
+**Status:** Accepted, runtime control maintenance activated<br>
 **Date:** 2026-10-31<br>
 **Owners:** Agent Landing Zone and runtime repository maintainers
 
@@ -97,8 +97,21 @@ native source failures. Native integration and publication still require genuine
 passing checks under the maintained current-revision model.
 
 Governance remains contributor infrastructure, not an application or provisioning
-dependency. This record captures authorization, not a claim that activation or
-the native release has already occurred.
+dependency. Activation of contributor controls does not establish native release
+readiness.
+
+### Activation evidence
+
+The isolated maintenance change was normally squash-merged through
+[Azure/agent-app-orchestrator#429](https://github.com/Azure/agent-app-orchestrator/pull/429)
+on 2026-11-01. Its reviewed head was
+`7c91b60c7968a44964ecc4dd5427313dc404878c`, and the resulting develop commit is
+`9e45626f38de36e8faa595734ccd8fa378b27dbc`.
+
+Every actual required check passed before integration, including tests, frontend,
+lint, typing, architecture, exceptions, policy and the aggregate quality gate.
+No administrative override, fabricated approval or branch-protection change was
+needed. Native code and its main-targeted release retain their own required checks.
 
 ## Consequences
 
