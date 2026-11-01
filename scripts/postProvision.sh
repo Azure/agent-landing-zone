@@ -20,25 +20,18 @@ echo
 # This avoids persisting secrets in the User environment (registry)
 #-------------------------------------------------------------------------------
 
-azd_values="$(azd env get-values)" || {
+command -v jq >/dev/null 2>&1 || { echo "jq is required to load the selected azd environment." >&2; exit 1; }
+azd_values="$(azd env get-values --output json)" || {
   echo "Could not load the selected azd environment; refusing to configure resources." >&2
   exit 1
 }
-[ -n "$azd_values" ] || { echo "The selected azd environment is empty." >&2; exit 1; }
-while IFS= read -r line; do
-  line="${line%$'\r'}"
-  [[ -z "$line" ]] && continue
-  [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || { echo "Invalid azd environment output." >&2; exit 1; }
-  key="${BASH_REMATCH[1]}"
-  value="${BASH_REMATCH[2]}"
-
-  # Trim surrounding double quotes from the value (if present)
-  value="${value%\"}"
-  value="${value#\"}"
-
-  # Export into current shell
+jq -e 'type == "object" and length > 0 and all(to_entries[];
+  (.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) and
+  (.value | type == "string") and (.value | contains("\u0000") | not))' \
+  <<< "$azd_values" >/dev/null || { echo "Invalid azd environment JSON, key or value." >&2; exit 1; }
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
   export "$key=$value"
-done <<< "$azd_values"
+done < <(jq -b -j 'to_entries[] | .key, "\u0000", .value, "\u0000"' <<< "$azd_values")
 
 is_truthy() {
   case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -50,6 +43,10 @@ is_truthy() {
 #-------------------------------------------------------------------------------
 # Private deployment-host prerequisite (before data-plane configuration)
 #-------------------------------------------------------------------------------
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.resource_groups --azure-dir "$PROJECT_ROOT/.azure" --bind-only) >/dev/null || {
+  echo "Resource-group destination binding failed; configuration has not started." >&2
+  exit 1
+}
 network_exit=0
 (cd "$PROJECT_ROOT" && python3 -m config.deployment.private_network --stage post-provision) || network_exit=$?
 if [ "$network_exit" -eq 20 ]; then
@@ -61,6 +58,13 @@ elif [ "$network_exit" -ne 0 ]; then
 fi
 
 #-------------------------------------------------------------------------------
+# BEGIN component runtime egress
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.egress --apply) || {
+  echo "Component egress reconciliation failed; application configuration has not started." >&2
+  exit 1
+}
+# END component runtime egress
+
 # Container APP API Keys Warning
 #-------------------------------------------------------------------------------
 echo
@@ -133,14 +137,6 @@ python -m config.governance.setup
 echo "✅ Governance and audit configuration finished."
 
 ###############################################################################
-# 2) Hosted conversation continuity
-###############################################################################
-echo
-echo "🔐 Publishing fail-closed delegated continuity defaults…"
-python -m config.continuity.setup
-echo "✅ Fail-closed delegated continuity defaults published."
-
-###############################################################################
 # 3) AI Foundry Setup
 ###############################################################################
 echo
@@ -150,7 +146,8 @@ echo "📑 AI Foundry Setup…"
   python -m config.aifoundry.setup
   echo "✅ AI Foundry setup script finished."
 } || {
-  echo "❗️ Error during AI Foundry setup. Skipping it."
+  echo "❗️ Error during AI Foundry setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -163,7 +160,8 @@ echo "🔍 ContainerApp setup…"
   python -m config.containerapps.setup
   echo "✅ Container Apps setup script finished."
 } || {
-  echo "❗️ Error during Container Apps setup. Skipping it."
+  echo "❗️ Error during Container Apps setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -176,7 +174,8 @@ echo "🔍 AI Search setup…"
   python -m config.search.setup
   echo "✅ Search setup script finished."
 } || {
-  echo "❗️ Error during Search setup. Skipping it."
+  echo "❗️ Error during Search setup." >&2
+  exit 1
 }
 
 ###############################################################################
@@ -187,9 +186,10 @@ echo "🔐 Administrative panel Cosmos RBAC…"
 {
   echo "🚀 Running config.panel.setup…"
   python -m config.panel.setup
-  echo "✅ Administrative panel Cosmos RBAC finished (no-op unless DEPLOY_ADMINISTRATIVE_PANEL=true)."
+  echo "✅ Native frontend metadata Cosmos RBAC finished (no-op when metadata is not required)."
 } || {
-  echo "❗️ Error during administrative panel Cosmos RBAC setup. Skipping it."
+  echo "❗️ Error during native frontend metadata Cosmos RBAC setup." >&2
+  exit 1
 }
 
 ###############################################################################

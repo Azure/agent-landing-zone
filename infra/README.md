@@ -1,15 +1,26 @@
 # Agent Landing Zone infrastructure
 
-This directory contains the Bicep infrastructure foundation used by Agent Landing Zone. Deploy the solution from the [repository root](../README.md), not from this directory.
+This directory contains the Bicep and Terraform implementations of the
+Agent Landing Zone infrastructure.
 
-For configuration and deployment instructions, see the [Agent Landing Zone documentation](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/):
+```text
+infra/
+  bicep/       Bicep templates and modules
+  terraform/   Terraform configuration and tests
+  shared/      Naming and role catalogs used by both implementations
+  tests/       Infrastructure checks and test fixtures
+  LICENSE      License for the incorporated foundation
+```
 
-- [Configuration](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/configuration/)
-- [Deploy the full stack](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-full-stack/)
-- [Deploy infrastructure only](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deploy-infra-only/)
-- [Network isolation](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/network-isolation/)
-- [Hosted agents](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/hosted-agents/)
+Run `azd` commands from the [repository root](../README.md). Configure your
+deployment in [`main.parameters.json`](../main.parameters.json).
+[`manifest.json`](../manifest.json) lists the component versions and the
+upstream foundation version used by this repository.
 
-For the broader architecture and implementation options, see [AI Landing Zones](https://aka.ms/ailz).
+Deployment hooks are in [`scripts/`](../scripts/), with infrastructure helpers
+in [`scripts/infra/`](../scripts/infra/).
 
-The infrastructure's source repository, version, and commit are recorded in the repository-root [`manifest.json`](../manifest.json), under `infra.source`. Deployment uses the code in this directory; it does not download that source version at provisioning time.
+See the [deployment documentation](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/)
+to get started. For development details, see the [Terraform README](terraform/README.md),
+[infrastructure tests](tests/README.md) and
+[directory layout decision](../docs/adr/ADR-0032-infrastructure-source-layout.md).

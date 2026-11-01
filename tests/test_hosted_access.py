@@ -23,7 +23,7 @@ STORE = PREFIX + "Microsoft.AppConfiguration/configurationStores/test-store"
 VAULT = PREFIX + "Microsoft.KeyVault/vaults/test-vault"
 SECRET = VAULT + "/secrets/AUDIT-HMAC-KEY"
 ENV = {
-    "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+    "ORCHESTRATION_HOST": "hosted",
     "AZURE_SUBSCRIPTION_ID": SUB, "AZURE_RESOURCE_GROUP": "test-group",
     "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT, "AZURE_AI_PROJECT_ENDPOINT": ENDPOINT,
     "APP_CONFIG_ENDPOINT": "https://test-store.azconfig.io",
@@ -140,9 +140,9 @@ class HostedAccessTests(unittest.TestCase):
             self.discover(env)
         self.assertEqual([], self.azure.writes)
 
-    def test_classic_noop_no_azure_even_apply(self):
-        plan = self.discover({"DEPLOYMENT_TOPOLOGY": "classic"})
-        self.assertTrue(plan.classic)
+    def test_container_apps_has_no_bundled_hosted_bootstrap(self):
+        plan = self.discover({"ORCHESTRATION_HOST": "container_apps"})
+        self.assertTrue(plan.skipped)
         self.assertEqual((), self.apply(plan))
         self.assertEqual([], self.azure.calls)
 
@@ -152,10 +152,8 @@ class HostedAccessTests(unittest.TestCase):
             {"DEPLOYMENT_TOPOLOGY": "classic", "DEPLOY_HOSTED_AGENT_ORCHESTRATION": "true"},
         ):
             with self.subTest(environment=env), redirect_stdout(io.StringIO()) as output:
-                self.assertEqual(0, access.main(["--plan"], environment=env, run=self.azure))
-                result = json.loads(output.getvalue())
-                self.assertTrue(result["classic"])
-                self.assertEqual([], result["grants"])
+                self.assertEqual(1, access.main(["--plan"], environment=env, run=self.azure))
+                self.assertEqual("", output.getvalue())
         self.assertEqual([], self.azure.calls)
 
     def test_exact_three_roles_and_actual_instance(self):
@@ -169,10 +167,41 @@ class HostedAccessTests(unittest.TestCase):
             (access.Role.SECRET, SECRET),
         ], [(grant.role, grant.scope) for grant in plan.grants])
 
+    def test_split_foundry_preserves_exact_model_appconfig_and_audit_ownership(self):
+        for group in ("foundry-group", "rg-ai(team)", "rg-équipe"):
+            with self.subTest(group=group):
+                self.azure = AzureFixture()
+                environment = {
+                    **ENV, "AZURE_RESOURCE_GROUP": group,
+                    "AZURE_APP_RESOURCE_GROUP": "test-group",
+                    "AZURE_NETWORK_RESOURCE_GROUP": "network-group",
+                    "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT.replace("test-group", group),
+                }
+                for old_id in (PROJECT, ACCOUNT, MODEL):
+                    new_id = old_id.replace("test-group", group)
+                    self.azure.resources[new_id] = {**self.azure.resources.pop(old_id), "id": new_id}
+                self.azure.settings["AZURE_RESOURCE_GROUP"]["value"] = group
+                self.azure.settings["AZURE_APP_RESOURCE_GROUP"] = {
+                    "key": "AZURE_APP_RESOURCE_GROUP", "label": "agent-lz", "value": "test-group",
+                }
+                plan = self.discover(environment)
+                plan.validate()
+                self.assertEqual("test-group", plan.resource_group)
+                self.assertEqual(group, plan.foundry_resource_group)
+                self.assertEqual([STORE, MODEL.replace("test-group", group), SECRET], [g.scope for g in plan.grants])
+                with self.assertRaises(access.AccessError):
+                    replace(plan, grants=tuple(
+                        access.Grant(g.role, MODEL) if g.role is access.Role.MODEL else g
+                        for g in plan.grants
+                    )).validate()
+                self.fails_discovery({**environment, "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT})
+                self.azure.settings["AZURE_APP_RESOURCE_GROUP"]["value"] = "wrong-group"
+                self.fails_discovery(environment)
+
     def test_custom_instance_discovery_is_read_only_and_validates_actual_name(self):
         self.azure.live["name"] = self.azure.version["name"] = "sample-hosted-agent"
         instance = access.discover_instance(
-            {**ENV, "DEPLOYMENT_TOPOLOGY": "classic"}, name="sample-hosted-agent", run=self.azure,
+            {**ENV, "ORCHESTRATION_HOST": "container_apps"}, name="sample-hosted-agent", run=self.azure,
         )
         self.assertEqual(PRINCIPAL, instance.principal_id)
         self.assertEqual("7", instance.agent_version)
@@ -259,7 +288,7 @@ class HostedAccessTests(unittest.TestCase):
         self.azure.live["versions"] = {"latest": dict(self.azure.version, version="8")}
         self.assertEqual("7", self.discover().agent_version)
 
-    def test_role_allowlist_excludes_search_blob_conversation_elevated(self):
+    def test_nonretrieval_plan_excludes_search_blob_conversation_elevated(self):
         self.assertEqual({
             "516239f1-63e1-4d78-a4de-a74fb236a071",
             "4633458b-17de-408a-b874-0445c86b69e6",
@@ -518,7 +547,7 @@ class HostedAccessTests(unittest.TestCase):
         for changed in (
             replace(plan, subscription=OTHER), replace(plan, resource_group="other-group"),
             replace(plan, principal_id="guess"), replace(plan, grants=plan.grants + (plan.grants[0],)),
-            replace(plan, classic=True),
+            replace(plan, skipped=True),
         ):
             with self.subTest(plan=changed), self.assertRaises(access.AccessError):
                 self.apply(changed)

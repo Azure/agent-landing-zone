@@ -16,6 +16,11 @@ are authoritative.
 3. Read every runtime component tag from `manifest.json` `components[]` and the
    infrastructure provenance from `infra.source` (`repo`, `tag`, `commit`);
    never copy a previous version table.
+   Align the bundled `app-definition.json` source commits and the exact
+   component-pin review in
+   `infra/tests/contracts/fixtures/incorporated-foundation-normalization.json`
+   in the same change. Run the release gate against the real loaded application
+   definition, not just the manifest values.
 4. `infra/` is repository-owned source (no submodule). Keep `manifest.json`
    `infra.source` equal to the AI Landing Zone release the in-repository
    `infra/` was incorporated from, and validate the exact `infra/` tree being

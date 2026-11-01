@@ -8,24 +8,41 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "b8bd441d578e840de2bc5189afdb3693131cfd71" },
-      "profiles": ["blob-delegator"],
+      "source": { "commit": "3961224368685cd0e96966c18496adb8b6626987" },
+      "profiles": ["blob-delegator", "retrieval-reader"],
+      "egress": [],
       "ingress": "external"
     },
     {
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "27f952fcf8d48a2ba6267c237ea6bea8361fedd2" },
-      "profiles": ["model-user", "retrieval-reader", "conversation-store"],
+      "source": { "commit": "8cff5be48d166e3270f874374bd343e7899073ec" },
+      "profiles": ["model-user", "retrieval-reader"],
+      "egress": [
+        {
+          "fqdn": "openaipublic.blob.core.windows.net",
+          "protocol": "https",
+          "port": 443,
+          "purpose": "Download tiktoken encoding assets when the runtime cache is empty."
+        }
+      ],
       "ingress": "external"
     },
     {
       "name": "ingestion",
       "kind": "containerapp",
       "path": "ingestion",
-      "source": { "commit": "72efd8d7d51e10d38bf8b89f03b7eb42e1ed8ff2" },
+      "source": { "commit": "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1" },
       "profiles": ["model-user", "conversation-store", "ingestion-writer"],
+      "egress": [
+        {
+          "fqdn": "openaipublic.blob.core.windows.net",
+          "protocol": "https",
+          "port": 443,
+          "purpose": "Download tiktoken encoding assets for chunking and token estimation when the runtime cache is empty."
+        }
+      ],
       "ingress": "external",
       "resources": { "cpu": 1.0, "memory": "3.0Gi" }
     }

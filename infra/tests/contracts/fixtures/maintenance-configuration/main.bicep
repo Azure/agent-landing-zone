@@ -1,6 +1,6 @@
 targetScope = 'resourceGroup'
 
-module defaultMaintenance '../../../../modules/maintenance/avm.res.maintenance.maintenance-configuration.bicep' = {
+module defaultMaintenance '../../../../bicep/modules/maintenance/avm.res.maintenance.maintenance-configuration.bicep' = {
   name: 'maintenance-default-contract'
   params: {
     maintenanceConfig: {
@@ -9,7 +9,7 @@ module defaultMaintenance '../../../../modules/maintenance/avm.res.maintenance.m
   }
 }
 
-module inGuestPatchMaintenance '../../../../modules/maintenance/avm.res.maintenance.maintenance-configuration.bicep' = {
+module inGuestPatchMaintenance '../../../../bicep/modules/maintenance/avm.res.maintenance.maintenance-configuration.bicep' = {
   name: 'maintenance-in-guest-patch-contract'
   params: {
     maintenanceConfig: {

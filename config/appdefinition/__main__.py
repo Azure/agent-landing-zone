@@ -71,12 +71,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _assign_roles(definition: AppDefinition) -> int:
-    from config.deployment.composition import DeploymentMode, DeploymentTopologyError, resolve_mode
+    from config.deployment.composition import DeploymentTopologyError, resolve_mode
 
     from .roles import RoleAssignmentError, assign_roles
 
     try:
-        hosted = resolve_mode(os.environ) is not DeploymentMode.CLASSIC
+        hosted = resolve_mode(os.environ).value == "hosted"
         created = assign_roles(definition, os.environ, hosted_orchestration=hosted)
     except (DeploymentTopologyError, RoleAssignmentError, RuntimeError) as error:
         LOGGER.error("Capability-profile role assignment failed: %s", error)

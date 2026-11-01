@@ -10,10 +10,9 @@ declared in ``hosted-agent/azure.yaml`` or ``composition.py``'s
 ``azd ai agent run`` developer flow, not real container deploys. Because of
 this, whatever ``CMD``/``ENTRYPOINT`` is baked into the published
 ``agent-app-orchestrator`` image is what a Foundry hosted agent will actually
-run, and today that image's ``CMD`` is always the classic Container-App
-entrypoint (``uvicorn main:app --host 0.0.0.0 --port 8080``), not the hosted
-entrypoint (``uvicorn src.api.hosted_entrypoint:app --host 0.0.0.0 --port
-8088``). This module first builds the exact manifest-pinned orchestrator source
+run. The native Container Apps worker and Hosted server have different official
+entrypoints (``python -m native.durable`` and ``python -m native.hosted``).
+This module first builds the exact manifest-pinned orchestrator source
 through the component's standard ACR Tasks path, resolves that pushed image to
 an immutable digest, and then builds a tiny derivative image with only the
 port/entrypoint ``CMD`` overridden. A caller may instead supply an immutable
@@ -385,6 +384,7 @@ def prepare_hosted_image(
     agent_pool: str | None = None,
     resource_group: str | None = None,
     azure_cli: str = "az",
+    required_source_paths: tuple[str, ...] = (),
 ) -> str:
     """Resolve an override or automatically build a hosted-compatible digest."""
     if image_version and image_version.strip():
@@ -417,6 +417,12 @@ def prepare_hosted_image(
             expected_commit=source_commit,
             target_dir=source_dir,
         )
+        if any(not (source_dir / path).is_file() for path in required_source_paths):
+            raise ValueError(
+                "The manifest-pinned orchestrator source lacks the required native "
+                "entrypoint. Coordinate compatible component pins before building; "
+                "no application image was built."
+            )
         base_digest = build_source_image(
             registry=registry,
             source_dir=source_dir,

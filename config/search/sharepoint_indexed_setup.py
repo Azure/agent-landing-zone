@@ -1,22 +1,17 @@
 """SharePoint Indexed knowledge source preflight and helpers (preview).
 
 The SharePoint Indexed knowledge source (kind: ``indexedSharePoint``, API
-``2026-05-01-preview``) is registered through the standard j2 template +
+``2026-08-01-preview``) is registered through the standard j2 template +
 ``provision_knowledge_sources`` path in ``config/search/setup.py``. This
 module intentionally does NOT PUT the KS itself; it only owns:
 
-1. Advisory prerequisites logging for operators (Entra app registration +
-   Federated Identity Credential + Graph ``Sites.Selected`` or
-   ``Sites.Read.All`` admin consent), matching the pattern used for
-   Work IQ.
-2. A ``filter_sharepoint_indexed_sources`` helper that removes the KS from
-   the rendered template when required identifiers are missing so the rest
-   of the provisioning still succeeds.
+This module validates required identifiers and logs administrator prerequisites.
+It never removes an enabled source to make provisioning succeed. Search setup
+also validates source completeness before mutating any Azure resource.
 
-Auth to Microsoft Graph is baked into the KS ``connectionString`` at
-registration time via the User Assigned Managed Identity + FIC and is not
-performed here. See ``docs/howto_grounding_sharepoint_indexed.md`` for the
-manual Entra prerequisites that Bicep cannot cover.
+The secretless connection string identifies the ingestion application and
+Search managed identity. Native permission ingestion and delegated query-time
+authorization are separate from that application's Graph indexing access.
 """
 
 from __future__ import annotations
@@ -28,7 +23,7 @@ from typing import Any
 SHAREPOINT_INDEXED_KIND = "indexedSharePoint"
 SHAREPOINT_INDEXED_PARAMS_KEY = "indexedSharePointParameters"
 SHAREPOINT_INDEXED_ADMIN_CONSENT_DOCS = (
-    "https://azure.github.io/AI-Landing-Zones/agent-landing-zone/"
+    "https://azure.github.io/AI-Landing-Zones/agent-landing-zone/sharepoint/"
 )
 
 
@@ -46,9 +41,10 @@ def sharepoint_indexed_required_context_keys() -> tuple[str, ...]:
     return (
         "SHAREPOINT_INDEXED_ENABLED",
         "SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME",
-        "SHAREPOINT_INDEXED_INDEX_NAME",
         "SHAREPOINT_INDEXED_SITE_URL",
         "SHAREPOINT_INDEXED_TENANT_ID",
+        "SHAREPOINT_INDEXED_APPLICATION_ID",
+        "SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID",
     )
 
 
@@ -59,12 +55,7 @@ def sharepoint_indexed_is_configured(context: dict) -> bool:
 
     if not _is_truthy(context.get("SHAREPOINT_INDEXED_ENABLED")):
         return False
-    required = (
-        "SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME",
-        "SHAREPOINT_INDEXED_INDEX_NAME",
-        "SHAREPOINT_INDEXED_SITE_URL",
-        "SHAREPOINT_INDEXED_TENANT_ID",
-    )
+    required = sharepoint_indexed_required_context_keys()[1:]
     return all((context.get(k) or "").strip() for k in required)
 
 
@@ -82,44 +73,27 @@ def log_sharepoint_indexed_prerequisites_warning() -> None:
     logging.warning(
         "   Prerequisites: 1) Register an Entra app for SharePoint Indexed. "
         "2) Add a Federated Identity Credential on that app for the User "
-        "Assigned Managed Identity used by the orchestrator. "
+        "Assigned Managed Identity used by Search (or its system identity). "
         "3) Grant admin consent for Microsoft Graph Sites.Selected (preferred) "
         "or Sites.Read.All. 4) If using Sites.Selected, grant the app read "
         "access to the target SharePoint site."
     )
     logging.warning(
-        f"   See {SHAREPOINT_INDEXED_ADMIN_CONSENT_DOCS} for the full "
-        "walkthrough (this URL is a placeholder until the docs page lands "
-        "on the docs branch)."
+        f"   See {SHAREPOINT_INDEXED_ADMIN_CONSENT_DOCS} for source setup "
+        "and protected-retrieval acceptance."
     )
 
 
 def filter_sharepoint_indexed_sources(defs: dict, context: dict) -> None:
-    """Remove the SharePoint Indexed KS from the rendered template when the
-    required identifiers are missing so the rest of the provisioning still
-    succeeds. Default deployments (SharePoint Indexed disabled) are
-    untouched.
-    """
+    """Retained validation entrypoint; enabled sources are never filtered out."""
 
-    ks_name = (context.get("SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME") or "").strip()
-    if not ks_name:
+    if not _is_truthy(context.get("SHAREPOINT_INDEXED_ENABLED")):
         return
     if sharepoint_indexed_is_configured(context):
         log_sharepoint_indexed_prerequisites_warning()
         return
 
-    logging.warning(
-        f"SharePoint Indexed knowledge source '{ks_name}' is missing one or "
-        "more required identifiers (INDEX_NAME, SITE_URL, TENANT_ID). "
-        "Removing it from the provisioning payload."
+    raise ValueError(
+        "SharePoint Indexed is enabled but required source/app identity "
+        "settings are missing. The configured source was not removed."
     )
-    knowledge_sources = defs.get("knowledgeSources") or []
-    defs["knowledgeSources"] = [
-        ks for ks in knowledge_sources if ks.get("name") != ks_name
-    ]
-    for kb in defs.get("knowledgeBases") or []:
-        kb["knowledgeSources"] = [
-            ref
-            for ref in kb.get("knowledgeSources") or []
-            if ref.get("name") != ks_name
-        ]

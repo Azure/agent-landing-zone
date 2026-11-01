@@ -51,15 +51,27 @@ def load_allow_list() -> tuple[list[str], list[str]]:
     )
 
 
+def load_allowed_lines() -> dict[str, set[str]]:
+    text = NAMING_MAP.read_text(encoding="utf-8").replace("\r\n", "\n")
+    allowed: dict[str, set[str]] = {}
+    for entry in _allow_block(text, "naming-allow-exact-lines"):
+        path, separator, line = entry.partition("|")
+        path, line = path.strip(), line.strip()
+        if not separator or not path or not line or any(token in path for token in ("*", "?", "\\", "..")):
+            raise AssertionError("Inherited package exceptions require an exact file and complete source line")
+        allowed.setdefault(path, set()).add(line)
+    return allowed
+
+
 def is_allowed(path: str, globs: list[str]) -> bool:
     return any(_glob_to_regex(glob).match(path) for glob in globs)
 
 
-def find_hits(path: str, text: str) -> list[str]:
+def find_hits(path: str, text: str, allowed_lines: dict[str, set[str]] | None = None) -> list[str]:
     return [
         f"{path}:{number}: {line.strip()[:160]}"
         for number, line in enumerate(text.splitlines(), start=1)
-        if LEGACY_PATTERN.search(line)
+        if LEGACY_PATTERN.search(line) and line.strip() not in (allowed_lines or {}).get(path, set())
     ]
 
 
@@ -115,6 +127,15 @@ class NamingPatternTests(unittest.TestCase):
             find_hits("a.md", "clean\nGPT-RAG here\nagent-lz"),
         )
 
+    def test_inherited_package_exception_is_exact_file_and_complete_line_only(self) -> None:
+        allowed = load_allowed_lines()
+        path = "config/deployment/native_deploy.py"
+        line = 'entrypoint = path / "src/gpt_rag_ui/config/native.py"'
+        self.assertEqual([], find_hits(path, "    " + line, allowed))
+        self.assertTrue(find_hits("config/deployment/other.py", line, allowed))
+        self.assertTrue(find_hits(path, line + " # alz fallback", allowed))
+        self.assertTrue(find_hits(path, "label = 'gpt-rag'", allowed))
+
 
 class NamingInventoryTests(unittest.TestCase):
     def test_allow_list_blocks_are_present(self) -> None:
@@ -127,6 +148,7 @@ class NamingInventoryTests(unittest.TestCase):
     def test_no_legacy_names_outside_allow_list(self) -> None:
         permanent, temporary = load_allow_list()
         allowed = permanent + temporary
+        allowed_lines = load_allowed_lines()
         violations: list[str] = []
         for path in tracked_files():
             if is_allowed(path, allowed):
@@ -137,7 +159,7 @@ class NamingInventoryTests(unittest.TestCase):
             data = file_path.read_bytes()
             if b"\0" in data:
                 continue  # binary
-            violations.extend(find_hits(path, data.decode("utf-8", errors="replace")))
+            violations.extend(find_hits(path, data.decode("utf-8", errors="replace"), allowed_lines))
         self.assertEqual(
             [],
             violations,

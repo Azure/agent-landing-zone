@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
      "_hostedAgentContainerRegistryEndpoint"),
 ])
 def test_foundation_handoff_preserves_disabled_and_external_hosted_cases(name, flag, value):
-    text = (ROOT / "infra" / "main.bicep").read_text(encoding="utf-8")
+    text = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
     expression = re.search(rf"^output {name} string = (.+)$", text, re.MULTILINE)[1]
     assert expression == f"({flag} || _hostedAgentPrerequisitesEnabled) ? {value} : ''"
     for provisioned, hosted, expected in (

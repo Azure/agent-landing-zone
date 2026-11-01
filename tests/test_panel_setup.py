@@ -9,7 +9,8 @@ from config.panel import setup
 class PanelPublishedDatabaseTests(unittest.TestCase):
     def setUp(self):
         self.environment = {
-            "DEPLOY_ADMINISTRATIVE_PANEL": "true",
+            "ORCHESTRATION_HOST": "hosted",
+            "APPLICATION_MODE": "both",
             "AZURE_RESOURCE_GROUP": "test-group",
             "RESOURCE_TOKEN": "testtoken",
             "AZURE_SUBSCRIPTION_ID": "test-subscription",
@@ -19,10 +20,10 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
     def test_published_account_and_database_are_used_for_container_scopes(self):
         with (
             patch.object(setup, "_run_az", side_effect=["test-account", "test-database"]) as az,
-            patch.object(setup, "resolve_container_app_principal_id", side_effect=["ui", "ingestion"]),
+            patch.object(setup, "resolve_container_app_principal_id", return_value="ui"),
             patch.object(setup, "ensure_cosmos_sql_role_assignment", return_value=True) as assign,
         ):
-            self.assertEqual(setup.configure_panel_rbac(self.environment), 4)
+            self.assertEqual(setup.configure_panel_rbac(self.environment), 1)
         self.assertEqual([call.args[0][call.args[0].index("--key") + 1] for call in az.call_args_list],
                          ["DATABASE_ACCOUNT_NAME", "DATABASE_NAME"])
         for call in az.call_args_list:
@@ -31,7 +32,8 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
         for call in assign.call_args_list:
             self.assertEqual(call.args[0], "test-account")
             self.assertIn("/dbs/test-database/colls/", call.args[-1])
-            self.assertIn(call.args[3], ("ui", "ingestion"))
+            self.assertEqual(call.args[3], "ui")
+            self.assertTrue(call.args[-1].endswith("/colls/native-ui-metadata"))
 
     def test_explicit_names_preserve_existing_behavior_without_config_read(self):
         self.environment.update(DATABASE_ACCOUNT_NAME="explicit-account", DATABASE_NAME="explicit-db")

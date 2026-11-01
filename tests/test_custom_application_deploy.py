@@ -183,6 +183,34 @@ def test_bundled_definition_never_enters_custom_registry_configuration():
     image.assert_not_called()
 
 
+@pytest.mark.parametrize("image", [None, f"private.azurecr.io/web@{DIGEST}"])
+@pytest.mark.parametrize("failure", [False, True])
+def test_custom_container_targets_application_without_changing_foundry_root(tmp_path, image, failure):
+    app = tmp_path / "sample"
+    shutil.copytree(ROOT / "samples" / "custom-app" / "containerapp", app)
+    path = app / "azure.yaml"
+    original = path.read_bytes()
+    environment = {**ENV, "AZURE_RESOURCE_GROUP": "rg-ai", "AZURE_APP_RESOURCE_GROUP": "rg-app"}
+
+    def run(args, **kwargs):
+        rendered = yaml.safe_load(path.read_text())
+        assert rendered["services"]["web"]["resourceGroup"] == "rg-app"
+        assert kwargs["env"]["AZURE_RESOURCE_GROUP"] == "rg-ai"
+        if failure:
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0)
+
+    with patch.object(deploy, "prepare_image", return_value=image), \
+            patch.object(deploy, "configure_service_registry"), \
+            patch.object(deploy.subprocess, "run", side_effect=run):
+        if failure:
+            with pytest.raises(subprocess.CalledProcessError):
+                deploy.deploy_service(str(app / "app-definition.json"), "web", environment)
+        else:
+            deploy.deploy_service(str(app / "app-definition.json"), "web", environment)
+    assert path.read_bytes() == original
+
+
 @pytest.mark.parametrize("failure", ["none", "deploy", "identity", "roles"])
 def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, failure):
     app = tmp_path / "hosted"

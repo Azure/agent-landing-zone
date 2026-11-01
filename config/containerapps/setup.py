@@ -9,6 +9,7 @@ Prerequisites:
 - The following keys must be present in App Configuration (label: agent-lz):
     - SUBSCRIPTION_ID
     - AZURE_RESOURCE_GROUP
+    - AZURE_APP_RESOURCE_GROUP (optional; defaults to AZURE_RESOURCE_GROUP)
     - CONTAINER_REGISTRY_NAME
     - USE_UAI
     - CONTAINER_APPS (JSON list)
@@ -34,6 +35,9 @@ from azure.identity import (
 )
 from azure.appconfiguration import AzureAppConfigurationClient
 from azure.mgmt.appcontainers import ContainerAppsAPIClient
+from azure.core.exceptions import ResourceNotFoundError
+
+from config.deployment.resource_groups import resource_group_for
 
 
 POLL_TIMEOUT_SECONDS = int(os.getenv("CONTAINER_APP_POLL_TIMEOUT_SECONDS", "600"))
@@ -145,11 +149,11 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
             
             return value
         except Exception as e:
+            if not required and isinstance(e, ResourceNotFoundError):
+                return None
             if attempt == max_retries - 1:
                 logging.error(f"Failed to fetch '{key}' after {max_retries} attempts: {e}")
-                if required:
-                    sys.exit(1)
-                return None
+                sys.exit(1)
             else:
                 logging.warning(f"Attempt {attempt + 1}/{max_retries} failed for '{key}': {e}. Retrying...")
                 time.sleep(2)
@@ -257,7 +261,12 @@ def main():
     # Read global settings
     logging.info("Fetching configuration from App Configuration...")
     subscription_id = get_config_value(appconfig, "SUBSCRIPTION_ID")
-    resource_group = get_config_value(appconfig, "AZURE_RESOURCE_GROUP")
+    resource_group = resource_group_for({
+        "AZURE_RESOURCE_GROUP": get_config_value(appconfig, "AZURE_RESOURCE_GROUP"),
+        "AZURE_APP_RESOURCE_GROUP": get_config_value(
+            appconfig, "AZURE_APP_RESOURCE_GROUP", required=False,
+        ) or "",
+    }, "application")
     acr_name = get_config_value(appconfig, "CONTAINER_REGISTRY_NAME")
     use_uai = get_config_value(appconfig, "USE_UAI")
     acr_server = f"{acr_name}.azurecr.io"

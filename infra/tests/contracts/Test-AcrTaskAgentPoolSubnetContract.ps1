@@ -5,7 +5,9 @@
 .DESCRIPTION
     Compiles the real orchestrator with Azure CLI Bicep and checks exact symbolic
     dependencies, bounded expressions, pool properties, and serialized cross-scope
-    child subnet deployments. No graph-fixture exemptions or Azure access are used.
+    child subnet deployments. ADR-0024 application wrappers are checked by an
+    exact before/after projection before the original assertions. No original
+    fingerprint is replaced and no Azure access is used.
 
     A1/A2 cover BYO subnet creation/reuse; A3 covers a new VNet; A4-A6 cover
     disabled gates; A7 covers count zero in both BYO paths; A8 protects the
@@ -22,18 +24,19 @@
     in finally, including on compilation or assertion failure.
 
 .EXAMPLE
-    pwsh ./tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
+    pwsh -NoProfile -File infra/tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
 
 .EXAMPLE
-    pwsh ./tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1 -MainFile /isolated-copy/main.bicep
+    pwsh -NoProfile -File infra/tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1 -MainFile /isolated-copy/infra/bicep/main.bicep
 #>
 
 [CmdletBinding()]
 param(
-    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'main.bicep')
+    [string]$MainFile = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'bicep/main.bicep')
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
 $failures = [System.Collections.Generic.List[string]]::new()
 $compiledFile = Join-Path ([System.IO.Path]::GetTempPath()) "acr-task-agent-pool-subnet-contract-$([guid]::NewGuid()).json"
 
@@ -71,12 +74,17 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Bicep compilation failed with exit code $LASTEXITCODE."
     }
-    $template = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -Depth 100
+    $actual = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+    $subnetGraph = $actual | ConvertTo-Json -Depth 100 -Compress | ConvertFrom-Json -Depth 100
+    $template = ConvertTo-ApplicationRootResourceGroupGraph $actual |
+        ConvertTo-Json -Depth 100 -Compress | ConvertFrom-Json -Depth 100
     Write-Host "ACR Task agent pool subnet contract (#159); compilation succeeded with Bicep $($template.metadata._generator.version)." -ForegroundColor Cyan
 
     $pool = $template.resources.acrTaskAgentPool
-    $subnets = $template.resources.virtualNetworkSubnets
-    $validation = $template.resources.componentFlagValidation
+    # Pool wrappers retain the historical representation, but subnet selection,
+    # NSG safety and child writes must be checked on the actual ADR-0027 graph.
+    $subnets = $subnetGraph.resources.virtualNetworkSubnets
+    $validation = $subnetGraph.resources.componentFlagValidation
     if ($null -eq $pool -or $null -eq $subnets -or $null -eq $validation) {
         throw 'Required symbolic resources acrTaskAgentPool, virtualNetworkSubnets, and componentFlagValidation must exist.'
     }
@@ -142,7 +150,7 @@ try {
         PoolCondition = @($pool.condition, "[variables('_deployAcrTaskAgentPool')]")
         SubnetCondition = @(
             $subnets.condition
-            "[and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs'))]"
+            "[and(and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs')), not(empty(variables('selectedSubnetDefinitions'))))]"
         )
         NewVnetCondition = @(
             $template.resources.virtualNetwork.condition
@@ -150,7 +158,7 @@ try {
         )
         NsgProtection = @(
             $validation.properties.parameters.existingSubnetNsgAssociationsAreProtected.value
-            "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), not(parameters('deployNsgs'))))]"
+            "[not(and(and(and(parameters('networkIsolation'), parameters('useExistingVNet')), not(empty(variables('selectedSubnetDefinitions')))), not(parameters('deployNsgs'))))]"
         )
         NsgRejection = @(
             $validation.properties.template.outputs.validated.value
@@ -256,7 +264,7 @@ try {
     $scopeBindings = [ordered]@{
         vnetName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetName')), createObject('value', variables('resourceNames').vnetName))]"
         subscriptionId = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetSubscriptionId')), createObject('value', subscription().subscriptionId))]"
-        resourceGroupName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetResourceGroupName')), createObject('value', resourceGroup().name))]"
+        resourceGroupName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetResourceGroupName')), createObject('value', variables('_networkResourceGroupName')))]"
         virtualNetworkResourceId = "[if(variables('_networkIsolation'), if(parameters('useExistingVNet'), createObject('value', parameters('existingVnetResourceId')), createObject('value', reference('virtualNetwork').outputs.resourceId.value)), createObject('value', ''))]"
     }
     foreach ($entry in $scopeBindings.GetEnumerator()) {
@@ -265,14 +273,29 @@ try {
     foreach ($name in @('useExistingVNet', 'deploySubnets', 'deployNsgs')) {
         Test-Equal "Subnet module $name forwarding" $subnets.properties.parameters.$name.value "[parameters('$name')]"
     }
-    $buildSubnets = @($subnets.properties.parameters.subnets.value | Where-Object { $_.name -ceq "[parameters('devopsBuildAgentsSubnetName')]" })
-    Test-Equal 'Exactly one build subnet is supplied to BYO child operations' $buildSubnets.Count 1
-    if ($buildSubnets.Count -eq 1) {
-        Test-Equal 'Build subnet prefix unchanged' $buildSubnets[0].addressPrefix "[parameters('devopsBuildAgentsSubnetPrefix')]"
-        Test-Equal 'Build subnet route unchanged' $buildSubnets[0].routeTableResourceId "[variables('_effectiveRouteTableId')]"
-        Test-Equal 'Build subnet remains undelegated' $buildSubnets[0].delegation ''
-        Test-Equal 'Build subnet service endpoints unchanged' $buildSubnets[0].serviceEndpoints @()
+    # Check the real build definition, including its independent ownership flag.
+    # The common projection supplies routing/NSGs, not per-consumer fallbacks.
+    $subnetExpression = [string]$subnets.properties.parameters.subnets.value
+    $buildDefinitions = @($subnetGraph.variables.subnetDefinitions | Where-Object purpose -CEQ 'devopsBuildAgents')
+    Test-Equal 'Exactly one build subnet definition' $buildDefinitions.Count 1
+    Test-Set 'Build subnet definition property surface' $buildDefinitions[0].PSObject.Properties.Name @('purpose', 'create', 'required', 'name', 'addressPrefix', 'delegation', 'serviceEndpoints')
+    foreach ($entry in ([ordered]@{
+        purpose = 'devopsBuildAgents'
+        create = "[parameters('deployDevopsBuildAgentsSubnet')]"
+        required = "[variables('_deployAcrTaskAgentPool')]"
+        name = "[parameters('devopsBuildAgentsSubnetName')]"
+        addressPrefix = "[parameters('devopsBuildAgentsSubnetPrefix')]"
+        delegation = ''
+        serviceEndpoints = @()
+    }).GetEnumerator()) {
+        Test-Equal "Build subnet $($entry.Key)" $buildDefinitions[0].($entry.Key) $entry.Value
     }
+    Test-Equal 'Subnet creation does not disable the build pool or retarget its subnet' `
+        $subnetGraph.variables._deployAcrTaskAgentPool "[and(and(parameters('deployContainerRegistry'), variables('_networkIsolation')), parameters('deployAcrTaskAgentPool'))]"
+    Test-Equal 'New and BYO paths share the exact subnet resource projection' `
+        $subnetExpression $subnetGraph.resources.virtualNetwork.properties.parameters.subnets.value
+    Test-Equal 'Build subnet retains actual route-table selection in the common projection' `
+        $subnetExpression.Contains("'routeTableResourceId', if(contains(createArray('agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'), lambdaVariables('subnet').purpose), if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), '')") $true
 
     $children = @($subnets.properties.template.resources)
     Test-Equal 'Subnet orchestrator retains exactly three child deployment declarations' $children.Count 3
@@ -290,7 +313,7 @@ try {
     }
     Test-Equal 'BYO path cannot PUT the complete VNet subnet collection' `
         $vnetChildren[0].condition "[and(not(parameters('useExistingVNet')), parameters('deploySubnets'))]"
-    Test-Equal 'NSG child gate unchanged' $nsgChildren[0].condition "[and(parameters('deploySubnets'), parameters('deployNsgs'))]"
+    Test-Equal 'NSG child gate excludes reserved subnets and duplicate dedicated NSGs' $nsgChildren[0].condition "[and(and(and(parameters('deploySubnets'), parameters('deployNsgs')), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[copyIndex()].name))), empty(coalesce(tryGet(parameters('subnets')[copyIndex()], 'networkSecurityGroupResourceId'), '')))]"
     $subnetChild = $subnetChildren[0]
     Test-Equal 'Subnet child gate unchanged' $subnetChild.condition "[and(parameters('useExistingVNet'), parameters('deploySubnets'))]"
     Test-Equal 'Subnet children serialize one PUT at a time' @($subnetChild.copy.mode, $subnetChild.copy.batchSize) @('serial', 1)
@@ -301,8 +324,8 @@ try {
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))]"
     )
     $excluded = @($subnets.properties.template.variables.invalidNsgSubnets)
-    Test-Equal '#168 generic NSG exclusions include the reserved Bastion subnet' `
-        $excluded @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet')
+    Test-Equal 'Generic NSG exclusions retain reserved service subnets including Basic management' `
+        $excluded @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet', 'GatewaySubnet', 'AzureFirewallManagementSubnet')
     $selection = @'
 [if(not(empty(coalesce(tryGet(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]], 'networkSecurityGroupResourceId'), ''))), createObject('value', string(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].networkSecurityGroupResourceId)), if(and(parameters('deployNsgs'), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name)), '2025-04-01').outputs.id.value), createObject('value', '')))]
 '@
@@ -310,12 +333,12 @@ try {
         $subnetChild.properties.parameters.networkSecurityGroupId $selection
     Test-Equal '#168 dedicated Bastion NSG stays gated on Bastion and NSGs' `
         $template.resources.bastionNsg.condition "[and(variables('_deployBastion'), parameters('deployNsgs'))]"
-    $bastionEntries = @($subnets.properties.parameters.subnets.value | Where-Object { $_.name -ceq "[parameters('azureBastionSubnetName')]" })
-    Test-Equal '#168 reserved subnet remains present independently of host deployment' $bastionEntries.Count 1
-    if ($bastionEntries.Count -eq 1) {
-        Test-Equal '#168 enabled Bastion retains the dedicated NSG binding' `
-            $bastionEntries[0].networkSecurityGroupResourceId "[if(and(variables('_deployBastion'), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, '')]"
-    }
+    $bastionDefinitions = @($subnetGraph.variables.subnetDefinitions | Where-Object purpose -CEQ 'bastion')
+    Test-Equal '#168 Bastion creation is independent of host deployment' `
+        @($bastionDefinitions.Count, $bastionDefinitions[0].create, $bastionDefinitions[0].name, $bastionDefinitions[0].delegation) `
+        @(1, "[parameters('deployAzureBastionSubnet')]", "[parameters('azureBastionSubnetName')]", '')
+    Test-Equal '#168 enabled Bastion retains its dedicated NSG binding in the common projection' `
+        $subnetExpression.Contains("'networkSecurityGroupResourceId', if(and(and(equals(lambdaVariables('subnet').purpose, 'bastion'), variables('_deployBastion')), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value,") $true
     if ($subnetChild.properties.parameters.networkSecurityGroupId -ceq $selection) {
         foreach ($case in @(
             @{ Name = 'Bastion disabled'; Subnet = 'AzureBastionSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
@@ -324,6 +347,8 @@ try {
             @{ Name = 'Explicit override'; Subnet = 'AzureBastionSubnet'; Explicit = 'operator-nsg'; Nsgs = $false; Expected = 'operator-nsg' }
             @{ Name = 'Firewall exclusion'; Subnet = 'AzureFirewallSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
             @{ Name = 'Gateway exclusion'; Subnet = 'AppGatewaySubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'VPN gateway exclusion'; Subnet = 'GatewaySubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'Basic management exclusion'; Subnet = 'AzureFirewallManagementSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
             @{ Name = 'Build subnet'; Subnet = 'devops-build-agents-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
             @{ Name = 'Custom idle subnet'; Subnet = 'unused-bastion-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
             @{ Name = 'Ordinary explicit NSG'; Subnet = 'workload'; Explicit = 'operator-nsg'; Nsgs = $true; Expected = 'operator-nsg' }
@@ -342,7 +367,7 @@ try {
         Test-Equal 'Child resource is a subnet PUT, not a VNet collection replacement' `
             @($resource.type, $resource.apiVersion, $resource.name) @('Microsoft.Network/virtualNetworks/subnets', '2024-07-01', "[parameters('name')]")
         $subnetProperties = [ordered]@{
-            addressPrefix = "[parameters('addressPrefix')]"
+            addressPrefix = "[if(variables('gatewayAttachmentsAreSafe'), parameters('addressPrefix'), fail('GatewaySubnet must not have an NSG, route table or delegation.'))]"
             delegations = "[parameters('delegations')]"
             serviceEndpoints = "[parameters('serviceEndpoints')]"
             networkSecurityGroup = "[if(empty(parameters('networkSecurityGroupId')), null(), createObject('id', parameters('networkSecurityGroupId')))]"
@@ -353,6 +378,9 @@ try {
         foreach ($entry in $subnetProperties.GetEnumerator()) {
             Test-Equal "Child subnet $($entry.Key) forwarding" $resource.properties.($entry.Key) $entry.Value
         }
+        Test-Equal 'Reserved GatewaySubnet guard rejects NSG, route table and delegation attachments before PUT' `
+            $subnetChild.properties.template.variables.gatewayAttachmentsAreSafe `
+            "[or(not(equals(last(split(parameters('name'), '/')), 'GatewaySubnet')), and(and(empty(parameters('networkSecurityGroupId')), empty(parameters('routeTableId'))), empty(parameters('delegations'))))]"
     }
 }
 catch {

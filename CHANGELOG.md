@@ -2,6 +2,670 @@
 
 ## [Unreleased]
 
+## [v6.0.0] - 2026-11-01
+
+### Changed
+
+- Run native Microsoft Agent Framework conversations and human-reviewed workflows on Foundry Hosted Agents or the standalone Durable Extension on Azure Container Apps.
+- Select only `ORCHESTRATION_HOST=hosted|container_apps` and `APPLICATION_MODE=conversational|workflow|both`, defaulting to Hosted/conversational. The bundled application includes the authenticated UI on either host. Custom-only definitions retain their declared components.
+- Keep native execution state separate from product ownership and optional features. History, feedback and private attachments remain independently disabled by default. Workflow/both requires ownership/action metadata even with history disabled.
+- Preserve optional NL2SQL and explicit tool configuration, use managed-identity DTS authentication, and align Bicep, Terraform, App Configuration and both lifecycle-hook implementations.
+- Retire classic, panel, preservation and cutover deployment controls. This major release uses the new native configuration for fresh deployments.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.5.0 |
+| agent-app-orchestrator | v6.0.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Actual integration CI passed 1,308 Python tests and 816 subtests, with 14 skipped.
+- Bicep build, lint and all 17 offline foundation contracts passed. Terraform formatting, readonly initialization, validation and the complete mocked suite passed on Ubuntu and Windows. Module pins, provider lock and incorporated-foundation provenance are unchanged.
+- The exact released runtime/UI sources and platform producer inputs passed 114 linked functional checks. The final eight producer checks passed without rerunning the earlier 106 component checks. Published noneditable SDK provenance and unchanged source hashes were verified.
+- Validation is local and static. No Azure deployment, live model calls, private-network validation or deployed Bicep/Terraform parity is claimed. Azure what-if was skipped because OIDC is not configured.
+
+[Integration checks](https://github.com/Azure/agent-landing-zone/actions/runs/41323471408)
+
+## [v5.6.0] - 2026-10-30
+
+### Changed
+
+- Reorganized infrastructure into dedicated Bicep and Terraform directories, with shared catalogs in `infra/shared/` and helpers in `scripts/infra/`. Updated deployment scripts, CI and documentation to use the new paths. You can still deploy with the same `azd` commands.
+- Removed unused files, duplicated tooling and the old hub test lab. Existing hub-and-spoke deployments are still supported.
+- Changed the default embedding deployment to `GlobalStandard` for `text-embedding-3-large`, version `1`. Model settings and capacity are unchanged, and you can still choose `Standard` for regional processing.
+
+If you reference Bicep files directly, update those paths to `infra/bicep/`. Before updating an existing checkout, back up local parameters and clear any skip-worktree flag on the old parameter file.
+
+Global Standard can process requests outside the resource region, even when you use private endpoints. If you need regional processing, select `Standard` explicitly and check model availability and quota before deploying.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+
+- CI passed 1,230 Python tests and 1,001 subtests, with 7 skipped.
+- Bicep build, lint and all 17 offline contract checks passed.
+- Terraform validation and all 120 mocked tests passed on Windows and Linux. Provider and module versions are unchanged.
+- No Azure deployment or what-if was run. Live quota, regional availability and SKU changes on existing deployments were not tested.
+
+[Release checks](https://github.com/Azure/agent-landing-zone/actions/runs/41076483632)
+
+## [v5.5.3] - 2026-10-28
+
+### Changed
+- Default isolated standalone deployments to Azure Firewall Basic in Bicep and
+  Terraform, with explicit Standard selection and matching policy SKU.
+- Provision Basic's management subnet, Standard/static public IP and management
+  NIC only when required. Keep management networking separate from workload
+  routes and generic subnet associations.
+- Create the firewall data subnet according to local firewall requirements;
+  omit unused spoke firewall reservations for external hub egress. Make
+  GatewaySubnet opt-in, independently of whether a shared hub has a gateway.
+- Resolve and persist deployment inputs through both lifecycle hook variants,
+  reject unsupported Basic DNS proxy selections, and align the central
+  configuration, network, VPN and cost guidance.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes the complete Python and hook suite: 1180 tests and 995
+  subtests passed, with 7 skipped.
+- Bicep 0.42.1 build/lint and all 20 offline contract entrypoints pass,
+  including 408 Basic firewall assertions, 535 subnet assertions and 450
+  preflight checks. Protected-graph tests reject 45 graph and 68 subnet deltas
+  without regenerating the original fingerprint fixtures.
+- Terraform readonly initialization, formatting, validation and all 117 mocked
+  tests pass on Ubuntu and Windows, including 49 networking scenarios. Module
+  pins and the provider lock are unchanged.
+- No live Azure deployment or capacity qualification was performed; the Azure
+  what-if gate was skipped because OIDC was not configured. Offline checks do
+  not establish deployed Bicep/Terraform parity.
+
+## [v5.5.2] - 2026-10-28
+
+### Fixed
+- Align the bundled application definition with the published UI and
+  orchestrator commits already pinned in the manifest, restoring definition
+  validation and deployment composition. Application Cosmos remains optional;
+  no runtime version or infrastructure provenance changes.
+- Validate the real bundled definition in the release pin regression so a
+  manifest-only update cannot silently leave the deployment contract stale.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Targeted definition, CLI, role, egress, composition, release and Terraform
+  interface coverage passes 180 tests and 70 subtests, with one skipped test.
+- Release and actual bundled-definition checks repeated on the integration
+  branch pass 64 tests and 54 subtests.
+- Hosted-agent and exact graph-normalization contracts pass, retaining the
+  original fingerprints and rejecting 45 graph mutations and 39 subnet deltas,
+  including drift in either embedded component source commit.
+- Validation is local and offline. No live Azure deployment, resource cleanup
+  or data migration was performed; previously published tags remain unchanged.
+
+## [v5.5.1] - 2026-10-28
+
+### Changed
+- Default application Cosmos DB to disabled in Bicep, Terraform and parameter
+  seeds. Shared deployment composition enables it for classic orchestration,
+  panel metadata, preserved classic runtime and custom conversation-store
+  consumers; incompatible explicit disables fail before provisioning.
+- Omit application-specific Cosmos identities, resources and container settings
+  when disabled. Foundry Agent Service backing storage and shared private DNS
+  remain independent.
+- Keep preflight and lifecycle recovery aligned with the effective application
+  selection. Review existing-environment previews and retain
+  `DEPLOY_COSMOS_DB=true` until existing data and consumers have been reviewed.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Targeted deployment and lifecycle regressions pass; Terraform validation and
+  all 90 mocked tests pass. Preflight coverage passes 394 checks.
+- Bicep compiles with the pinned compiler; PowerShell parsing and shell syntax
+  checks pass. Both providers retain the same application selection contract.
+- Central configuration documentation is published. Validation is local and
+  offline; no live Azure deployment, data migration or resource cleanup was
+  performed. Extended local suites were stopped and are not claimed as passing.
+
+## [v5.5.0] - 2026-10-28
+
+### Added
+- Platform configuration for integrated delegated hosted retrieval:
+  `RETRIEVAL_AUTH_MODE=native_search` is published automatically under
+  `agent-lz`, retaining user-delegated Foundry invocation. The discovered
+  hosted runtime receives Search Index Data Reader on the exact Search
+  service for transport, independently of end-user source permissions.
+- Include `retrieval-reader` in the bundled UI capabilities for fresh native
+  Search authorization before conversation-upload downloads. Preserve existing
+  Blob grants; transport roles never replace the user's document permissions.
+- Native Work IQ app authentication and secretless indexed SharePoint source
+  registration, with typed nonsecret identity inputs. Advanced source
+  configuration requires its compatible August preview API; the default Blob
+  API remains unchanged. Fabric sources receive a planning model and supported
+  reasoning effort.
+- ADR-0029 defines the coordinated UI/runtime credential forwarding,
+  request isolation, failure and adoption contract.
+
+### Changed
+- Ship coordinated UI and orchestrator knowledge security, including signed
+  user/session-bound citation downloads, current-user Storage authorization
+  for shared documents, and exact-document checks for conversation uploads.
+- Preserve downstream Conditional Access challenges through both hosted
+  protocols and offer explicit standalone or portal sign-in recovery without
+  replaying failed or partially completed operations.
+- Require manual dispatch for the orchestrator's development deployment
+  workflow; normal source updates retain their quality checks.
+
+### Fixed
+- Enable native document permissions on new application indexes and reconcile
+  existing compatible indexes with conditional updates, without deleting
+  documents or operator customizations. Incompatible permission annotations
+  block the update rather than retaining unprotected access.
+- Reject incomplete enabled sources and fail Work IQ consent checks before
+  Search resource changes. Configured sources are never silently removed to
+  make provisioning succeed.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.4.0 |
+| agent-app-orchestrator | v5.3.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Platform retrieval provisioning, permission profiles, shared deployment
+  composition and Bicep/Terraform interface contracts pass.
+- Component acceptance covers full behavioral suites, actual hosted SDK
+  contracts, installed-wheel and offline Linux-container execution, and the
+  protected quality checks.
+- Central documentation builds in strict MkDocs mode, including both
+  infrastructure-provider runbooks and the complete authentication recovery
+  setup.
+
+## [v5.4.0] - 2026-10-27
+
+### Added
+- Add an integrated Terraform foundation under `infra/terraform`, using a flat
+  AVM-based composition, pinned modules and a committed Linux/Windows provider
+  lock. Bicep remains the default; both providers use the shared azd application
+  lifecycle, typed configuration and complete deployment-output contract.
+- Add Terraform contract checks on Linux and Windows alongside the existing
+  Bicep, Python and cross-platform lifecycle checks.
+
+### Changed
+- Preserve foundation/application ownership, deployed runtime images, App
+  Configuration labels and Key Vault references across provisioning. Bind
+  Terraform backend and resource-group ownership for state-scoped teardown,
+  with the documented single-writer model for shared state.
+- Require bidirectional Bicep/Terraform parity for every infrastructure change
+  in AGENTS, Copilot instructions and constitution v2.1.0.
+- Align managed Code Quality analysis with the remaining Python sources after
+  retiring the JavaScript-only parity tooling.
+- Organize central deployment runbooks by infrastructure-only/full-stack outcome,
+  with separate Bicep and Terraform paths and a Terraform composition overview.
+
+### Removed
+- Retire the external Terraform parity assessment/publication automation and
+  its dedicated operational assets, retaining historical decision records.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes Terraform contracts on Linux and Windows, Bicep build/lint,
+  offline foundation contracts and the full deployment/hook suite:
+  1,095 tests, 873 subtests and 7 skips.
+- The complete local Terraform suite passes 89 tests. A public-foundation
+  Azure-authenticated plan in `swedencentral` passes without applying resources;
+  no full-stack Azure deployment was executed for this release.
+- Central documentation builds in strict MkDocs mode; navigation, links and the
+  Terraform diagram are validated. Runtime component pins are unchanged.
+
+## [v5.3.0] - 2026-10-27
+
+### Added
+- Prepare dedicated Power Platform and AI Gateway subnets with the required
+  service delegations. Isolated deployments create all twelve architecture
+  subnets by default, with individual creation switches and configurable
+  names and IPv4 ranges for new and existing virtual networks.
+
+### Changed
+- Use a dedicated application private endpoint subnet by default, independently
+  of the Foundry and grounding private endpoint subnet. Use the reserved
+  `GatewaySubnet` name without NSG, route-table or delegation attachments.
+- Apply global and individual subnet creation ownership consistently to both
+  virtual network paths. Validate enabled consumers, actual existing-network
+  properties, address overlap, delegated-subnet providers and APIM integration
+  NSG requirements before provisioning; do not silently reuse the Foundry subnet.
+- These are defaults for new deployments. Existing occupied subnets and private
+  endpoints are not automatically renamed or migrated; review explicit network
+  inputs and resource dependencies before applying the changed topology.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- GitHub CI passes `python -m pytest tests --quiet`, Bicep build/lint and all
+  17 offline foundation contract entrypoints. Subnet coverage includes 500
+  assertions and exact mutation-tested preservation of historical fingerprints.
+- The deterministic preflight suite passes 382 assertions. Targeted Python
+  regression coverage passes 174 tests across resource groups, deployment modes,
+  custom composition, provider prerequisites and regional quota checks.
+- Central documentation builds in strict MkDocs mode; all 36 subnet parameter
+  bindings match the implementation.
+- Validation is offline; no live Azure provisioning was performed.
+
+## [v5.2.0] - 2026-10-27
+
+### Changed
+- Prepare the bundled Foundry hosted image automatically during `azd deploy`,
+  binding its immutable digest to the provisioned foundation without another
+  `azd provision`. Fresh hosted deployments also support `azd up`; unchanged
+  images are reused and stale generated source/startup provenance is rebuilt
+  during deployment. Standalone preparation scripts remain optional
+  compatibility commands.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Repository deployment and contract suite: 795 tests and 767 subtests pass;
+  5 tests are skipped. Targeted integration coverage including continuity:
+  451 tests and 312 subtests pass, with 1 skipped test.
+- PowerShell and Bash hook checks, Bicep build/lint and the offline foundation
+  contract runner pass. Published component and infrastructure tag/commit
+  bindings match the manifest; incorporated infrastructure is unchanged.
+- Central documentation builds in strict mode. The Azure DevOps example
+  validator passes 310 promotion cases plus Bash/Python and cleanup checks.
+  Runbooks and Agent Landing Zone What's new describe the simplified workflow.
+
+## [v5.1.1] - 2026-10-27
+
+### Fixed
+- **SharePoint permission-only synchronization.** Pin Agent App Ingestion
+  v3.1.3 to refresh supported user/group ACLs on every affected item document
+  and document-library chunk independently of content timestamps. Remove
+  revoked principals without reprocessing unchanged content, include
+  Graph-reported inherited file permissions and retry failed ACL updates.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Ingestion's complete maintained suite passes: 1,015 tests and 10 subtests;
+  its evidence-bound quality gate reports no findings.
+- Deployment and lifecycle contracts, Bicep build/lint and all 16 offline
+  foundation entrypoints pass. Exact graph projections reject 27 mutations
+  while preserving historical fingerprints.
+- Published component tag/commit bindings and the strict central
+  documentation build pass.
+
+## [v5.1.0] - 2026-10-27
+
+### Added
+- Add optional per-component runtime egress declarations, an offline review
+  plan and source-subnet-scoped reconciliation of owned application rules.
+  Preserve legacy definitions, unrelated rules and shared requirements;
+  external policies are report-only and non-isolated deployments perform
+  no firewall operations.
+- Declare the orchestrator and ingestion cold-cache tiktoken dependency;
+  the UI declares no additional runtime egress.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.2 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Focused application, lifecycle, schema, selection and policy reconciliation
+  suites: 216 passed, 3 skipped and 220 subtests passed. Both hook variants and
+  actual compiled foundation rule-group priorities are covered.
+- All 16 offline foundation entrypoints pass. Final projection checks reject
+  25 mutations while retaining the original protected fingerprints and the
+  closed platform-outputs v1 schema.
+- Real cold-cache tokenizer initialization passes separately with the pinned
+  ingestion tiktoken 0.7.0 and orchestrator tiktoken 0.14.0, downloading both
+  encoding assets from the declared HTTPS host.
+- Strict central documentation build, agent asset validation and published
+  runtime tag/commit checks pass.
+
+## [v5.0.0] - 2026-10-27
+
+### Changed
+- **Foundry-first deployment root.** Use `AZURE_RESOURCE_GROUP` for Foundry,
+  grounding and the native azd root; select application resources with
+  `AZURE_APP_RESOURCE_GROUP`.
+- **Three resource groups by default for new environments.** Initialize
+  Foundry/root as `rg-<environment>` when unset, application as `<root>-app`
+  and networking as `<root>-network`. Create missing additional groups by
+  default unless `CREATE_RESOURCE_GROUPS=false`. Existing environments keep
+  their mapping; equal destination names explicitly select one or two groups.
+- **Application-scoped deployment and configuration.** Align foundation
+  resources, runtime deployment scripts, custom Container App targeting,
+  registry builds, identities, configuration and operator documentation with
+  the resolved application destination.
+- **Immutable native-root binding.** Record the Foundry-root contract in
+  binding version 2 and reject implicit conversion of existing version 1
+  split environments. The closed platform-outputs v1 schema is unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.1 |
+| agent-app-orchestrator | v5.2.2 |
+| agent-app-ingestion | v3.1.2 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Deployment, destination binding, application-definition and lifecycle
+  contract regressions pass, including native first-run azd initialization
+  and matching PowerShell/shell destination propagation.
+- Bicep build/lint and offline foundation contracts pass with the original
+  protected graph fingerprints, reviewed scoping projections and unchanged
+  platform-output schema.
+- Published runtime tag/commit bindings and incorporated infrastructure
+  provenance are verified. The central documentation build passes.
+
+## [v4.4.0] - 2026-10-26
+
+### Added
+- Add configurable application, Foundry/grounding and local-network
+  resource-group destinations through one `azd provision`, retaining the
+  single-resource-group default and supporting one, two or three distinct
+  destinations in the workload subscription.
+- Add `AZURE_FOUNDRY_RESOURCE_GROUP` and `AZURE_NETWORK_RESOURCE_GROUP`,
+  falling back to application/root `AZURE_RESOURCE_GROUP`, and strict
+  `CREATE_RESOURCE_GROUPS` opt-in, defaulting to `false`, for missing
+  additional destinations only.
+- Add paired `AZURE_APPLICATION_PE_SUBNET_NAME` and
+  `AZURE_APPLICATION_PE_SUBNET_PREFIX` settings independently of RG count;
+  omitted values preserve the shared private-endpoint subnet.
+
+### Changed
+- Scope foundation resources, exact resource-ID RBAC and dependent bindings
+  to their owners without changing default names, feature gates, public-access
+  settings or existing BYO network/DNS precedence.
+- Align PowerShell and shell hooks, Foundry configuration, quota preflight,
+  application/storage consumers and nonsecret `agent-lz` handoff context.
+  The closed platform-outputs v1 JSON and runtime pins remain unchanged.
+- Persist destination bindings, reject implicit migration/retargeting and
+  converge partial bootstrap retries without changing reused RG metadata.
+  Split-layout `azd down` fails closed; cleanup requires an explicit
+  resource-owner inventory, not automatic rollback or shared-RG deletion.
+- Coordinate the existing central documentation pages for configuration,
+  permissions, ownership, private networking, lifecycle and recovery.
+  Configurable RGs are supported by the Agent Bicep/azd entrypoint only;
+  Terraform and Portal support are not claimed.
+
+### Fixed
+- Use supported Azure CLI resource inventory filters during destination
+  preparation, retaining strict environment-tag matching and access failures.
+- Apply jumpbox Reader grants at the resolved resource-group deployment scope
+  rather than treating a resource-group ID as a service resource. Preserve
+  assignment GUIDs, per-resource grants and the single-group behavior.
+- Load application schema/YAML validation dependencies only when validation
+  runs, so destination binding can bootstrap on a fresh jumpbox before
+  post-provision installs the declared Python requirements.
+- Resolve the declared registry owner with an explicit repository import path
+  on isolated jumpbox Python, preserving default and custom-registry routing.
+- Load post-provision environment values through validated azd JSON on both
+  platforms, preserving structured identity metadata, quotes and multiline
+  values without interpreting them as shell expressions.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Full local Python/configurator regressions: 883 passed, 4 skipped and
+  970 subtests passed. Clean Linux deployment/hook CI: 654 passed, 6 skipped
+  and 741 subtests passed.
+- All 16 offline foundation entrypoints pass with Bicep 0.42.1, including
+  145 scope assertions, 17 rejected normalization mutations and the original
+  protected graph fingerprints. Both hook variants pass syntax/behavior checks.
+- Strict central documentation build and rubber-duck documentation review
+  pass. Runtime tag/commit bindings and incorporated infrastructure
+  provenance are verified without changing component or source pins.
+- Authorized private Azure validation completed native three-destination
+  provisioning, verified five private DNS/TLS endpoints with anonymous
+  access denied, and exercised the unchanged default chat and 3072-dimensional
+  embedding models with managed identity. Actual subscription deployment
+  writes and unauthorized private vault data access were denied. A targeted
+  recovery resolved an Azure private-endpoint internal error.
+
+## [v4.3.5] - 2026-10-26
+
+### Changed
+- Rename the subscription header to "Agent Landing Zone - prod subscription"
+  in all three reference architecture PNGs, matching the editable draw.io source.
+- Preserve the two-diagram README, full-resolution image links, resource
+  placements, UDR locations, management-group labels and AI Gateway subscription.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparison allows only the three subscription text values;
+  all image pixels outside those labels are identical to the previous exports.
+- Verify complete PDF bounds and bottom labels, all 6400-pixel-wide PNGs and
+  the central documentation site's strict build.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.4] - 2026-10-26
+
+### Changed
+- Show only the Standalone and Platform Hub diagrams in the README Architecture
+  section, retaining their full-resolution image links.
+- Remove the AI Gateway + Platform Hub subsection from the README only;
+  preserve every diagram asset and the central documentation site.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script, infrastructure sources and images are unchanged.
+- Verify exactly two architecture images in the intended order, both
+  full-resolution links and an otherwise unchanged README.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.3] - 2026-10-26
+
+### Changed
+- Move the workload UDR icon and caption to the space above AppGateway subnet
+  in the Platform Hub and Platform Hub with AI Gateway architecture diagrams.
+- Refresh only the two corresponding 6400-pixel-wide PNGs, preserving the
+  Standalone diagram and the separate AI Gateway landing-zone UDR.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparison allows only the two workload UDR group positions;
+  verify the new position is above AppGateway subnet without overlapping resources.
+- Preserve full export bounds and bottom labels; build the central documentation
+  site in strict mode and compare published PNG hashes with the source exports.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.2] - 2026-10-26
+
+### Changed
+- Rename the three architecture diagram titles to Agent Landing Zone.
+- Use the approved two-line title for the integrated scenario:
+  "Agent Landing Zone with Platform Hub" and "and AI Gateway Landing Zone".
+- Refresh the 6400-pixel-wide PNGs while preserving all existing resource
+  placements, connections, full-resolution links and safe export margins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure sources remain unchanged.
+- Canonical draw.io comparisons allow only the approved title text and the
+  integrated title box height; PNG differences are confined to the title area.
+- Verify complete bottom panels and all 6400-pixel-wide image dimensions;
+  build the central documentation site in strict mode.
+- Pass all 39 existing release-contract regressions for the unchanged
+  component and infrastructure combination.
+- No Azure deployment is required for these unchanged runtime sources.
+
+## [v4.3.1] - 2026-10-25
+
+### Changed
+- Refresh the README architecture section with high-resolution Standalone,
+  Platform Hub and AI Gateway + Platform Hub reference diagrams and links to
+  the full-size PNGs.
+
+### Fixed
+- Include the complete lower panels of the AI Gateway diagram with safe
+  export margins, and use `rg-networking` consistently in all three diagrams.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Documentation-only patch: runtime component pins and all application,
+  configuration, deployment script and infrastructure source are unchanged
+  from v4.3.0.
+- Verify all three 6400-pixel-wide PNGs, full-resolution README links, corrected
+  RG labels and complete bottom panels against the original draw.io export.
+- Build the central documentation site in strict mode and verify the published
+  HTML and exact PNG hashes.
+- Pass all 39 existing release-contract regressions with the unchanged pinned
+  component and infrastructure combination.
+- No Azure deployment or live-environment validation is needed for these
+  unchanged runtime and infrastructure sources.
+
+## [v4.3.0] - 2026-10-14
+
+### Added
+- Add opt-in persistent firewall DNS proxy configuration through
+  `ENABLE_FIREWALL_DNS_PROXY`, defaulting to `false` without changing client DNS.
+- Gate network-isolated native Foundry IQ Blob ingestion on the exact Search
+  shared private links being approved and successfully provisioned. Pending
+  links fail with administrator approval instructions; no unrelated or
+  target-side connections are approved automatically.
+- Honor explicit empty native Blob ingestion permission options for deliberately
+  shared, non-ADLS sources while retaining protected defaults and rejecting
+  unsupported or ambiguous configurations.
+
+### Changed
+- Pin UI v3.3.0 for ingestion-aware upload controls and early server-side
+  attachment rejection when the ingestion application is disabled. Text chat,
+  authentication and retrieval remain available.
+- Complete build-subnet-only HTTPS egress for the pinned Microsoft npm feeds
+  and package-download CDN without requiring firewall DNS proxy.
+- Make the ingestion Container App an independent, explicit deployment choice.
+  Fresh supported native-ingestion deployments omit it; existing and custom
+  deployments retain their prior component choices. Disabling deployment does
+  not delete existing applications or document data.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.3.0 |
+| agent-app-orchestrator | v5.2.1 |
+| agent-app-ingestion | v3.1.1 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Offline platform, panel and Search regressions, exact application source
+  binding and release-contract checks, and compiled foundation contracts.
+- UI source, installed-wheel and offline container regressions with all quality
+  gates passing; strict central documentation build.
+- Azure deployment and live-environment validation were intentionally omitted.
+
 ## [v4.2.3] - 2026-10-14
 
 ### Fixed

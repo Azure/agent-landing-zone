@@ -14,15 +14,16 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from typing import Iterable, Mapping, MutableMapping, Sequence
+from util.azure_cli import resolve_az_command
+from config.deployment.resource_groups import resource_group_for
 
 LOGGER = logging.getLogger("config.deployment.existing_images")
 
 PLACEHOLDER_IMAGE_PREFIX = "mcr.microsoft.com/dotnet/samples:"
-# Must match ``_containerDummyImageName`` in infra/main.bicep.
+# Must match ``_containerDummyImageName`` in infra/bicep/main.bicep.
 PLACEHOLDER_IMAGE = f"{PLACEHOLDER_IMAGE_PREFIX}aspnetapp-9.0"
 CONTAINERAPP_KIND = "containerapp"
 COMPONENT_KINDS = (CONTAINERAPP_KIND, "azure.ai.agent")
@@ -64,9 +65,22 @@ def discover_existing_images(
     subscription: str | None = None,
     environment_name: str | None = None,
 ) -> dict[str, str]:
-    """Query Azure for images already deployed. Missing apps or errors yield ``{}``."""
-    az = shutil.which("az")
-    if not az or not resource_group:
+    """Preserve application images; only a confirmed fresh root has no images."""
+    if not resource_group:
+        return {}
+    az = resolve_az_command()
+    exists_command = [az, "group", "exists", "--name", resource_group, "--output", "tsv"]
+    if subscription:
+        exists_command += ["--subscription", subscription]
+    try:
+        existence = subprocess.run(
+            exists_command, capture_output=True, text=True, timeout=180, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("Cannot verify application resource group before preserving images.") from error
+    if existence.returncode or existence.stdout.strip().lower() not in {"true", "false"}:
+        raise RuntimeError("Cannot verify application resource group; existing images have not been read.")
+    if existence.stdout.strip().lower() == "false":
         return {}
     command: list[str] = [
         az,
@@ -86,14 +100,16 @@ def discover_existing_images(
         completed = subprocess.run(
             command, capture_output=True, text=True, timeout=180, check=False
         )
-    except (OSError, subprocess.SubprocessError):
-        return {}
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("Cannot read existing application images; refusing to reset them.") from error
     if completed.returncode != 0:
-        return {}
+        raise RuntimeError("Cannot read existing application images; refusing to reset them.")
     try:
         payload = json.loads(completed.stdout or "[]")
-    except json.JSONDecodeError:
-        return {}
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Invalid existing-image discovery JSON; refusing to reset images.") from error
+    if not isinstance(payload, list):
+        raise RuntimeError("Existing-image discovery must return a JSON array.")
     return parse_container_app_images(payload, environment_name)
 
 
@@ -162,7 +178,7 @@ def definition_placeholder_plan(
     Components come from :func:`config.appdefinition.effective_components` for
     the materialized deployment mode, so a hosted orchestrator is never given a
     Container App. ``images`` maps azd service names to running images; when
-    omitted they are discovered from ``AZURE_RESOURCE_GROUP``.
+    omitted they are discovered from the resolved application resource group.
     """
     # Imported lazily: composition imports this module.
     from config.appdefinition import (
@@ -171,15 +187,20 @@ def definition_placeholder_plan(
         load_selected_definition,
         validate_definition,
     )
-    from config.deployment.composition import DeploymentMode, resolve_mode
+    from config.deployment.composition import resolve_mode, resolve_ingestion_selection
 
     definition = load_selected_definition(environment)
     validate_definition(definition)
-    hosted = resolve_mode(environment) is not DeploymentMode.CLASSIC
-    components = effective_components(definition, hosted_orchestration=hosted)
+    hosted = resolve_mode(environment).value == "hosted"
+    components = effective_components(
+        definition, hosted_orchestration=hosted,
+        deploy_ingestion=resolve_ingestion_selection(environment),
+    )
+    if not any(component.get("kind") == CONTAINERAPP_KIND for component in components):
+        return {}
     if images is None:
         images = discover_existing_images(
-            (environment.get("AZURE_RESOURCE_GROUP") or "").strip(),
+            resource_group_for(environment, "application"),
             (environment.get("AZURE_SUBSCRIPTION_ID") or "").strip() or None,
             (environment.get("AZURE_ENV_NAME") or "").strip() or None,
         )
@@ -212,7 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         plan = definition_placeholder_plan(os.environ)
-    except (AppDefinitionError, DeploymentTopologyError, FileNotFoundError, ValueError) as error:
+    except (AppDefinitionError, DeploymentTopologyError, FileNotFoundError, ValueError, RuntimeError) as error:
         LOGGER.error("%s", error)
         return 1
     if args.json:

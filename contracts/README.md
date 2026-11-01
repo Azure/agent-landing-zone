@@ -230,6 +230,15 @@ consumed by the umbrella validator and by component repositories that ship an
 app definition. Semantic rules (unique component names, settings key
 collisions, path existence) live outside the schema.
 
+The additive component `egress` contract retains `schemaVersion: 1`.
+Each entry contains `fqdn`, `protocol`, `port` and `purpose`; semantic
+validation and actual workload selection use `config.appdefinition.egress`
+and `config.deployment.egress_plan`. An explicit empty array revokes only
+that component's additional owned requirements; absence preserves legacy
+compatibility. Ownership, reconciliation and the generic infrastructure
+handoff are specified in [ADR-0025](../docs/adr/ADR-0025-component-runtime-egress.md).
+The closed platform-outputs v1 schema below is unchanged.
+
 ## Platform outputs v1 (feature 002, Agent Landing Zone)
 
 `platform-outputs-v1.schema.json` describes the non-secret platform endpoints

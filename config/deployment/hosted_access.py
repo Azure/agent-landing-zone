@@ -1,7 +1,10 @@
 """Plan (default) or apply the hosted instance's minimum runtime RBAC.
 
 Only configuration metadata, Foundry agent metadata and ARM are read. No secret
-values, inference requests, continuity activation or document grants are used.
+values, inference requests or continuity activation are used. Configured Search
+retrieval adds an exact-service Search Index Data Reader data-plane query grant
+for transport. It is not a Blob grant or permission to omit delegated source
+authorization; no end-user Search RBAC or impersonation grant is added here.
 """
 
 from __future__ import annotations
@@ -21,8 +24,10 @@ from typing import Callable, Mapping
 from urllib.parse import urlsplit
 from uuid import UUID, uuid5, NAMESPACE_URL
 
-from config.continuity.settings import FOUNDRY_TOKEN_AUDIENCE
-from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, DeploymentMode, resolve_mode
+from config.deployment.hosted import FOUNDRY_TOKEN_AUDIENCE
+from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, resolve_mode
+from config.deployment.resource_groups import resource_group_for
+from config.retrieval.settings import SEARCH_BACKENDS, validate_auth_mode
 from util.azure_cli import resolve_az_command
 
 
@@ -64,19 +69,21 @@ class AzureCommandError(AccessError):
 
 
 class Role(str, Enum):
-    # Verified against infra/constants/roles.json; never resolve a role by name.
+    # Verified against infra/shared/roles.json; never resolve a role by name.
     CONFIG = "516239f1-63e1-4d78-a4de-a74fb236a071"
     SECRET = "4633458b-17de-408a-b874-0445c86b69e6"
     MODEL = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+    SEARCH = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
 
 
 GUID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
 NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
-ARM_PREFIX = rf"/subscriptions/({GUID})/resourceGroups/({NAME})/providers/"
+ARM_PREFIX = rf"/subscriptions/({GUID})/resourceGroups/([^/]+)/providers/"
 RESOURCE_PATHS = {
     Role.CONFIG: rf"Microsoft\.AppConfiguration/configurationStores/{NAME}",
     Role.MODEL: rf"Microsoft\.CognitiveServices/accounts/{NAME}",
     Role.SECRET: r"Microsoft\.KeyVault/vaults/[A-Za-z0-9-]+/secrets/[A-Za-z0-9-]{1,127}",
+    Role.SEARCH: rf"Microsoft\.Search/searchServices/{NAME}",
 }
 PROJECT_PATH = rf"Microsoft\.CognitiveServices/accounts/({NAME})/projects/({NAME})"
 KV_REFERENCE = "application/vnd.microsoft.appconfig.keyvaultref+json"
@@ -142,9 +149,22 @@ def _endpoint(value: object, suffix: str, path: str = r"/?") -> str:
     return f"https://{parsed.hostname}{parsed.path}".rstrip("/")
 
 
-def _bound_scope(scope: str, path: str, subscription: str, group: str) -> None:
+def _scope_match(scope: str, path: str) -> re.Match[str]:
     match = re.fullmatch(ARM_PREFIX + path, scope, re.IGNORECASE)
-    if not match or not _same(match[1], subscription) or not _same(match[2], group):
+    if not match:
+        raise AccessError("Resource scope is not an exact resource in the declared subscription/resource group.")
+    try:
+        group = resource_group_for({"AZURE_RESOURCE_GROUP": match[2]}, "application")
+    except ValueError as error:
+        raise AccessError("Resource scope has an invalid Azure resource-group name.") from error
+    if group != match[2]:
+        raise AccessError("Resource scope has an invalid Azure resource-group name.")
+    return match
+
+
+def _bound_scope(scope: str, path: str, subscription: str, group: str) -> None:
+    match = _scope_match(scope, path)
+    if not _same(match[1], subscription) or not _same(match[2], group):
         raise AccessError("Resource scope is not an exact resource in the declared subscription/resource group.")
 
 
@@ -154,10 +174,9 @@ class Grant:
     scope: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.role, Role) or not re.fullmatch(
-            ARM_PREFIX + RESOURCE_PATHS[self.role], self.scope, re.IGNORECASE
-        ):
+        if not isinstance(self.role, Role):
             raise AccessError("Grant is outside the closed runtime role/scope allowlist.")
+        _scope_match(self.scope, RESOURCE_PATHS[self.role])
 
     def assignment_name(self, principal: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"{self.scope.lower()}|{principal.lower()}|{self.role.value}"))
@@ -172,17 +191,23 @@ class AccessPlan:
     agent_version: str = ""
     grants: tuple[Grant, ...] = ()
     audit: str = "not-configured"
-    classic: bool = False
+    skipped: bool = False
+    foundry_resource_group: str = ""
+    search_transport: bool = False
 
     def validate(self) -> None:
-        if self.classic:
-            if self.grants or self.principal_id:
-                raise AccessError("Classic bootstrap cannot contain grants.")
+        if self.skipped:
+            if self.grants or self.principal_id or self.search_transport:
+                raise AccessError("Inapplicable Hosted bootstrap cannot contain grants.")
             return
         _guid(self.subscription)
         _guid(self.principal_id)
         roles = [grant.role for grant in self.grants]
         expected = {Role.CONFIG, Role.MODEL}
+        if type(self.search_transport) is not bool:
+            raise AccessError("Invalid Search transport configuration status.")
+        if self.search_transport:
+            expected.add(Role.SEARCH)
         if self.audit == "configured":
             expected.add(Role.SECRET)
         elif self.audit != "not-configured":
@@ -190,7 +215,11 @@ class AccessPlan:
         if len(set(roles)) != len(roles) or set(roles) != expected:
             raise AccessError("Incomplete or duplicate runtime role plan.")
         for grant in self.grants:
-            _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, self.resource_group)
+            group = (
+                self.foundry_resource_group or self.resource_group
+                if grant.role in {Role.MODEL, Role.SEARCH} else self.resource_group
+            )
+            _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, group)
 
 
 def run_az(arguments: list[str]) -> object:
@@ -301,9 +330,10 @@ def discover_instance(
 ) -> HostedInstance:
     """Resolve a live routed identity bound to the declared Foundry project."""
     sub = _guid(environment.get("AZURE_SUBSCRIPTION_ID"))
-    group = _string(environment.get("AZURE_RESOURCE_GROUP"))
-    if not re.fullmatch(NAME, group):
-        raise AccessError("Invalid declared resource group.")
+    try:
+        group = resource_group_for(environment, "foundry")
+    except ValueError as error:
+        raise AccessError(str(error)) from error
     handoff = _object(_json(environment["HOSTED_AGENT_DEPLOYMENT"])) if environment.get("HOSTED_AGENT_DEPLOYMENT") else {}
     foundry = _object(handoff["foundry"]) if handoff.get("foundry") is not None else {}
     agent = _object(handoff["agent"]) if handoff.get("agent") is not None else {}
@@ -357,13 +387,18 @@ def discover_instance(
 
 def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> AccessPlan:
     """Discover and validate the entire closed plan before any write."""
-    if resolve_mode(environment) is DeploymentMode.CLASSIC:
-        return AccessPlan(classic=True)
+    if resolve_mode(environment).value != "hosted":
+        return AccessPlan(skipped=True)
+    try:
+        validate_auth_mode(environment)
+    except ValueError as error:
+        raise AccessError(str(error)) from None
     instance = discover_instance(environment, run=run)
-    sub, group, principal, name, version = (
+    sub, foundry_group, principal, name, version = (
         instance.subscription, instance.resource_group, instance.principal_id,
         instance.agent_name, instance.agent_version,
     )
+    group = resource_group_for(environment, "application")
     config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io")
     store_name = urlsplit(config_endpoint).hostname.split(".")[0]
     prefix = f"/subscriptions/{sub}/resourceGroups/{group}/providers/"
@@ -371,16 +406,29 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
     store = _object(run(["appconfig", "show", "--name", store_name, "--resource-group", group, "--subscription", sub]))
     if not _same(store.get("id"), store_id) or _endpoint(store.get("endpoint"), ".azconfig.io") != config_endpoint:
         raise AccessError("App Configuration endpoint/ARM scope mismatch.")
-    if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(_config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP"), group):
+    configured_foundry = _config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP")
+    if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(configured_foundry, foundry_group):
         raise AccessError("Configuration store belongs to a different deployment scope.")
+    configured_app = _setting(run, config_endpoint, "AZURE_APP_RESOURCE_GROUP")
+    configured_group = (
+        _string(configured_app.get("value")) if configured_app else configured_foundry
+    )
+    if not _same(configured_group, group):
+        raise AccessError("Configuration store belongs to a different application destination.")
     model_name = _config_value(run, config_endpoint, "AI_FOUNDRY_ACCOUNT_NAME")
     if not re.fullmatch(NAME, model_name):
         raise AccessError("Invalid configured model account name.")
-    model_id = prefix + f"Microsoft.CognitiveServices/accounts/{model_name}"
-    model = _account_metadata(run, model_id, sub, group)
+    model_id = f"/subscriptions/{sub}/resourceGroups/{foundry_group}/providers/Microsoft.CognitiveServices/accounts/{model_name}"
+    model = _account_metadata(run, model_id, sub, foundry_group)
     if not _same(model.get("id"), model_id) or model.get("kind") not in {"AIServices", "OpenAI"}:
         raise AccessError("Configured model account identity/type mismatch.")
     grants = [Grant(Role.CONFIG, store_id), Grant(Role.MODEL, model_id)]
+    search = _search_transport_grant(
+        environment, run=run, config_endpoint=config_endpoint,
+        subscription=sub, foundry_group=foundry_group,
+    )
+    if search is not None:
+        grants.append(search)
     audit = _setting(run, config_endpoint, "AUDIT_HMAC_KEY")
     if audit is not None:
         content_type = audit.get("contentType")
@@ -400,9 +448,61 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         if not _same(vault.get("id"), vault_id) or _endpoint(properties.get("vaultUri"), ".vault.azure.net") != vault_endpoint or properties.get("enableRbacAuthorization") is not True:
             raise AccessError("Audit vault ARM endpoint/scope or RBAC authorization mismatch.")
         grants.append(Grant(Role.SECRET, f"{vault_id}/secrets/{urlsplit(uri).path.split('/')[2]}"))
-    plan = AccessPlan(sub, group, principal, name, version, tuple(grants), "configured" if audit else "not-configured")
+    plan = AccessPlan(
+        sub, group, principal, name, version, tuple(grants),
+        "configured" if audit else "not-configured",
+        foundry_resource_group=foundry_group,
+        search_transport=search is not None,
+    )
     plan.validate()
     return plan
+
+
+def _search_transport_grant(
+    environment: Mapping[str, str], *, run: RunAzure, config_endpoint: str,
+    subscription: str, foundry_group: str,
+) -> Grant | None:
+    """Bind the hosted principal to the provisioned Search service, not the project MI.
+
+    The foundation always publishes RETRIEVAL_BACKEND for bundled retrieval.
+    A metadata/model-only deployment without that setting needs no Search grant.
+    No inferred subscription/RG scope or arbitrary endpoint can authorize a grant.
+    """
+    backend_row = _setting(run, config_endpoint, "RETRIEVAL_BACKEND")
+    if backend_row is None:
+        if (environment.get("RETRIEVAL_BACKEND") or "").strip():
+            raise AccessError("Required App Configuration key RETRIEVAL_BACKEND (agent-lz) is missing.")
+        return None
+    backend = _consistent(environment, ("RETRIEVAL_BACKEND",), backend_row.get("value"))
+    if backend not in SEARCH_BACKENDS:
+        raise AccessError("Configured retrieval backend has no supported Search transport contract.")
+    mode_row = _setting(run, config_endpoint, "RETRIEVAL_AUTH_MODE")
+    if mode_row is not None:
+        try:
+            validate_auth_mode({"RETRIEVAL_AUTH_MODE": mode_row.get("value")})
+        except ValueError:
+            raise AccessError("Configured RETRIEVAL_AUTH_MODE has no implemented native Search route.") from None
+    scope = _consistent(
+        environment, ("SEARCH_SERVICE_RESOURCE_ID",),
+        _config_value(run, config_endpoint, "SEARCH_SERVICE_RESOURCE_ID"),
+    )
+    _bound_scope(scope, RESOURCE_PATHS[Role.SEARCH], subscription, foundry_group)
+    name = scope.rsplit("/", 1)[1]
+    configured_name = _config_value(run, config_endpoint, "SEARCH_SERVICE_NAME")
+    endpoint = _endpoint(_consistent(
+        environment, ("SEARCH_SERVICE_QUERY_ENDPOINT", "SEARCH_SERVICE_ENDPOINT"),
+        _config_value(run, config_endpoint, "SEARCH_SERVICE_QUERY_ENDPOINT"),
+    ), ".search.windows.net")
+    if not _same(configured_name, name) or endpoint != f"https://{name.lower()}.search.windows.net":
+        raise AccessError("Search endpoint/name does not map to the exact provisioned Search resource.")
+    resource = _object(run(["resource", "show", "--ids", scope]))
+    if (
+        not _same(resource.get("id"), scope)
+        or not _same(resource.get("name"), name)
+        or not _same(resource.get("type"), "Microsoft.Search/searchServices")
+    ):
+        raise AccessError("Search ARM resource identity/type mismatch.")
+    return Grant(Role.SEARCH, scope)
 
 
 def _has_exact(run: RunAzure, plan: AccessPlan, grant: Grant) -> bool:
@@ -511,7 +611,7 @@ def main(argv: list[str] | None = None, *, environment: Mapping[str, str] | None
         if args.apply:
             apply(plan, run=run)
             verified = tuple(True for _ in plan.grants)
-            if not plan.classic:
+            if not plan.skipped:
                 logging.warning(PROPAGATION)
         else:
             verified = inspect_assignments(plan, run=run)

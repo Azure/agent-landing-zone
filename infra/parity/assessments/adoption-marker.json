@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "1.0.0",
-  "ledgerBranch": "terraform-parity-assessments",
-  "integrationBranch": "develop",
-  "adoptionCommitSha": "5a30a4fbb8338b6d1623fdaa7b8e79425b1f4d3b",
-  "adoptedAt": "2026-08-22T14:00:00Z",
-  "backfilledPullRequests": [126, 142, 144, 146, 147, 148],
-  "note": "Every pull request merged into develop after this commit requires exactly one assessment. The six listed merges are a hand-assessed seed, review pending: each records a reviewed-by-hand outcome and rationale before workflow activation, and none carries a recorded approver, approval URL, or approval time. The seed is copied to the terraform-parity-assessments ledger branch when that branch is created, after which the assessment workflow appends every later record only to that branch."
-}

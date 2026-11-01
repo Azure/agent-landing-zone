@@ -8,13 +8,12 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Mapping
 
 from config.deployment.composition import (
     HOSTED_AGENT_NAME_DEFAULT,
-    DeploymentMode,
+    hosted_agent_configuration,
     hosted_startup_command,
     hosted_startup_command_sha256,
     is_truthy,
@@ -23,7 +22,11 @@ from config.deployment.composition import (
 )
 from config.deployment.hosted_image import prepare_hosted_image
 from config.deployment.private_network import check_stage
+from config.deployment.context import registry_resource_group
 from util.azure_cli import resolve_az_command
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:
@@ -71,14 +74,10 @@ def prepare_environment(
     image_version_override: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Return ``(digest, generated_source_commit)`` for the selected topology."""
-    if resolve_mode(environment) is DeploymentMode.CLASSIC:
+    if resolve_mode(environment).value != "hosted":
         return None, None
 
-    if not is_truthy(environment.get("HOSTED_AGENT_PREPARED")):
-        raise ValueError(
-            "Hosted prerequisites are not provisioned. Run azd provision before "
-            "preparing the hosted image."
-        )
+    deployment_handoff(environment)
     validate_hosted_prerequisites(
         environment,
         require_image_digest=False,
@@ -178,8 +177,10 @@ def prepare_environment(
         source_ref=component["source_ref"],
         source_commit=source_commit,
         startup_command=hosted_startup_command(environment),
+        port=8080 if environment.get("ORCHESTRATION_HOST") == "hosted" else 8088,
+        required_source_paths=("src/native/hosted.py",) if environment.get("ORCHESTRATION_HOST") == "hosted" else (),
         agent_pool=agent_pool or None,
-        resource_group=_required(environment, "AZURE_RESOURCE_GROUP"),
+        resource_group=registry_resource_group(environment),
         azure_cli=resolve_az_command(),
     )
     return digest, source_commit
@@ -228,6 +229,27 @@ def persist_digest(
         )
 
 
+def deployment_handoff(environment: Mapping[str, str]) -> dict[str, object]:
+    """Validate foundation bindings without requiring an application image."""
+    handoff = json.loads(_required(environment, "HOSTED_AGENT_DEPLOYMENT"))
+    if not isinstance(handoff, dict):
+        raise ValueError("HOSTED_AGENT_DEPLOYMENT must be an object.")
+    for section, bindings in (
+        ("foundry", {
+            "projectResourceId": "AZURE_AI_PROJECT_RESOURCE_ID",
+            "projectEndpoint": "AZURE_AI_PROJECT_ENDPOINT",
+        }),
+        ("containerRegistry", {"endpoint": "AZURE_CONTAINER_REGISTRY_ENDPOINT"}),
+    ):
+        context = handoff.get(section)
+        if not isinstance(context, dict):
+            raise ValueError(f"Missing provisioned hosted {section} context. Run azd provision first.")
+        for field, variable in bindings.items():
+            if context.get(field) != _required(environment, variable):
+                raise ValueError(f"Hosted foundation {section}.{field} binding mismatch.")
+    return handoff
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
@@ -253,15 +275,11 @@ def main(argv: list[str] | None = None) -> int:
             image_version_override=args.image_version,
         )
         if digest is None:
-            print("Classic topology selected; hosted image preparation skipped.")
+            LOGGER.info("Container Apps selected; Hosted image preparation is not applicable.")
             return 0
         persist_digest(os.environ, digest, generated_source_commit)
         print(digest)
-        print(
-            "Hosted image digest materialized. Run azd provision again to "
-            "materialize the deploy handoff, then run azd deploy.",
-            file=sys.stderr,
-        )
+        LOGGER.info("Hosted image digest materialized. Run azd deploy to publish the agent.")
         return 0
     except (
         OSError,
@@ -269,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         RuntimeError,
         subprocess.CalledProcessError,
     ) as exc:
-        print(f"Hosted image preparation failed: {exc}", file=sys.stderr)
+        LOGGER.error("Hosted image preparation failed: %s", exc)
         return 1
 
 
