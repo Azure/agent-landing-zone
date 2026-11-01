@@ -139,9 +139,11 @@ protocol, state store, authorization context or operational behavior.
   use the canonical selectors rather than materializing the old panel topology.
   Reject obsolete explicit native selection inputs with corrective guidance,
   without silently migrating or deleting an older deployment's state.
-- Keep any necessary legacy library interfaces isolated from the native
-  lifecycle. They must not turn an old panel setting into an implicit history
-  or metadata feature choice.
+- Do not retain a `classic` deployment mode, `PRESERVE_CLASSIC_RUNTIME` or an
+  alternate classic execution/cutover branch in the shipped lifecycle.
+  Historical fixtures and release artifacts are provenance, not current
+  deployment choices. Old panel settings must not implicitly enable history
+  or metadata.
 - Keep `HOSTED_AGENT_BASE_URL` for conversational invocation and
   `HOSTED_WORKFLOW_BASE_URL` for the separate workflow publication.
 - Bind durable clients/workers through the official scheduler configuration and
@@ -196,9 +198,10 @@ identity metadata and service-identity reads driven by arbitrary IDs remain
 unsafe. It also supersedes any implication that classic conversation APIs are
 the mandatory backing service for native UI history or feedback.
 
-The maintainer explicitly approved the two-selector public contract on
-2026-11-01. This supersedes the earlier decision to expose or map old panel
-topology choices in the native lifecycle. Retaining the old public selectors
+The maintainer explicitly approved the two-selector public contract and removal
+of classic/preserve deployment controls on 2026-11-01. This supersedes the earlier
+decision to expose or map old panel topology choices in the native lifecycle.
+Retaining the old public selectors
 would preserve redundant choices and indirect feature defaults. Making history
 or feedback unconditional for Hosted would also introduce unnecessary metadata
 dependencies. The selected alternative includes the UI implicitly while keeping
