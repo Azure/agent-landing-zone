@@ -5,7 +5,7 @@
 ### Changed
 
 - Update configuration dependencies to Azure App Configuration 1.10.0,
-  Identity 1.26.0, Key Vault Secrets 4.11.3 and jsonschema 4.26.0.
+  Identity 1.27.0, Key Vault Secrets 4.11.3 and jsonschema 4.26.0.
   Preserve the existing credential, secret and deployment-contract APIs,
   supported Python versions, Terraform version and published component pins.
 
