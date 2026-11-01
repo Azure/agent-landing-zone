@@ -128,8 +128,20 @@ protocol, state store, authorization context or operational behavior.
 
 - Publish `APPLICATION_MODE` as `conversational`, `workflow` or `both`, with
   `conversational` as the default. Each Hosted publication receives one kind.
-- Publish `ORCHESTRATION_HOST` as `hosted` or `container_apps`. Map existing
-  platform topology inputs explicitly at composition, and reject contradictions.
+- Publish `ORCHESTRATION_HOST` as `hosted` or `container_apps`, with `hosted`
+  as the default. Together with `APPLICATION_MODE`, these are the only public
+  native deployment selectors.
+- Include the UI/BFF in either host choice. Do not require a separate
+  `hosted-panel` versus `hosted-no-panel` selection, an administrative-panel
+  deployment flag or a redundant host boolean.
+- Derive necessary foundation switches from the selected host internally.
+  Native prompts, template inputs, persisted settings and public handoffs must
+  use the canonical selectors rather than materializing the old panel topology.
+  Reject obsolete explicit native selection inputs with corrective guidance,
+  without silently migrating or deleting an older deployment's state.
+- Keep any necessary legacy library interfaces isolated from the native
+  lifecycle. They must not turn an old panel setting into an implicit history
+  or metadata feature choice.
 - Keep `HOSTED_AGENT_BASE_URL` for conversational invocation and
   `HOSTED_WORKFLOW_BASE_URL` for the separate workflow publication.
 - Bind durable clients/workers through the official scheduler configuration and
@@ -164,6 +176,8 @@ protocol, state store, authorization context or operational behavior.
   Tool authorization, document-level security and OBO remain independently
   enforced.
 - Keep history, feedback and private attachments explicit and feature-gated.
+  They default off independently of the selected host. Workflow/both still
+  requires owner/action metadata even when history is disabled.
   Private attachments do not publish documents into a corporate corpus.
   Use supported native attachments or an authorized private-storage tool path.
   Custom ingestion is optional and disabled by default.
@@ -181,6 +195,14 @@ Their security observations are not invalidated. In particular, untrusted
 identity metadata and service-identity reads driven by arbitrary IDs remain
 unsafe. It also supersedes any implication that classic conversation APIs are
 the mandatory backing service for native UI history or feedback.
+
+The maintainer explicitly approved the two-selector public contract on
+2026-11-01. This supersedes the earlier decision to expose or map old panel
+topology choices in the native lifecycle. Retaining the old public selectors
+would preserve redundant choices and indirect feature defaults. Making history
+or feedback unconditional for Hosted would also introduce unnecessary metadata
+dependencies. The selected alternative includes the UI implicitly while keeping
+product features and their dependencies explicit.
 
 ## Consequences
 
