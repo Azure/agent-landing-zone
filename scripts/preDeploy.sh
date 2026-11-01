@@ -229,6 +229,22 @@ had_errors=0
 release_default="$(jq -r '.release // empty' "$manifest_path")"
 
 native_mode="$(printf "%s" "$topology_json" | jq -r '.bundled_application // false')"
+# BEGIN optional MCP lifecycle
+if [ "$native_mode" = "true" ]; then
+  (cd "$repo_root" && python3 -m config.deployment.mcp --deploy) || {
+    red "MCP preparation/deployment failed; consumers have not been deployed."
+    exit 1
+  }
+  mcp_environment="$(cd "$repo_root" && azd env get-values --output json)" || exit 1
+  mcp_exports="$(printf '%s' "$mcp_environment" | python3 -c '
+import json, shlex, sys
+for key, value in json.load(sys.stdin).items():
+    if key.startswith("MCP_"):
+        print("export " + key + "=" + shlex.quote(str(value)))
+')" || exit 1
+  eval "$mcp_exports"
+fi
+# END optional MCP lifecycle
 # BEGIN native application lifecycle
 if [ "$native_mode" = "true" ]; then
   (cd "$repo_root" && python3 -m config.deployment.native_deploy --deploy) || {
@@ -245,6 +261,7 @@ fi
 # ---------- Iterate components ----------
 while IFS= read -r comp; do
   name="$(printf "%s" "$comp" | jq -r '.name')"
+  if [ "$native_mode" = "true" ] && [ "$name" = "agent-app-mcp" ]; then continue; fi
   if [[ " $selected_components " != *" $name "* ]]; then
     yellow "$name is not deployed in $deployment_mode mode."
     continue
@@ -423,6 +440,13 @@ done < <(jq -c '.components[]' "$app_definition_path")
 if [ "$had_errors" -ne 0 ]; then
   red "One or more components failed. See logs above."
   exit 1
+fi
+
+if [ "$native_mode" = "true" ]; then
+  (cd "$repo_root" && python3 -m config.deployment.mcp --activate) || {
+    red "MCP caller authorization/activation failed."
+    exit 1
+  }
 fi
 
 green "All components processed."

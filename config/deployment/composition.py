@@ -15,6 +15,7 @@ from typing import Mapping
 from config.deployment.app_settings import merge_app_configuration_settings, substitute_values
 from config.deployment.existing_images import apply_existing_images, discover_existing_images
 from config.deployment.resource_groups import resource_group_for
+from config.deployment import mcp_config
 from config.deployment.firewall import resolve_firewall_inputs
 from config.deployment.native import (
     OBSOLETE_SELECTION_KEYS, OrchestrationHost, nl2sql_selected, resolve_application,
@@ -132,13 +133,15 @@ def validate_hosted_prerequisites(
 
 
 def selected_components(
-    host: OrchestrationHost, *, deploy_ingestion: bool = False,
+    host: OrchestrationHost, *, deploy_ingestion: bool = False, deploy_mcp: bool = False,
 ) -> tuple[str, ...]:
     components = ("agent-app-ui",)
     if host is OrchestrationHost.CONTAINER_APPS:
         components += ("agent-app-orchestrator",)
     if deploy_ingestion:
         components += ("agent-app-ingestion",)
+    if deploy_mcp:
+        components = (mcp_config.MCP_COMPONENT, *components)
     return components
 
 
@@ -151,7 +154,10 @@ def materialized_settings(environment: Mapping[str, str]) -> dict[str, str]:
     app = resolve_application(environment)
     ingestion = resolve_ingestion_selection(environment)
     validate_ingestion_selection(environment, ingestion)
-    return {**app.settings(), DEPLOY_INGESTION_CONTAINER_APP: str(ingestion).lower()}
+    return {
+        **app.settings(), DEPLOY_INGESTION_CONTAINER_APP: str(ingestion).lower(),
+        mcp_config.DEPLOY_AGENT_APP_MCP: str(mcp_config.selected(environment)).lower(),
+    }
 
 
 def describe_application(environment: Mapping[str, str]) -> dict[str, object]:
@@ -167,7 +173,7 @@ def describe_application(environment: Mapping[str, str]) -> dict[str, object]:
         "deploy_ingestion_container_app": ingestion,
         "deploy_cosmos_db": resolve_cosmos_selection(environment),
         "components": (
-            list(selected_components(app.host, deploy_ingestion=ingestion))
+            list(selected_components(app.host, deploy_ingestion=ingestion, deploy_mcp=mcp_config.selected(environment)))
             if bundled else []
         ),
         "publications": list(app.publications) if bundled else [],
@@ -214,9 +220,10 @@ def requires_custom_cosmos(environment: Mapping[str, str]) -> bool:
 
 def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
     """Select actual native metadata/catalog/custom consumers, never checkpoints."""
+    nl2sql_selected(environment)
     required = (
         (resolve_application(environment).metadata and is_bundled_application(environment))
-        or requires_custom_cosmos(environment) or nl2sql_selected(environment)
+        or requires_custom_cosmos(environment) or mcp_config.vector_required(environment)
     )
     raw = environment.get(DEPLOY_COSMOS_DB)
     if raw is None:
@@ -227,7 +234,8 @@ def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
     if required and normalized == "false":
         raise DeploymentTopologyError(
             f"{DEPLOY_COSMOS_DB}=false conflicts with required native frontend "
-            "metadata, an enabled NL2SQL catalog or a custom Cosmos capability."
+            "metadata, the MCP catalog or a custom Cosmos capability. "
+            "Unset DEPLOY_COSMOS_DB to use automatic dependency selection."
         )
     return normalized == "true"
 
@@ -302,12 +310,21 @@ def _resolve_application_overrides(
             )
     hosted = app.host is OrchestrationHost.HOSTED
     bundled = is_bundled_application(environment)
+    deploy_mcp = mcp_config.selected(environment)
+    if deploy_mcp and not bundled:
+        raise DeploymentTopologyError(
+            "DEPLOY_AGENT_APP_MCP selects the bundled MCP component. "
+            "Custom definitions must explicitly declare their own MCP service and dependencies."
+        )
+    nl2sql_selected(environment)  # Reject a selected retired direct SQL capability.
     prepare_hosted = requires_hosted_foundation(environment, hosted_orchestration=hosted and bundled)
     parameters: dict[str, object] = {
         "prepareHostedAgent": prepare_hosted,
         "deployDurableTaskScheduler": bundled and app.host is OrchestrationHost.CONTAINER_APPS,
         "deployHostedAgent": False,
         "deployCosmosDb": resolve_cosmos_selection(environment),
+        "enableCosmosVectorSearch": mcp_config.vector_required(environment),
+        "cosmosAccountCapabilities": mcp_config.account_capabilities(environment),
         "useCAppAPIKey": False,
     }
     if prepare_hosted and not (hosted and bundled):
@@ -332,6 +349,13 @@ def _resolve_application_overrides(
             and not (item.get("service_name") == "orchestrator" and hosted)]
     if not bundled:
         apps = []
+    if deploy_mcp:
+        apps.append({
+            "name": None, "external": True, "service_name": "mcp",
+            "profile_name": "main", "min_replicas": 1, "max_replicas": 3,
+            "cpu": "0.5", "memory": "1.0Gi", "canonical_name": "MCP_APP",
+            "dapr": {"enabled": False}, "roles": ["AcrPull", "AppConfigurationDataReader"],
+        })
     apps.extend(custom_container_apps(environment, apps, hosted_orchestration=hosted))
     for item in apps:
         if bundled and item.get("service_name") in {"orchestrator", "frontend", "dataingest"}:
@@ -350,8 +374,8 @@ def _resolve_application_overrides(
         ([{"name": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
            "canonical_name": "NATIVE_UI_METADATA_CONTAINER", "partitionKey": "/principal_id"}]
          if app.metadata and bundled else [])
-        + ([item for item in existing if item.get("name") == "datasources"] if nl2sql_selected(environment) else [])
         + (existing if requires_custom_cosmos(environment) else [])
+        + mcp_config.cosmos_containers(environment)
     )
     unique = {}
     for item in containers:
@@ -360,16 +384,15 @@ def _resolve_application_overrides(
 
     settings = {
         **app.settings(), DEPLOY_INGESTION_CONTAINER_APP: str(ingestion).lower(),
-        "NL2SQL_ENABLED": str(nl2sql_selected(environment)).lower(),
-        "NL2SQL_SOURCE_REGISTRY": environment.get("NL2SQL_SOURCE_REGISTRY", ""),
         "NATIVE_TOOL_SECRET_NAMES": environment.get("NATIVE_TOOL_SECRET_NAMES", "[]"),
-        "DATASOURCES_CONTAINER": "datasources" if nl2sql_selected(environment) else "",
         "HOSTED_AGENT_BASE_URL": environment.get("HOSTED_AGENT_BASE_URL", ""),
         "HOSTED_WORKFLOW_BASE_URL": environment.get("HOSTED_WORKFLOW_BASE_URL", ""),
         "HOSTED_AGENT_RESOURCE_SCOPE": environment.get("HOSTED_AGENT_RESOURCE_SCOPE", ""),
         "HOSTED_AGENT_IMAGE_VERSION": environment.get("HOSTED_AGENT_IMAGE_VERSION", ""),
         "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS": environment.get("HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "60"),
     }
+    if deploy_mcp or mcp_config.retained_catalog(environment):
+        settings.update(mcp_config.settings(environment))
     if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip():
         settings["SEARCH_RAG_INDEX_NAME"] = environment["SEARCH_RAG_INDEX_NAME"].strip()
     parameters["additionalAppConfigurationSettings"] = merge_app_configuration_settings(

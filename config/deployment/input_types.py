@@ -33,7 +33,7 @@ _GROUPS: dict[InputKind, str] = {
         bastionEnableTunneling enableAcsMediaEgress sideBySideDeploy deploySoftware
         deployAfProject deployAAfAgentSvc aiFoundryDisableLocalAuth enableAgenticRetrieval
         foundryIqIsAdlsGen2 foundryIqFilterAddOnEnabled useUAI useCAppAPIKey
-        useZoneRedundancy enableCosmosAnalyticalStorage
+        useZoneRedundancy enableCosmosAnalyticalStorage enableCosmosVectorSearch
         deployJumpbox deployBastion deployNatGateway deployVM
     """,
     "int": "acrTaskAgentPoolCount dbDatabaseThroughput durableTaskSchedulerCapacity",
@@ -42,7 +42,7 @@ _GROUPS: dict[InputKind, str] = {
         bastionAllowedSourceIPs foundryIqIngestionPermissionOptions
         foundryIqSourceDataFields foundryIqSearchFields modelDeploymentList
         containerAppsList workloadProfiles databaseContainersList storageAccountContainersList
-        additionalAppConfigurationSettings storageAccountResourceAccessRules
+        additionalAppConfigurationSettings storageAccountResourceAccessRules cosmosAccountCapabilities
     """,
     "object": "deploymentTags publicIngress hostedAgent",
     "string": """

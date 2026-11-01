@@ -279,6 +279,13 @@ elif module == "config.deployment.firewall":
     print("DEPLOY_AZURE_FIREWALL_SUBNET=true")
     print("DEPLOY_AZURE_FIREWALL_MANAGEMENT_SUBNET=true")
     print("DEPLOY_GATEWAY_SUBNET=false")
+elif module == "config.deployment.mcp":
+    record("mcp-capture")
+    assert args == ["--capture-capabilities"]
+    captured = {"COSMOS_ACCOUNT_CAPABILITIES": '["EnableServerless"]'}
+    values.update(captured)
+    save(values)
+    print(json.dumps(captured))
 elif module == "config.deployment.terraform_inputs":
     record("inputs")
     assert argument("--environment") == "-"
@@ -435,7 +442,7 @@ def test_complete_hook_prepares_selected_inputs_and_short_circuits(
     expected = ["selection-validation", "appdefinition", "terraform_groups" if provider == "terraform" else "resource_groups",
                 "topology", "firewall"]
     if failure != "firewall":
-        expected.append("inputs")
+        expected += ["mcp-capture", "inputs"]
     if failure not in ("firewall", "inputs"):
         if provider == "terraform":
             expected.append("environment-reload")

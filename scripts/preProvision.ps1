@@ -230,6 +230,22 @@ foreach ($line in (@($topologyOutput) + @($firewallOutput))) {
     }
 }
 
+Push-Location $projectRoot
+try {
+    $mcpCaptureOutput = Invoke-PythonModule -ModuleName 'config.deployment.mcp' -Arguments @('--capture-capabilities')
+    $mcpCaptureExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($mcpCaptureExitCode -ne 0) {
+    Write-Error "MCP catalog capability/ownership capture failed; provisioning has not started."
+    exit $mcpCaptureExitCode
+}
+$mcpCapture = ($mcpCaptureOutput -join "`n") | ConvertFrom-Json
+foreach ($prop in $mcpCapture.PSObject.Properties) {
+    Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
+}
+
 Write-Host "Composing Agent Landing Zone deployment mode..." -ForegroundColor Cyan
 Push-Location $projectRoot
 try {

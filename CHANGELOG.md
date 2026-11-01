@@ -4,6 +4,18 @@
 
 ### Changed
 
+- Move NL2SQL to the optional `agent-app-mcp` Container App using the official
+  Python MCP SDK, dedicated Entra authorization and application Cosmos vector
+  metadata. The native orchestrator consumes its two tools without SQL drivers
+  or direct catalog grants. No additional Azure AI Search service is required.
+- Compose MCP and its metadata containers through both Bicep and Terraform,
+  deploy it before consumers, authorize their actual identities, restart active
+  MCP revisions and only then activate tools. Deselecting MCP retains its catalog.
+  These are exact feature-commit candidates, not published component releases.
+- Add approved-source metadata onboarding and coordinated central application
+  documentation. SQL approval, read-only database permissions and private SQL
+  connectivity remain operator responsibilities.
+
 - Update configuration dependencies to Azure App Configuration 1.10.0,
   Identity 1.27.0, Key Vault Secrets 4.11.3 and jsonschema 4.26.0.
   Preserve the existing credential, secret and deployment-contract APIs,

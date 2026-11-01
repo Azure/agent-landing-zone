@@ -537,7 +537,7 @@ resource "azurerm_virtual_machine_extension" "jumpbox_bootstrap" {
       "-AzureResourceGroupName \"${local.deployment_context.foundry_rg}\"",
       "-AzdEnvName \"${var.environmentName}\"",
       "-ExtraRepoUrls \"${join(",", [for component in local.compute_manifest.components : component.repo])}\"",
-      "-ExtraRepoTags \"${join(",", [for component in local.compute_manifest.components : component.tag])}\"",
+      "-ExtraRepoTags \"${join(",", [for component in local.compute_manifest.components : try(component.tag, component.branch)])}\"",
       "-ExtraRepoNames \"${join(",", [for component in local.compute_manifest.components : component.name])}\"",
     ])
   })

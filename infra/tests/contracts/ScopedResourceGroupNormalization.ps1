@@ -133,6 +133,11 @@ function Get-NativePlatformProjection {
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # ADR-0036: validate the exact optional vector/source-reference delta before
+    # projecting it away. The original fingerprints still reject other changes.
+    $mcp = Get-Content (Join-Path $PSScriptRoot 'fixtures\mcp-component-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    $copy = Invoke-ScopedProjection $copy $mcp.projection
     # ADR-0034: validate every native addition (including complete PE/DNS
     # expressions and hub-scoped grants) before the pre-native adapters.
     # Never exempt endpoint arrays or alter the original fingerprints.

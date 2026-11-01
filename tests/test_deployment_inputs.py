@@ -233,7 +233,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 223
+    assert len(declarations) == 225
     original = values()
     for name, kind in declarations:
         if name in original:
