@@ -1,6 +1,6 @@
-# ADR-0035: Preserve protected quality checks during native runtime adoption
+# ADR-0035: Retire the frozen-base quality policy self-lock
 
-**Status:** Proposed, no policy activation authorized by this record<br>
+**Status:** Accepted maintainer decision, implementation and activation pending<br>
 **Date:** 2026-10-31<br>
 **Owners:** Agent Landing Zone and runtime repository maintainers
 
@@ -29,6 +29,12 @@ The UI also demonstrates an independent prerequisite: green develop checks do
 not prove release-to-main readiness when main's protected dependency manifest
 lacks the adopted SDKs.
 
+The maintainer subsequently requested removal of this blocking policy and
+authorized administrative adoption and PR integration. The authenticated acting
+account's administration permission was verified for the runtime, UI and umbrella
+repositories. This decision supersedes the earlier hold pending a new formal
+authorization channel; it does not waive actual source or behavior failures.
+
 Affected repositories are `Azure/agent-app-orchestrator` and `Azure/agent-app-ui`.
 The umbrella manifest and central product documentation must not describe a
 blocked candidate as the validated released combination.
@@ -55,19 +61,22 @@ before publication.
   existing behavior while promoting dependency-only prerequisites.
 - Reversibility: no production change occurs while adoption is only proposed.
 
-### Option B: Source-only corrections within existing policy
+### Option B: Current-revision quality checks without a permanent self-lock
 
-- Benefits: resolve genuine bugs and missing failure evidence without changing
-  protected controls. Independently compatible maintenance can proceed.
-- Costs and risks: cannot by itself authorize the remaining protected surface,
-  workflow and retirement changes required by the native major.
-- Security and identity: retain exact approvals only for unchanged, proven
-  handlers. Changed handlers need precise handling or legitimate new adoption.
-- Operational consequences: use targeted checks and keep residual policy
-  findings distinct from source defects.
-- Component compatibility: retain the current released combination while the
-  coordinated native release remains blocked.
-- Reversibility: ordinary reviewed source corrections remain reversible.
+- Benefits: analyze source, dependency manifests and contributor controls from
+  the revision actually being reviewed. Control maintenance no longer requires
+  pretending that new contracts are unchanged historical ones.
+- Costs and risks: maintainers must review control changes through the repository
+  process instead of relying on an immutable-policy prohibition.
+- Security and identity: preserve actual failure evidence, source/report binding,
+  typing coverage and suppression protections. No blanket approval inheritance
+  or debt-baseline reset is permitted.
+- Operational consequences: retire the automatic control-edit prohibition and
+  frozen-base authority, not lint, typing, architecture or behavior checks.
+- Component compatibility: preserve host-specific production dependencies and
+  validate the real published SDK groups used by each component.
+- Reversibility: contributor control changes remain versioned and reversible;
+  reintroducing a permanent self-lock would require a new explicit decision.
 
 ### Do not change
 
@@ -76,39 +85,50 @@ before publication.
 
 ## Decision
 
-Prepare formal adoption evidence and continue source-only corrections, but keep
-the coordinated native release blocked until every required check passes through
-a legitimate, verifiable process.
+Choose Option B, as explicitly requested by the maintainer. Remove the
+frozen-base/self-amendment policy rather than adding another authorization
+channel. Retain required quality checks and their useful regression protections.
 
-This proposal does not add an authorization channel, approve exception records,
-change required statuses or prescribe an administrative bypass. If no compliant
-activation path exists, report that limitation rather than manufacturing a
-passing result. Governance is contributor infrastructure, not a new application
-or provisioning dependency.
+Use a small, isolated maintenance PR for the transition. The maintainer-authorized
+administrative override is limited to adopting that maintenance change when the
+old self-lock is its remaining blocker and other checks pass. Do not disable
+branch protection, fabricate statuses or extend this override to unresolved
+native source failures. Native integration and publication still require genuine
+passing checks under the maintained current-revision model.
+
+Governance remains contributor infrastructure, not an application or provisioning
+dependency. This record captures authorization, not a claim that activation or
+the native release has already occurred.
 
 ## Consequences
 
 ### Positive
 
-- Preserve protected-base execution, source-bound evidence and failure controls.
+- Preserve source-bound evidence and actual failure controls without freezing
+  contributor policy and dependencies permanently at the previous architecture.
 - Distinguish functional SDK proof from merge and release acceptance.
 - Avoid inheriting historical approvals for changed or retired handlers.
 
 ### Negative or accepted
 
 - Passing behavior tests alone cannot satisfy the release commitment.
-- Explicit adoption and dependency sequencing can block publication.
+- The isolated administrative transition needs exact scope and recorded evidence.
 
 ## Adoption and migration
 
-First resolve removable source/evidence findings under existing rules. Promote
-compatible SDK prerequisites through normal protected PRs before their consumers
-reach develop or main. Preserve unrelated main documentation during reconciliation.
+First prepare and validate the isolated control-maintenance PR. Record its exact
+head, the old self-lock finding, passing independent checks and the maintainer
+authorization before administrative integration.
 
-Maintain a reviewed inventory of exact surface changes and handler dispositions.
-Establish a compliant adoption path before attempting protected-policy activation.
-No candidate-supplied policy or substitute dependency environment may replace the
-trusted base to force a passing check.
+Then retire unused classic execution source coherently, preserve active shared
+helpers and maintain exact active/retired surface and handler inventories. Do not
+delete history or retain dead execution code solely to satisfy obsolete checks.
+Preserve unrelated main changes during reconciliation.
+
+CI must state explicitly that it evaluates the actual reviewed revision and its
+dependency contracts. Do not disguise source substitution as protected-base
+execution or claim that local prospective-policy validation is a passing hosted
+CI result.
 
 After all required checks pass, validate the exact frozen component combination,
 publish components, bind umbrella tags and commits, and publish matching product
@@ -121,8 +141,8 @@ checks.
 
 ## Compliance verification
 
-- Reject unauthorized control edits, mismatched source hashes and replayed
-  approval/evidence. Fail closed when authority cannot be verified.
+- Bind reports to the exact source being checked. Reject mismatched hashes,
+  replayed evidence and forged statuses.
 - Preserve negative tests for source substitution, approval inheritance,
   retired handlers and broadened suppressions.
 - Verify any future adoption against exact reviewed modules, handlers and SDK
@@ -139,6 +159,6 @@ network behavior or live model file understanding.
 
 ## Review trigger
 
-Reassess when a compliant maintainer-controlled adoption path is demonstrated,
-the protected evaluator changes, or the final native candidate has no remaining
-source/evidence or policy failures.
+Reassess after the maintenance PR is activated, when the final native candidate
+passes every required check, or if current-revision evaluation permits weakened
+coverage, invalid retirement or unproven failure handling.
