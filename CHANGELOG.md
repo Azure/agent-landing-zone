@@ -8,6 +8,9 @@
   Identity 1.27.0, Key Vault Secrets 4.11.3 and jsonschema 4.26.0.
   Preserve the existing credential, secret and deployment-contract APIs,
   supported Python versions, Terraform version and published component pins.
+- Refresh immutable Azure login, Terraform setup and artifact-upload action
+  pins for Node 24 runners. Keep Terraform 1.13.0, readonly initialization,
+  both operating-system contract gates and optional OIDC behavior unchanged.
 
 ## [v6.0.0] - 2026-11-01
 
