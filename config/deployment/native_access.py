@@ -97,6 +97,7 @@ def grant_container_features(environment: Mapping[str, str]) -> None:
     grant_secrets(environment, ui, secret_names(environment, (
         "CHAINLIT_AUTH_SECRET", "OAUTH_AZURE_AD_CLIENT_SECRET", "authClientSecret",
     )))
-    if environment["ORCHESTRATION_HOST"] == "container_apps":
+    from config.deployment.native import resolve_application
+    if resolve_application(environment).host == "container_apps":
         worker = resolve_container_app_principal_id(group, f"ca-{token}-orchestrator")
         grant_runtime_features(environment, worker)

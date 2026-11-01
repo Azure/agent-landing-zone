@@ -1,4 +1,8 @@
-"""Both real hook scripts and root deploy/smoke sections, with offline CLIs."""
+"""Both real Hosted bootstrap hooks, with offline CLIs.
+
+Native root publication is covered by test_hosted_deploy_hooks. The retired
+root stateless deploy/smoke/cutover section is not an executable product path.
+"""
 
 import os
 from pathlib import Path
@@ -44,7 +48,7 @@ if os.environ.get("FAKE_FAIL") == "conditional":
     fixture.assignments = [fixture.assignment(SECRET, access.Role.SECRET, condition="@operator-condition")]
 env = dict(ENV, AZURE_ENV_NAME="offline-child", UNUSED='$(exit 98); "quoted"')
 if os.environ.get("FAKE_CLASSIC") == "1":
-    env = {"DEPLOYMENT_TOPOLOGY": "classic", "AZURE_ENV_NAME": "offline-child"}
+    env = {"ORCHESTRATION_HOST": "container_apps", "AZURE_ENV_NAME": "offline-child"}
 
 def run(command, **kwargs):
     if command[1:3] == ["env", "get-values"]:
@@ -159,7 +163,7 @@ azd() {
 
 
 class HostedAccessHookTests(unittest.TestCase):
-    def run_hook(self, shell, *, root=False, fail="", classic=False):
+    def run_hook(self, shell, *, fail="", container_apps=False):
         suffix = "ps1" if shell == "powershell" else "sh"
         with tempfile.TemporaryDirectory(prefix="hosted access offline ") as directory:
             temp = Path(directory)
@@ -177,15 +181,9 @@ class HostedAccessHookTests(unittest.TestCase):
             (temp / "response.txt").write_text(response, encoding="utf-8")
             env = dict(os.environ, FAKE_ROOT=str(temp), FAKE_TRACE=str(temp / "trace.txt"),
                        REAL_REPO=str(ROOT), REAL_PYTHON=sys.executable, FAKE_FAIL=fail,
-                       FAKE_CLASSIC="1" if classic else "0", AZURE_ENV_NAME="offline-child")
-            source = (ROOT / "scripts" / f"preDeploy.{suffix}").read_text(encoding="utf-8-sig")
+                       FAKE_CLASSIC="1" if container_apps else "0", AZURE_ENV_NAME="offline-child")
             if shell == "powershell":
-                if root:
-                    start = source.index("  Push-Location $hostedProject\n  try {")
-                    end = source.index('  $invocationsEndpoint =', start)
-                    action = source[start:end] + "\nAdd-Content -LiteralPath $env:FAKE_TRACE -Value 'cutover-boundary'\n"
-                else:
-                    action = "& (Join-Path $env:FAKE_ROOT 'scripts/bootstrapHostedAccess.ps1')\nexit $LASTEXITCODE\n"
+                action = "& (Join-Path $env:FAKE_ROOT 'scripts/bootstrapHostedAccess.ps1')\nexit $LASTEXITCODE\n"
                 command = [PWSH, "-NoProfile", "-NonInteractive", "-Command", PS_PREFIX + action]
             else:
                 fake_bin = temp / ".fake-bin"
@@ -194,12 +192,7 @@ class HostedAccessHookTests(unittest.TestCase):
                 shim = fake_bin / "python3"
                 shim.write_text('#!/usr/bin/env bash\nexec "$REAL_PYTHON" "$FAKE_ROOT/driver.py" "$@"\n', encoding="utf-8", newline="\n")
                 shim.chmod(0o755)
-                if root:
-                    start = source.index('  (\n    cd "$hosted_project"\n    azd env set')
-                    end = source.index('  invocations_endpoint=', start)
-                    action = source[start:end] + '\necho cutover-boundary >> "$FAKE_TRACE"\n'
-                else:
-                    action = 'sh scripts/bootstrapHostedAccess.sh\n'
+                action = 'sh scripts/bootstrapHostedAccess.sh\n'
                 command = [BASH, "-c", SH_PREFIX + action]
             result = subprocess.run(command, cwd=temp, env=env, capture_output=True, text=True,
                                     encoding="utf-8", errors="replace", timeout=40, check=False)
@@ -208,10 +201,10 @@ class HostedAccessHookTests(unittest.TestCase):
             return result, events
 
     def cases(self, shell):
-        for root in (False, True):
+        for root in (False,):
             for fail in ("", "env", "identity", "write", "conditional"):
                 with self.subTest(root=root, fail=fail):
-                    result, events = self.run_hook(shell, root=root, fail=fail)
+                    result, events = self.run_hook(shell, fail=fail)
                     output = result.stdout + result.stderr
                     self.assertNotIn("PRIVATE-MARKER", output)
                     self.assertEqual(1, events.count("env"), output)
@@ -230,7 +223,7 @@ class HostedAccessHookTests(unittest.TestCase):
                         self.assertIn("NOT data-plane readiness", output)
                         if root:
                             self.assertEqual(["deploy", "env", "create:CONFIG", "create:MODEL", "create:SECRET", "smoke", "cutover-boundary"], events)
-        result, events = self.run_hook(shell, classic=True)
+        result, events = self.run_hook(shell, container_apps=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(["env"], events)
 
@@ -243,38 +236,20 @@ class HostedAccessHookTests(unittest.TestCase):
         self.cases("bash")
 
     def recovery(self, shell):
-        failed, events = self.run_hook(shell, root=True, fail="smoke")
+        failed, events = self.run_hook(shell, fail="identity")
         self.assertNotEqual(0, failed.returncode, failed.stdout + failed.stderr)
-        self.assertIn("smoke", events)
-        self.assertNotIn("cutover-boundary", events)
-        recovered, events = self.run_hook(shell, root=True)
+        self.assertFalse(any(event.startswith("create:") for event in events))
+        recovered, events = self.run_hook(shell)
         self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
-        self.assertEqual("cutover-boundary", events[-1])
+        self.assertEqual(["create:CONFIG", "create:MODEL", "create:SECRET"], events[1:])
 
     @unittest.skipUnless(PWSH, "PowerShell 7 is not installed")
-    def test_powershell_propagation_failure_blocks_cutover_and_rerun_recovers(self):
+    def test_powershell_identity_failure_blocks_writes_and_rerun_recovers(self):
         self.recovery("powershell")
 
     @unittest.skipUnless(BASH, "bash is not installed")
-    def test_posix_propagation_failure_blocks_cutover_and_rerun_recovers(self):
+    def test_posix_identity_failure_blocks_writes_and_rerun_recovers(self):
         self.recovery("bash")
-
-    def smoke_failures(self, shell):
-        for fail in ("errorframe", "missingcompletion", "emptycompletion"):
-            with self.subTest(fail=fail):
-                result, events = self.run_hook(shell, root=True, fail=fail)
-                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
-                self.assertIn("smoke", events)
-                self.assertNotIn("cutover-boundary", events)
-                self.assertNotIn("PRIVATE-MARKER", result.stdout + result.stderr)
-
-    @unittest.skipUnless(PWSH, "PowerShell 7 is not installed")
-    def test_powershell_rejects_error_frames_and_uncompleted_or_empty_smoke(self):
-        self.smoke_failures("powershell")
-
-    @unittest.skipUnless(BASH, "bash is not installed")
-    def test_posix_rejects_error_frames_and_uncompleted_or_empty_smoke(self):
-        self.smoke_failures("bash")
 
     def test_single_service_hook_no_duplicate_root_bootstrap(self):
         content = (ROOT / "hosted-agent/azure.yaml").read_text(encoding="utf-8")
@@ -290,10 +265,10 @@ class HostedAccessHookTests(unittest.TestCase):
             root = (ROOT / "scripts" / f"preDeploy.{suffix}").read_text(encoding="utf-8-sig")
             self.assertNotIn("hosted_access", root)
             self.assertNotIn("bootstrapHostedAccess", root)
-            self.assertLess(root.index("azd deploy orchestrator-agent"), root.index("azd ai agent invoke"))
-            self.assertIn('"content":"Hello!"', root)
-            self.assertNotIn("Agent Landing Zone hosted smoke OK.", root)
-            self.assertIn("--validate-smoke", root)
+            self.assertIn("config.deployment.native_deploy", root)
+            self.assertIn("--deploy", root)
+            self.assertNotIn("azd deploy orchestrator-agent", root)
+            self.assertNotIn("HOSTED_CUTOVER_COMPLETE", root)
 
 
 if __name__ == "__main__":

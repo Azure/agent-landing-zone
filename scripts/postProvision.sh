@@ -137,16 +137,6 @@ python -m config.governance.setup
 echo "✅ Governance and audit configuration finished."
 
 ###############################################################################
-# 2) Hosted conversation continuity
-###############################################################################
-echo
-if [ -z "${APPLICATION_MODE:-}" ]; then
-  echo "🔐 Publishing fail-closed delegated continuity defaults…"
-  python -m config.continuity.setup
-  echo "✅ Fail-closed delegated continuity defaults published."
-fi
-
-###############################################################################
 # 3) AI Foundry Setup
 ###############################################################################
 echo
@@ -196,9 +186,9 @@ echo "🔐 Administrative panel Cosmos RBAC…"
 {
   echo "🚀 Running config.panel.setup…"
   python -m config.panel.setup
-  echo "✅ Administrative panel Cosmos RBAC finished (no-op unless DEPLOY_ADMINISTRATIVE_PANEL=true)."
+  echo "✅ Native frontend metadata Cosmos RBAC finished (no-op when metadata is not required)."
 } || {
-  echo "❗️ Error during administrative panel Cosmos RBAC setup." >&2
+  echo "❗️ Error during native frontend metadata Cosmos RBAC setup." >&2
   exit 1
 }
 

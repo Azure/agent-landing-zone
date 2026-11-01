@@ -55,8 +55,12 @@ def validate_component_source(path: Path, component: str, environment: Mapping[s
 
 def runtime_settings(environment: Mapping[str, str]) -> dict[str, str]:
     """Structural settings; functional tool/source configuration stays dynamic."""
+    from config.deployment.composition import is_bundled_application
+
     app = resolve_application(environment)
-    settings = {**app.settings(), "CHAT_BACKEND": "", "DEPLOY_ADMINISTRATIVE_PANEL": "false"}
+    settings = app.settings()
+    if not is_bundled_application(environment):
+        return settings
     if app.host == "container_apps":
         settings.update({"HOSTED_AGENT_BASE_URL": "", "HOSTED_WORKFLOW_BASE_URL": ""})
         settings.update(scheduler_settings(environment))
@@ -245,6 +249,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.settings:
             settings = runtime_settings(os.environ)
         elif args.deploy:
+            from config.deployment.composition import is_bundled_application
+            if not is_bundled_application(os.environ):
+                LOGGER.info("Custom definition selected; bundled native publication/worker is not selected.")
+                print("{}")
+                return 0
             check_stage(os.environ, "pre-deploy")
             grant_container_features(os.environ)
             app = resolve_application(os.environ)

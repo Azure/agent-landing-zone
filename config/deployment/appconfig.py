@@ -10,23 +10,21 @@ from pathlib import Path
 import subprocess
 from typing import Mapping
 
-from config.continuity.settings import public_settings as continuity_public_settings
-from config.panel.settings import public_settings as panel_public_settings
 from config import find_repo_root
 from config.deployment.appconfig_intent import Setting, prepare_publication, resolve_intent
 from config.deployment.egress import selected_environment
 from config.deployment.composition import (
     APP_CONFIG_LABEL,
     DEPLOY_INGESTION_CONTAINER_APP,
-    DeploymentMode,
+    custom_container_apps,
+    is_bundled_application,
     requires_hosted_foundation,
     resolve_mode,
     resolve_ingestion_selection,
-    resolve_runtime_mode,
     validate_hosted_prerequisites,
     validate_ingestion_selection,
 )
-from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
+from config.deployment.native import OrchestrationHost, resolve_application, scheduler_settings
 from util.azure_cli import resolve_az_command
 from config.deployment.context import context_settings
 from config.deployment.resource_groups import resource_group_for
@@ -149,10 +147,34 @@ def build_settings(
     require_hosted_endpoint: bool = False,
 ) -> dict[str, str]:
     mode = resolve_mode(environment)
+    if not is_bundled_application(environment):
+        # Custom definitions own their services and consumers; never discover
+        # an undeclared bundled frontend/worker or require a native DTS binding.
+        group = resource_group_for(environment, "application")
+        subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or "").strip()
+        token = _required(environment, "RESOURCE_TOKEN")
+        applications = custom_container_apps(environment, [], hosted_orchestration=False)
+        settings = {**resolve_application(environment).settings(), **context_settings(environment)}
+        containers = []
+        for application in applications:
+            service = application["service_name"]
+            name = f"ca-{token}-{service}"
+            discovered = _container_app(group, name, required=True, subscription=subscription)
+            canonical = application["canonical_name"]
+            endpoint = f"https://{discovered['fqdn']}" if discovered["fqdn"] else ""
+            settings[canonical + "_NAME"] = name
+            settings[canonical + "_ENDPOINT"] = endpoint
+            containers.append({
+                "name": name, "serviceName": service, "canonical_name": canonical,
+                "principalId": discovered["principalId"], "fqdn": discovered["fqdn"],
+            })
+        settings["CONTAINER_APPS"] = json.dumps(containers, separators=(",", ":"))
+        settings.update(source_public_settings(environment))
+        return settings
     deploy_ingestion = resolve_ingestion_selection(environment)
     validate_ingestion_selection(environment, deploy_ingestion)
-    hosted = mode is not DeploymentMode.CLASSIC
-    native = resolve_application(environment) if native_selected(environment) else None
+    hosted = mode is OrchestrationHost.HOSTED
+    native = resolve_application(environment)
     resource_group = resource_group_for(environment, "application")
     subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip()
     deployment_context = context_settings(environment)
@@ -179,15 +201,13 @@ def build_settings(
     if hosted and require_hosted_endpoint:
         required_endpoints = (
             [("HOSTED_AGENT_BASE_URL" if kind == "conversational" else "HOSTED_WORKFLOW_BASE_URL")
-             for kind in native.publications] if native else ["HOSTED_AGENT_BASE_URL"]
+             for kind in native.publications]
         )
         if any(not environment.get(key, "").strip() for key in required_endpoints):
             raise ValueError(
                 "Hosted deployment completed without required publication endpoints: " + ", ".join(required_endpoints)
             )
-    runtime_mode = resolve_runtime_mode(mode, environment)
-    runtime_hosted = runtime_mode is not DeploymentMode.CLASSIC
-    retrieval_settings = retrieval_public_settings(environment, hosted=runtime_hosted)
+    retrieval_settings = retrieval_public_settings(environment, hosted=hosted)
     source_settings = source_public_settings(environment)
 
     frontend = _container_app(
@@ -201,7 +221,7 @@ def build_settings(
         _container_app(
             resource_group, app_names["orchestrator"], required=True, subscription=subscription
         )
-        if runtime_mode is DeploymentMode.CLASSIC
+        if mode is OrchestrationHost.CONTAINER_APPS
         else {"fqdn": "", "principalId": ""}
     )
 
@@ -222,7 +242,7 @@ def build_settings(
             "principalId": dataingest["principalId"],
             "fqdn": dataingest["fqdn"],
         })
-    if runtime_mode is DeploymentMode.CLASSIC:
+    if mode is OrchestrationHost.CONTAINER_APPS:
         container_apps.insert(
             0,
             {
@@ -235,50 +255,28 @@ def build_settings(
         )
 
     return {
-        **(native.settings() if native else {}),
+        **native.settings(),
         **({
             "HOSTED_WORKFLOW_BASE_URL": environment.get("HOSTED_WORKFLOW_BASE_URL", "").strip(),
             "NATIVE_UI_METADATA_CONTAINER": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
-            "ENABLE_CHAT_HISTORY": environment.get("ENABLE_CHAT_HISTORY", "false"),
-            "ENABLE_USER_FEEDBACK": environment.get("ENABLE_USER_FEEDBACK", "false"),
-            "ENABLE_PRIVATE_ATTACHMENTS": environment.get("ENABLE_PRIVATE_ATTACHMENTS", "false"),
             "DATASOURCES_CONTAINER": "datasources" if environment.get("NL2SQL_ENABLED", "").lower() == "true" else "",
             "NL2SQL_ENABLED": environment.get("NL2SQL_ENABLED", "false"),
             "NL2SQL_SOURCE_REGISTRY": environment.get("NL2SQL_SOURCE_REGISTRY", ""),
             "NATIVE_TOOL_SECRET_NAMES": environment.get("NATIVE_TOOL_SECRET_NAMES", "[]"),
-        } if native else {}),
+        }),
         **(
             scheduler_settings(environment)
-            if native and native.host == "container_apps" else {}
+            if native.host == "container_apps" else {}
         ),
         **({
             "DURABLE_AGENT_NAME": environment.get("DURABLE_AGENT_NAME", "agent-lz-conversation"),
             "DURABLE_WORKFLOW_NAME": environment.get("DURABLE_WORKFLOW_NAME", "agent-lz-research-review"),
-        } if native else {}),
+        }),
         **deployment_context,
         DEPLOY_INGESTION_CONTAINER_APP: str(deploy_ingestion).lower(),
         **(
             {"SEARCH_RAG_INDEX_NAME": environment["SEARCH_RAG_INDEX_NAME"].strip()}
             if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip() else {}
-        ),
-        "DEPLOY_HOSTED_AGENT_ORCHESTRATION": str(runtime_hosted).lower(),
-        "PREPARE_HOSTED_AGENT": str(prepare_hosted).lower(),
-        "DEPLOY_HOSTED_AGENT": (
-            environment.get("DEPLOY_HOSTED_AGENT") or "false"
-        ).strip().lower(),
-        "HOSTED_AGENT_PREPARED": (
-            environment.get("HOSTED_AGENT_PREPARED")
-            or str(prepare_hosted)
-        ).strip().lower(),
-        "DEPLOY_ADMINISTRATIVE_PANEL": str(
-            runtime_mode is DeploymentMode.HOSTED_PANEL and not native
-        ).lower(),
-        "DEPLOYMENT_TOPOLOGY": runtime_mode.value,
-        "CHAT_BACKEND": (
-            "" if native else "hosted_agent" if runtime_hosted else "orchestrator"
-        ),
-        "ORCHESTRATOR_BASE_URL": (
-            f"https://{orchestrator['fqdn']}" if orchestrator["fqdn"] else ""
         ),
         "INGESTION_BASE_URL": (
             f"https://{dataingest['fqdn']}" if dataingest["fqdn"] else ""
@@ -300,7 +298,7 @@ def build_settings(
         ),
         "ORCHESTRATOR_APP_NAME": (
             app_names["orchestrator"]
-            if runtime_mode is DeploymentMode.CLASSIC
+            if mode is OrchestrationHost.CONTAINER_APPS
             else ""
         ),
         "FRONTEND_APP_NAME": app_names["frontend"],
@@ -308,15 +306,8 @@ def build_settings(
         "CONTAINER_APPS": json.dumps(
             container_apps, separators=(",", ":")
         ),
-        **(
-            orchestrator_caller_settings(environment, frontend)
-            if runtime_mode is DeploymentMode.CLASSIC
-            else {}
-        ),
-        **({} if native else continuity_public_settings(environment)),
         **retrieval_settings,
         **source_settings,
-        **panel_public_settings(environment),
     }
 
 
@@ -388,12 +379,6 @@ def main(argv: list[str] | None = None) -> int:
         selected = selected_environment(root, _required(os.environ, "AZURE_ENV_NAME"))
         intent = resolve_intent(args.input if args.input is not None else root / "main.parameters.json", selected)
         authority_environment = dict(selected)
-        # Existing preDeploy sets this ephemeral marker before persisting it and
-        # explicitly clears it during rollback. Preserve that existing gate, but
-        # never take declaration substitutions/destination bindings from process
-        # defaults seeded by postProvision.
-        if "HOSTED_CUTOVER_COMPLETE" in os.environ:
-            authority_environment["HOSTED_CUTOVER_COMPLETE"] = os.environ["HOSTED_CUTOVER_COMPLETE"]
         settings = build_settings(
             authority_environment,
             require_hosted_endpoint=args.require_hosted_endpoint,

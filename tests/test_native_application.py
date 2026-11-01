@@ -9,7 +9,7 @@ import shutil
 import os
 import yaml
 
-from config.deployment.native import resolve_application, scheduler_settings
+from config.deployment.native import OBSOLETE_SELECTION_KEYS, resolve_application, scheduler_settings
 from config.deployment import native_deploy, native_access
 from config.deployment import appconfig, private_network
 from config.deployment import hosted_image
@@ -36,7 +36,7 @@ def environment(host="hosted", mode="conversational"):
         "AZURE_AI_PROJECT_ENDPOINT": "https://test.services.ai.azure.com/api/projects/test",
         "AZURE_AI_PROJECT_RESOURCE_ID": f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.CognitiveServices/accounts/test/projects/test",
         "AZURE_CONTAINER_REGISTRY_ENDPOINT": "test.azurecr.io",
-        "HOSTED_AGENT_PREPARED": "true", "APP_CONFIG_ENDPOINT": "https://test.azconfig.io",
+        "APP_CONFIG_ENDPOINT": "https://test.azconfig.io",
         "HOSTED_AGENT_DEPLOYMENT": json.dumps({"durableTask": HUB}),
     }
 
@@ -60,13 +60,11 @@ def test_native_hosted_startup_matches_canonical_runtime_module_and_parameter_se
     )
 
 
-@pytest.mark.parametrize("topology,host", [
-    ("classic", "container_apps"),
-    ("hosted-no-panel", "hosted"),
-    ("hosted-panel", "hosted"),
-])
-def test_topology_maps_only_at_composition_boundary(topology, host):
-    assert resolve_application({"DEPLOYMENT_TOPOLOGY": topology}).host == host
+@pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS))
+@pytest.mark.parametrize("value", ["", "false", "true", "classic", "hosted-panel"])
+def test_obsolete_settings_are_rejected_not_reinterpreted(key, value):
+    with pytest.raises(ValueError, match="Remove these settings"):
+        resolve_application({key: value})
 
 
 @pytest.mark.parametrize("values", [
@@ -129,7 +127,11 @@ def test_native_foundation_consumers_and_no_blanket_grants(host, mode, cosmos):
                for a in values["containerAppsList"])
     assert [c["name"] for c in values["databaseContainersList"]] == (["native-ui-metadata"] if cosmos else [])
     settings = {s["name"]: s["value"] for s in values["additionalAppConfigurationSettings"]}
-    assert settings["CHAT_BACKEND"] == ""
+    assert not set(settings).intersection(OBSOLETE_SELECTION_KEYS)
+    assert all(settings[key] == "false" for key in (
+        "ENABLE_CHAT_HISTORY", "ENABLE_USER_FEEDBACK", "ENABLE_PRIVATE_ATTACHMENTS",
+    ))
+    assert any(item["service_name"] == "frontend" for item in values["containerAppsList"])
     assert all(s["label"] == "agent-lz" for s in values["additionalAppConfigurationSettings"])
     if host == "container_apps":
         worker = next(a for a in values["containerAppsList"] if a["service_name"] == "orchestrator")
@@ -258,7 +260,7 @@ def test_native_appconfig_requires_every_selected_endpoint_and_has_no_legacy_rou
     }
     with patch.object(appconfig, "_container_app", return_value={"fqdn": "ui.example", "principalId": "principal"}):
         settings = appconfig.build_settings(env, require_hosted_endpoint=True)
-        assert settings["CHAT_BACKEND"] == ""
+        assert not set(settings).intersection(OBSOLETE_SELECTION_KEYS)
         assert settings["HOSTED_WORKFLOW_BASE_URL"] == env["HOSTED_WORKFLOW_BASE_URL"]
         assert "HOSTED_CONTINUITY_ENABLED" not in settings
         with pytest.raises(ValueError, match="HOSTED_WORKFLOW_BASE_URL"):

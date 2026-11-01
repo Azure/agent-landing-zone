@@ -146,6 +146,10 @@ variable "additionalAppConfigurationSettings" {
     condition     = length(distinct([for s in var.additionalAppConfigurationSettings : jsonencode([s.name, s.label == null ? var.appConfigLabel : s.label])])) == length(var.additionalAppConfigurationSettings)
     error_message = "Additional App Configuration name/label pairs must be unique."
   }
+  validation {
+    condition     = alltrue([for s in var.additionalAppConfigurationSettings : !contains(jsondecode(file("${path.module}/../../config/deployment/appconfig_ownership.json")).retired, s.name)])
+    error_message = "Obsolete application settings are unsupported. Configure ORCHESTRATION_HOST=hosted|container_apps and APPLICATION_MODE=conversational|workflow|both with independent native feature flags."
+  }
 }
 variable "networkIsolation" {
   type     = bool

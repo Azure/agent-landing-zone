@@ -103,7 +103,7 @@ specs/**
 contracts/naming-map.md
 contracts/*.json
 contracts/README.md
-config/deployment/rollback.json
+tests/fixtures/historical-runtime-rollback.json
 config/governance/tests/test_setup.py
 config/panel/tests/test_operator_contract.py
 config/panel/tests/test_settings.py

@@ -1,50 +1,10 @@
 #!/usr/bin/env python3
-"""Assign container-scoped Cosmos RBAC for the optional administrative panel.
+"""Grant the bundled frontend access to its native UI metadata container.
 
-Issue #611 / ADR-0004. This script is the *only* place that grants Cosmos
-data-plane access for the panel's owner-index and feedback metadata
-containers. It never uses the generic AILZ account-scope role-assignment
-loop (``containerAppsList[].roles`` + ``modules/security/cosmos-data-plane-
-role-assignment.bicep`` in the ``infra`` submodule): that loop only supports
-whole-account scope, which would also grant access to any other container in
-the shared account/database -- including, in a migrated environment, the
-classic ``conversations`` chat-content container. Panel Cosmos RBAC must
-never risk exposing chat content, so every assignment here is scoped to
-exactly one container path (``/dbs/{database}/colls/{container}``) using the
-same built-in Cosmos SQL role GUIDs AILZ already uses
-(``00000000-0000-0000-0000-000000000002`` Data Contributor,
-``00000000-0000-0000-0000-000000000001`` Data Reader). This keeps the
-AI Landing Zone submodule generic while all application-specific narrowing lives
-here, in an Agent Landing Zone config/hook, per AGENTS.md.
-
-Identity/role matrix (ADR-0004):
-
-- **agent-app-ui (frontend)** -- the only component holding the user token and
-  the exclusive owner of managed-Conversation create/read/append/delete and
-  the owner index -- gets **Cosmos DB Built-in Data Contributor**, scoped to
-  *only* the two panel containers.
-- **agent-app-ingestion (dataingest)** -- the operator overview surface reads
-  aggregate counts over panel metadata only -- gets **Cosmos DB Built-in
-  Data Reader**, scoped to the *same* two containers. It never gets write
-  access and never gets the classic ``conversations``/``datasources``/
-  ``prompts``/``mcp`` containers through this script.
-- **agent-app-orchestrator (hosted agent/container)** -- stateless, holds
-  **zero** managed-Conversations RBAC per ADR-0001/0003/0004 -- gets
-  *nothing* here. This script has no code path that resolves or assigns a
-  role to the orchestrator/hosted-agent identity.
-
-Idempotent: every assignment is looked up by (principalId, roleDefinitionId,
-scope) before creating, so re-running this script (every ``postProvision``)
-never fails on an assignment that already exists and never duplicates one.
-
-Reversible: deleting the two container-scoped assignments (or simply setting
-``DEPLOY_ADMINISTRATIVE_PANEL=false`` and re-running provisioning, which never
-calls this script) fully revokes panel Cosmos access without touching any
-other container, account, or identity.
-
-No-op unless ``DEPLOY_ADMINISTRATIVE_PANEL`` is ``true``. This script implements
-the platform contract -- the exact,
-reviewed, narrow-scope RBAC shape -- is ready the moment that gate lifts.
+Workflows, history, feedback or private attachment descriptors require metadata.
+The grant is Data Contributor at exactly one container scope, never account
+scope. Neither the runtime nor ingestion receives UI metadata access here.
+Assignments are idempotent; this configurator never removes resources or grants.
 """
 
 from __future__ import annotations
@@ -57,7 +17,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from util.azure_cli import resolve_az_command
-from config.deployment.composition import resolve_ingestion_selection
 from config.deployment.resource_groups import ResourceGroupError, resource_group_for
 
 
@@ -133,36 +92,13 @@ def role_definition_id(
     )
 
 
-def panel_container_grants() -> tuple[PanelContainerGrant, ...]:
-    """Return the exact, reviewed grants this script ever assigns.
-
-    Frontend (UI BFF) gets read/write (Data Contributor) on both panel
-    containers -- it is the exclusive owner of the owner index and feedback
-    metadata. Ingestion (operator overview) gets read-only (Data Reader) on
-    the same two containers -- aggregate counts only, never a write. The
-    hosted agent/orchestrator identity is never a grant target.
-    """
-    from config.panel.settings import FEEDBACK_CONTAINER_NAME, OWNER_INDEX_CONTAINER_NAME
-
-    containers = (OWNER_INDEX_CONTAINER_NAME, FEEDBACK_CONTAINER_NAME)
-    grants = []
-    for container_name in containers:
-        grants.append(
-            PanelContainerGrant(
-                service_name=FRONTEND_APP_SERVICE_NAME,
-                role_definition_guid=COSMOS_DATA_CONTRIBUTOR_ROLE_GUID,
-                container_name=container_name,
-            )
-        )
-    for container_name in containers:
-        grants.append(
-            PanelContainerGrant(
-                service_name=DATA_INGEST_APP_SERVICE_NAME,
-                role_definition_guid=COSMOS_DATA_READER_ROLE_GUID,
-                container_name=container_name,
-            )
-        )
-    return tuple(grants)
+def panel_container_grants(environment: Mapping[str, str] | None = None) -> tuple[PanelContainerGrant, ...]:
+    """Return the single frontend-only native metadata grant."""
+    return (PanelContainerGrant(
+        FRONTEND_APP_SERVICE_NAME,
+        COSMOS_DATA_CONTRIBUTOR_ROLE_GUID,
+        (environment or {}).get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
+    ),)
 
 
 def _run_az(arguments: list[str], *, required: bool = True) -> str:
@@ -325,20 +261,13 @@ def resolve_subscription_id(environment: Mapping[str, str]) -> str:
 
 
 def configure_panel_rbac(environment: Mapping[str, str]) -> int:
-    """Reconcile every panel Cosmos container-scoped grant.
-
-    No-op (returns 0) unless ``DEPLOY_ADMINISTRATIVE_PANEL`` is ``true``.
-    Returns the number of newly created assignments.
-    """
-    from config.deployment.native import resolve_application, selected as native_selected
-    metadata = (
-        resolve_application(environment).metadata if native_selected(environment)
-        else is_truthy(environment.get("DEPLOY_ADMINISTRATIVE_PANEL"))
-    )
+    """Assign native metadata access when selected; return newly created grants."""
+    from config.deployment.native import resolve_application
+    from config.deployment.composition import is_bundled_application
+    metadata = is_bundled_application(environment) and resolve_application(environment).metadata
     if not metadata:
         logging.info(
-            "[panel.setup] DEPLOY_ADMINISTRATIVE_PANEL is not true; skipping "
-            "panel Cosmos RBAC (no container, no role assignment)."
+            "[panel.setup] Native frontend metadata is not required; no container role assignment."
         )
         return 0
 
@@ -354,8 +283,7 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     ):
         if not value:
             raise PanelRbacError(
-                f"DEPLOY_ADMINISTRATIVE_PANEL is true but {name} is not set; "
-                "cannot assign panel Cosmos RBAC."
+                f"Native frontend metadata requires {name}; cannot assign Cosmos RBAC."
             )
     try:
         resource_group = resource_group_for(environment, "application")
@@ -378,35 +306,25 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
                 database_name = value
     if not account_name:
         raise PanelRbacError(
-            "DEPLOY_ADMINISTRATIVE_PANEL is true but DATABASE_ACCOUNT_NAME is not set; "
-            "cannot assign panel Cosmos RBAC."
+            "Native frontend metadata requires DATABASE_ACCOUNT_NAME; cannot assign Cosmos RBAC."
         )
     subscription_id = resolve_subscription_id(environment)
     if not subscription_id:
         raise PanelRbacError(
-            "DEPLOY_ADMINISTRATIVE_PANEL is true but AZURE_SUBSCRIPTION_ID "
-            "could not be determined; cannot assign panel Cosmos RBAC."
+            "Native frontend metadata requires an AZURE_SUBSCRIPTION_ID; cannot assign Cosmos RBAC."
         )
     database_name = database_name or account_name
 
     app_names = {
         FRONTEND_APP_SERVICE_NAME: f"ca-{resource_token}-frontend",
     }
-    if resolve_ingestion_selection(environment) and not native_selected(environment):
-        app_names[DATA_INGEST_APP_SERVICE_NAME] = f"ca-{resource_token}-dataingest"
     principal_ids = {
         service_name: resolve_container_app_principal_id(resource_group, app_name)
         for service_name, app_name in app_names.items()
     }
 
     created = 0
-    grants = (
-        (PanelContainerGrant(
-            FRONTEND_APP_SERVICE_NAME, COSMOS_DATA_CONTRIBUTOR_ROLE_GUID,
-            environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
-        ),)
-        if native_selected(environment) else panel_container_grants()
-    )
+    grants = panel_container_grants(environment)
     for grant in grants:
         if grant.service_name not in principal_ids:
             continue

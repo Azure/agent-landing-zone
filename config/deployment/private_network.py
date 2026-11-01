@@ -16,7 +16,8 @@ import time
 from typing import Mapping
 from urllib.parse import urlsplit
 
-from config.deployment.composition import DeploymentMode, is_truthy, resolve_mode
+from config.deployment.composition import is_bundled_application, is_truthy, requires_hosted_foundation, resolve_mode
+from config.deployment.native import OrchestrationHost
 from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
 
 
@@ -187,10 +188,13 @@ def check_stage(environment: Mapping[str, str], stage: str) -> int:
     keys = ["APP_CONFIG_ENDPOINT"]
     if stage == "hosted-build":
         keys = ["AZURE_CONTAINER_REGISTRY_ENDPOINT"]
-    elif stage == "pre-deploy" and resolve_mode(environment) is not DeploymentMode.CLASSIC:
+    elif stage == "pre-deploy" and requires_hosted_foundation(
+        environment, hosted_orchestration=is_bundled_application(environment)
+        and resolve_mode(environment) is OrchestrationHost.HOSTED,
+    ):
         keys.append("AZURE_AI_PROJECT_ENDPOINT")
     endpoints = [(key, environment.get(key) or "") for key in keys]
-    if stage == "pre-deploy" and native_selected(environment) and resolve_application(environment).host == "container_apps":
+    if stage == "pre-deploy" and is_bundled_application(environment) and resolve_application(environment).host == "container_apps":
         # Validate the actual output before probing it. No constructed hostname,
         # public-network fallback or RUN_FROM_JUMPBOX connectivity bypass.
         scheduler_settings(environment)

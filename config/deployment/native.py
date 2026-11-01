@@ -6,6 +6,7 @@ The foundation handoff contains provider-returned scheduler metadata, not secret
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 import json
 import re
 from typing import Mapping
@@ -13,8 +14,22 @@ from urllib.parse import urlsplit
 
 
 def selected(environment: Mapping[str, str]) -> bool:
-    """Legacy library callers remain compatible; lifecycle explicitly selects native."""
-    return "APPLICATION_MODE" in environment or "ORCHESTRATION_HOST" in environment
+    """The shipped application lifecycle is native, including unset defaults."""
+    return True
+
+
+class OrchestrationHost(str, Enum):
+    HOSTED = "hosted"
+    CONTAINER_APPS = "container_apps"
+
+
+OBSOLETE_SELECTION_KEYS = frozenset({
+    "DEPLOYMENT_TOPOLOGY", "DEPLOY_ADMINISTRATIVE_PANEL",
+    "DEPLOY_HOSTED_AGENT_ORCHESTRATION", "PRESERVE_CLASSIC_RUNTIME",
+    "HOSTED_CUTOVER_COMPLETE", "CHAT_BACKEND",
+    "USE_FOUNDRY_HOSTED_AGENTS", "PREPARE_HOSTED_AGENT",
+    "DEPLOY_HOSTED_AGENT", "DEPLOY_DURABLE_TASK_SCHEDULER", "HOSTED_AGENT_PREPARED",
+})
 
 
 def boolean(environment: Mapping[str, str], key: str, default: bool = False) -> bool:
@@ -27,58 +42,50 @@ def boolean(environment: Mapping[str, str], key: str, default: bool = False) -> 
 @dataclass(frozen=True)
 class NativeApplication:
     mode: str
-    host: str
-    topology: str
+    host: OrchestrationHost
     ingestion: bool
     metadata: bool
+    history: bool
+    feedback: bool
+    private_attachments: bool
 
     @property
     def publications(self) -> tuple[str, ...]:
         return ("conversational", "workflow") if self.mode == "both" else (self.mode,)
 
     def settings(self) -> dict[str, str]:
-        return {"APPLICATION_MODE": self.mode, "ORCHESTRATION_HOST": self.host}
+        return {
+            "APPLICATION_MODE": self.mode, "ORCHESTRATION_HOST": self.host.value,
+            "ENABLE_CHAT_HISTORY": str(self.history).lower(),
+            "ENABLE_USER_FEEDBACK": str(self.feedback).lower(),
+            "ENABLE_PRIVATE_ATTACHMENTS": str(self.private_attachments).lower(),
+        }
 
 
 def resolve_application(environment: Mapping[str, str]) -> NativeApplication:
     mode = environment.get("APPLICATION_MODE", "conversational").strip().lower()
-    host = environment.get("ORCHESTRATION_HOST", "").strip().lower()
-    topology = environment.get("DEPLOYMENT_TOPOLOGY", "").strip().lower()
+    host = environment.get("ORCHESTRATION_HOST", "hosted").strip().lower()
+    obsolete = sorted(OBSOLETE_SELECTION_KEYS.intersection(environment))
+    if obsolete:
+        raise ValueError(
+            "Obsolete native deployment settings: " + ", ".join(obsolete)
+            + ". Remove these settings and select ORCHESTRATION_HOST=hosted|container_apps "
+            "and APPLICATION_MODE=conversational|workflow|both. Features are explicit."
+        )
     if mode not in {"conversational", "workflow", "both"}:
         raise ValueError("APPLICATION_MODE must be conversational, workflow, or both.")
-    if host and host not in {"hosted", "container_apps"}:
+    if host not in {"hosted", "container_apps"}:
         raise ValueError("ORCHESTRATION_HOST must be hosted or container_apps.")
-    mapped = {"classic": "container_apps", "hosted-no-panel": "hosted", "hosted-panel": "hosted"}
-    if topology and topology not in mapped:
-        raise ValueError("Unknown DEPLOYMENT_TOPOLOGY.")
-    signals = [value for value in (host, mapped.get(topology)) if value]
-    if "DEPLOY_HOSTED_AGENT_ORCHESTRATION" in environment:
-        signals.append("hosted" if boolean(environment, "DEPLOY_HOSTED_AGENT_ORCHESTRATION") else "container_apps")
-    if len(set(signals)) > 1:
-        raise ValueError("Contradictory ORCHESTRATION_HOST and deployment topology settings; align them before provisioning.")
-    host = signals[0] if signals else "hosted"
-    panel = boolean(environment, "DEPLOY_ADMINISTRATIVE_PANEL", topology == "hosted-panel")
-    if topology and panel != (topology == "hosted-panel"):
-        raise ValueError("DEPLOY_ADMINISTRATIVE_PANEL contradicts DEPLOYMENT_TOPOLOGY.")
-    if panel and host != "hosted":
-        raise ValueError("The administrative panel topology requires Hosted.")
-    if boolean(environment, "PRESERVE_CLASSIC_RUNTIME"):
-        raise ValueError("Native applications do not support PRESERVE_CLASSIC_RUNTIME; use an explicit deployment, not legacy migration.")
-    if environment.get("CHAT_BACKEND", "").strip():
-        raise ValueError("Native selection cannot be combined with legacy CHAT_BACKEND. Use a separate native environment; do not migrate or delete the previous deployment's state.")
-    history = boolean(environment, "ENABLE_CHAT_HISTORY", panel)
+    history = boolean(environment, "ENABLE_CHAT_HISTORY")
     feedback = boolean(environment, "ENABLE_USER_FEEDBACK")
     private_attachments = boolean(environment, "ENABLE_PRIVATE_ATTACHMENTS")
     if private_attachments and mode == "workflow":
         raise ValueError("ENABLE_PRIVATE_ATTACHMENTS requires conversational or both mode; workflow starts do not accept private attachments.")
     metadata = mode in {"workflow", "both"} or history or feedback or private_attachments
-    # Legacy panel is mapped to product history at this boundary, not enabled
-    # as a second native runtime. Materialized native topology has no panel.
-    topology = "classic" if host == "container_apps" else "hosted-no-panel"
     return NativeApplication(
-        mode, host, topology,
+        mode, OrchestrationHost(host),
         boolean(environment, "DEPLOY_INGESTION_CONTAINER_APP"),
-        metadata,
+        metadata, history, feedback, private_attachments,
     )
 
 

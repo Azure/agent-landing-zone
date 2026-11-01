@@ -12,7 +12,7 @@ from config.deployment import private_network as network
 
 PRIVATE = {
     "NETWORK_ISOLATION": "true",
-    "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+    "ORCHESTRATION_HOST": "hosted",
     "APP_CONFIG_ENDPOINT": "https://config.azconfig.io",
     "AZURE_AI_PROJECT_ENDPOINT": "https://foundry.services.ai.azure.com/api/projects/demo",
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": "registry.azurecr.io",
@@ -33,7 +33,7 @@ class StageTests(unittest.TestCase):
         for stage, env in (
             ("unknown", {}),
             ("pre-deploy", {**PRIVATE, "NETWORK_ISOLATION": "tru"}),
-            ("pre-deploy", {**PRIVATE, "DEPLOYMENT_TOPOLOGY": "invalid"}),
+            ("pre-deploy", {**PRIVATE, "ORCHESTRATION_HOST": "invalid"}),
         ):
             with self.subTest(stage=stage, env=env), self.assertRaises(ValueError):
                 network.check_stage(env, stage)
@@ -56,18 +56,18 @@ class StageTests(unittest.TestCase):
         probe.assert_called_once_with("APP_CONFIG_ENDPOINT", PRIVATE["APP_CONFIG_ENDPOINT"])
 
     @patch.object(network, "check_endpoint")
-    def test_classic_does_not_probe_foundry(self, probe: MagicMock) -> None:
-        env = {**PRIVATE, "DEPLOYMENT_TOPOLOGY": "classic", "AZURE_AI_PROJECT_ENDPOINT": ""}
+    def test_custom_container_only_does_not_probe_foundry_or_dts(self, probe: MagicMock) -> None:
+        env = {**PRIVATE, "ORCHESTRATION_HOST": "container_apps", "AGENTLZ_APP_DEFINITION": "samples/custom-app/containerapp", "AZURE_AI_PROJECT_ENDPOINT": ""}
         self.assertEqual(0, network.check_stage(env, "pre-deploy"))
         probe.assert_called_once_with("APP_CONFIG_ENDPOINT", PRIVATE["APP_CONFIG_ENDPOINT"])
 
     @patch.object(network, "check_endpoint")
     def test_hosted_topologies_require_foundry(self, probe: MagicMock) -> None:
-        for mode in ("hosted-no-panel", "hosted-panel"):
+        for mode in ("conversational", "workflow", "both"):
             with self.subTest(mode=mode):
                 probe.reset_mock()
                 self.assertEqual(0, network.check_stage(
-                    {**PRIVATE, "DEPLOYMENT_TOPOLOGY": mode}, "pre-deploy"
+                    {**PRIVATE, "APPLICATION_MODE": mode}, "pre-deploy"
                 ))
                 self.assertEqual(2, probe.call_count)
 

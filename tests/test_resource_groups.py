@@ -1065,7 +1065,7 @@ class HookTests(ScratchTest):
                 before = json.loads(json.dumps(requested))
                 composed = compose_parameters(requested, {
                     "NETWORK_ISOLATION": "true",
-                    "DEPLOYMENT_TOPOLOGY": "classic",
+                    "ORCHESTRATION_HOST": "container_apps",
                 })
                 self.assertEqual(before, requested, "Composition must not mutate operator input.")
                 for name, value in {

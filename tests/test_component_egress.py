@@ -26,7 +26,7 @@ REQUIREMENT = {
     "purpose": "Initialize the tokenizer from an empty runtime cache.",
 }
 ENV = {
-    "DEPLOYMENT_TOPOLOGY": "classic", "NETWORK_ISOLATION": "true",
+    "ORCHESTRATION_HOST": "container_apps", "NETWORK_ISOLATION": "true",
     "DEPLOY_INGESTION_CONTAINER_APP": "true",
     "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000001",
     "AZURE_RESOURCE_GROUP": "rg-foundry", "AZURE_APP_RESOURCE_GROUP": "rg-app",
@@ -153,20 +153,17 @@ def test_bundled_review_and_shared_tokenizer_requirement():
     assert rule["sourceAddresses"] == SOURCES["containerapp"]
 
 
-@pytest.mark.parametrize("hosted,preserve,ingestion", [
-    (False, False, False), (False, False, True), (True, False, False),
-    (True, False, True), (True, True, False), (True, True, True),
-])
-def test_actual_selection_source_union(hosted, preserve, ingestion):
+@pytest.mark.parametrize("hosted", [False, True])
+@pytest.mark.parametrize("ingestion", [False, True])
+def test_actual_selection_source_union(hosted, ingestion):
     selected = plan(
-        DEPLOYMENT_TOPOLOGY="hosted-no-panel" if hosted else "classic",
+        ORCHESTRATION_HOST="hosted" if hosted else "container_apps",
         HOSTED_AGENT_RESOURCE_SCOPE="api://application/.default",
-        PRESERVE_CLASSIC_RUNTIME=str(preserve).lower(),
         DEPLOY_INGESTION_CONTAINER_APP=str(ingestion).lower(),
     )
     rule = reconcile(selected, SOURCES, None)["rules"][0]
     expected = set(SOURCES["azure.ai.agent"] if hosted else SOURCES["containerapp"])
-    if ingestion or preserve:
+    if ingestion:
         expected.update(SOURCES["containerapp"])
     assert set(rule["sourceAddresses"]) == expected
     assert len(rule["owners"]) == 1 + ingestion
@@ -189,13 +186,13 @@ def test_custom_components_follow_additive_workload_selection(tmp_path, kind):
     selected = plan(AGENTLZ_APP_DEFINITION=str(definition), DEPLOY_INGESTION_CONTAINER_APP="false")
     assert selected["applicationId"] == "custom-app"
     assert {item["id"] for item in selected["components"]} == {
-        "agent-lz-default/ui", "agent-lz-default/orchestrator", "agent-lz-default/ingestion", "custom-app/web",
+        "custom-app/web",
     }
     result = reconcile(selected, SOURCES, None)
     assert len(result["rules"]) == 2
     shared = next(rule for rule in result["rules"] if rule["fqdn"] == REQUIREMENT["fqdn"])
-    assert len(shared["owners"]) == 3
-    assert set(shared["sourceAddresses"]) == set(SOURCES["containerapp"] + SOURCES[kind])
+    assert len(shared["owners"]) == 1
+    assert set(shared["sourceAddresses"]) == set(SOURCES[kind])
 
 
 def test_reconcile_preserves_shared_requirement_then_removes_final_owner():

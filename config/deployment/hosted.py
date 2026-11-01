@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import yaml
 
 MAX_SMOKE_OUTPUT = 1024 * 1024
+FOUNDRY_TOKEN_AUDIENCE = "https://ai.azure.com"
 
 
 def service_protocol(project: Path, service_name: str) -> str:

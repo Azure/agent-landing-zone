@@ -599,7 +599,7 @@ locals {
   # input handoff, not permission to expose arbitrary supplied values as outputs.
   # Never export this whole object: foundation values can include sensitive input.
   # The publisher must load Terraform-owned current values without overwriting
-  # them, and publish runtime_settings through its existing cutover/evidence gates.
+  # them, and publish canonical runtime_settings through the shared lifecycle.
   app_config_bootstrap = {
     enabled                = var.deployAppConfig && var.appRuntimeConfigurationMode == "appConfig"
     label                  = var.appConfigLabel
