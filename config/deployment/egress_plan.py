@@ -15,7 +15,6 @@ from config.appdefinition import load_definition, load_selected_definition, vali
 from config.appdefinition.egress import Destination, validate_requirement
 from config.appdefinition.loader import component_service_name, effective_components
 from config.deployment.composition import (
-    DeploymentMode,
     compose_parameters,
     is_truthy,
     resolve_ingestion_selection,
@@ -38,16 +37,15 @@ def fingerprint(value: object) -> str:
 def declaration_plan(
     root: Path, environment: Mapping[str, str], source: Mapping[str, object],
 ) -> dict[str, Any]:
-    """Follow actual additive application composition, not just the selected file."""
+    """Follow the selected application's declared consumers and composed services."""
     selected = validate_definition(load_selected_definition(environment, root), root)
-    bundled = validate_definition(load_definition(root / "app-definition.json", root), root)
     composed = compose_parameters(source, environment)
     services = {
         app["service_name"]
         for app in composed["parameters"]["containerAppsList"]["value"]
     }
-    hosted = resolve_mode(environment) is not DeploymentMode.CLASSIC
-    definitions = [bundled] if selected.bundled else [bundled, selected]
+    hosted = resolve_mode(environment).value == "hosted"
+    definitions = [selected]
     components: list[dict[str, Any]] = []
     for definition in definitions:
         for component in effective_components(

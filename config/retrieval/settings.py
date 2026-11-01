@@ -1,6 +1,6 @@
 """Public settings for the implemented native Search delegation route.
 
-An empty mode denotes no hosted route (classic, including pre-cutover migration).
+An empty mode denotes no Hosted route (the Container Apps host).
 It is not a service-identity fallback. Source credentials remain request-local in
 the UI/runtime; provisioning publishes neither tokens nor an identity envelope.
 """
@@ -55,14 +55,14 @@ def validate_auth_mode(environment: Mapping[str, str]) -> None:
     if not isinstance(raw, str) or raw.strip() not in {"", NATIVE_SEARCH}:
         raise ValueError(
             "RETRIEVAL_AUTH_MODE must be native_search (or empty for automatic "
-            "hosted selection / no classic route). No other route is implemented."
+            "host selection). No other route is implemented."
         )
 
 
 def public_settings(
     environment: Mapping[str, str], *, hosted: bool,
 ) -> dict[str, str]:
-    """Resolve the route before discovery/publication, preserving classic auth."""
+    """Resolve the route before discovery/publication, preserving request auth."""
     validate_auth_mode(environment)
     if not hosted:
         return {RETRIEVAL_AUTH_MODE: ""}

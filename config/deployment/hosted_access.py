@@ -24,8 +24,8 @@ from typing import Callable, Mapping
 from urllib.parse import urlsplit
 from uuid import UUID, uuid5, NAMESPACE_URL
 
-from config.continuity.settings import FOUNDRY_TOKEN_AUDIENCE
-from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, DeploymentMode, resolve_mode
+from config.deployment.hosted import FOUNDRY_TOKEN_AUDIENCE
+from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, resolve_mode
 from config.deployment.resource_groups import resource_group_for
 from config.retrieval.settings import SEARCH_BACKENDS, validate_auth_mode
 from util.azure_cli import resolve_az_command
@@ -191,14 +191,14 @@ class AccessPlan:
     agent_version: str = ""
     grants: tuple[Grant, ...] = ()
     audit: str = "not-configured"
-    classic: bool = False
+    skipped: bool = False
     foundry_resource_group: str = ""
     search_transport: bool = False
 
     def validate(self) -> None:
-        if self.classic:
+        if self.skipped:
             if self.grants or self.principal_id or self.search_transport:
-                raise AccessError("Classic bootstrap cannot contain grants.")
+                raise AccessError("Inapplicable Hosted bootstrap cannot contain grants.")
             return
         _guid(self.subscription)
         _guid(self.principal_id)
@@ -387,8 +387,8 @@ def discover_instance(
 
 def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> AccessPlan:
     """Discover and validate the entire closed plan before any write."""
-    if resolve_mode(environment) is DeploymentMode.CLASSIC:
-        return AccessPlan(classic=True)
+    if resolve_mode(environment).value != "hosted":
+        return AccessPlan(skipped=True)
     try:
         validate_auth_mode(environment)
     except ValueError as error:
@@ -611,7 +611,7 @@ def main(argv: list[str] | None = None, *, environment: Mapping[str, str] | None
         if args.apply:
             apply(plan, run=run)
             verified = tuple(True for _ in plan.grants)
-            if not plan.classic:
+            if not plan.skipped:
                 logging.warning(PROPAGATION)
         else:
             verified = inspect_assignments(plan, run=run)

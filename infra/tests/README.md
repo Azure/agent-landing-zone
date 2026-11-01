@@ -52,6 +52,18 @@ model/version and fallback capacity 10 before restoring the historical SKU.
 The scoped graph contract rejects SKU/model/version/capacity and custom-list
 mutations. Existing baseline fixtures and fingerprints remain unchanged.
 
+`native-platform-normalization.json` records the exact ADR-0034 delta from
+pre-native `951a1df` to `86a19f0`, compiled with the same Bicep 0.42.1. It
+validates the complete native scheduler/hub and hub-scoped client/worker grants,
+default-off inputs, returned-endpoint handoff, worker ingress forwarding, and
+the complete PE/DNS expressions before the existing adapters run. The single
+DTS endpoint and zone are prepended without rewriting any legacy branch.
+Mutation checks cover isolation, public access, PE placement/group, DNS reuse
+and policy ownership, grant scope/consumers, resource injection, and every
+deploying native delta. No endpoint array is ignored and no historical
+fingerprint is regenerated. This is offline compiled-contract evidence, not
+live DTS, private DNS, RBAC or provider-parity validation.
+
 `historical-foundation-manifest.json` contains exactly the four fields from
 the retired incorporated manifest at `v2.7.3`. It is only a regression fixture,
 not deployment or release configuration. The normalizer first checks the

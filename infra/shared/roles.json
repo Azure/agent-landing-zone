@@ -1,4 +1,8 @@
 {
+  "DurableTaskDataContributor": {
+    "guid": "0ad04412-c4d5-4796-b79c-f76d14c8d402",
+    "key": "DurableTaskDataContributor"
+  },
   "AcrDelete": {
     "guid": "c2f4ef07-c644-48eb-af81-4b1b4947fb11",
     "key": "AcrDelete"

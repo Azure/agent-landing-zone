@@ -103,7 +103,7 @@ specs/**
 contracts/naming-map.md
 contracts/*.json
 contracts/README.md
-config/deployment/rollback.json
+tests/fixtures/historical-runtime-rollback.json
 config/governance/tests/test_setup.py
 config/panel/tests/test_operator_contract.py
 config/panel/tests/test_settings.py
@@ -122,4 +122,17 @@ listed in the issue templates.
 
 ```naming-allow-temporary
 infra/**
+```
+
+### Exact-line inherited package compatibility
+
+The native source gate and cross-component test must address the UI's actual
+inherited Python package. This is not a new product identifier or permission to
+introduce legacy names elsewhere. The scanner accepts only the complete source
+line below in its exact repository-relative file (ignoring indentation); adding
+another token or moving the line to another file still fails.
+
+```naming-allow-exact-lines
+config/deployment/native_deploy.py | entrypoint = path / "src/gpt_rag_ui/config/native.py"
+tests/test_native_component_binding.py | ui = importlib.import_module("gpt_rag_ui.clients.native_durable")
 ```

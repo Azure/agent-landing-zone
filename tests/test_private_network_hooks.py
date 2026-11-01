@@ -19,7 +19,7 @@ BASH = shutil.which("bash")
 JQ = shutil.which("jq")
 VALUES = """NETWORK_ISOLATION="true"
 ACR_TASK_AGENT_POOL="test-pool"
-DEPLOYMENT_TOPOLOGY="classic"
+ORCHESTRATION_HOST="container_apps"
 APP_CONFIG_ENDPOINT="https://config.azconfig.io"
 AZURE_RESOURCE_GROUP="test-group"
 AZURE_SUBSCRIPTION_ID="test-subscription"
@@ -33,7 +33,15 @@ MANIFEST = """{"components": [
   {"name": "agent-app-ingestion", "repo": "https://example.invalid/ingestion.git", "tag": "v1.0.0", "commit": "3333333333333333333333333333333333333333"}
 ]}
 """
-TOPOLOGY = '{"deploy_hosted_agent_orchestration":false,"deploy_administrative_panel":false,"topology":"classic","components":["agent-app-ui","agent-app-orchestrator","agent-app-ingestion"]}'
+TOPOLOGY = json.dumps({
+    "ORCHESTRATION_HOST": "container_apps", "APPLICATION_MODE": "conversational",
+    "bundled_application": True, "ui_included": True,
+    "components": ["agent-app-ui", "agent-app-orchestrator"],
+})
+VALUES += "HOSTED_AGENT_DEPLOYMENT=" + json.dumps(json.dumps({"durableTask": {
+    "resourceId": "/subscriptions/example/resourceGroups/example/providers/Microsoft.DurableTask/schedulers/example",
+    "endpoint": "https://returned.eastus.durabletask.io", "taskHubName": "agent-lz",
+}})) + "\n"
 
 # Only the DNS/TLS boundary is replaced for the integrated flag/endpoint cases.
 PROBE_DRIVER = r"""
@@ -79,6 +87,11 @@ function python {
     if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.outputs') {
         $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
+        return
+    }
+    if ($call -match 'config.deployment.native_deploy') {
+        Add-Content -LiteralPath $env:FAKE_TRACE -Value 'azure-boundary'
+        $global:LASTEXITCODE = 93
         return
     }
     if ($call -match 'config.deployment.private_network') {
@@ -142,6 +155,7 @@ case "$*" in
     exit "$FAKE_PROBE_EXIT" ;;
   *config.appdefinition*) exit 0 ;;
   *config.deployment.topology*) cat "$FAKE_ROOT/topology.json"; exit 0 ;;
+  *config.deployment.native_deploy*) echo azure-boundary >> "$FAKE_TRACE"; exit 93 ;;
   *config.deployment.appconfig*) echo azure-boundary >> "$FAKE_TRACE"; exit 93 ;;
   *) echo "Unexpected Python operation" >&2; exit 94 ;;
 esac
@@ -166,9 +180,10 @@ exit 0
 field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -n1; }
 case "$*" in
   *to_entries*) exec "$REAL_JQ" "$@" ;;
-  *deploy_hosted_agent_orchestration*|*deploy_administrative_panel*) echo false ;;
-  *'.topology'*) echo classic ;;
-  *'.components | '*) echo 'agent-app-ui agent-app-orchestrator agent-app-ingestion' ;;
+  *'.ORCHESTRATION_HOST'*) echo container_apps ;;
+  *'.APPLICATION_MODE'*) echo conversational ;;
+  *'.bundled_application'*) echo true ;;
+  *'.components | '*) echo 'agent-app-ui agent-app-orchestrator' ;;
   *'.release // empty'*) ;;
   *'--arg n'*) echo "agent-app-$4" ;;
   *'.components[].name'*) printf 'ui\norchestrator\ningestion\n' ;;
@@ -207,11 +222,11 @@ class HookExecutionTests(unittest.TestCase):
             (root / "values.txt").write_text(values, encoding="utf-8")
             parsed_values = {}
             for line in values.splitlines():
-                match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"', line)
+                match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*)=("(?:[^"\\]|\\.)*")', line)
                 if not match:
                     structured_values = values
                     break
-                parsed_values[match[1]] = match[2]
+                parsed_values[match[1]] = json.loads(match[2])
             else:
                 structured_values = json.dumps(parsed_values) if parsed_values else values
             (root / "values.json").write_text(structured_values, encoding="utf-8")

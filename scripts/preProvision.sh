@@ -76,6 +76,12 @@ eval "$AZD_ENVIRONMENT_EXPORTS"
 import_azd_environment
 # END azd environment import
 
+# Reject obsolete inputs before any Azure change using the same shared resolver.
+(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.topology --describe) >/dev/null || {
+    echo "Native application selection failed; provisioning has not started." >&2
+    exit 1
+}
+
 # BEGIN infrastructure provider validation
 PROVIDER_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.provider --repo-root "$PROJECT_ROOT")"
 PROVIDER_EXIT=$?
@@ -198,21 +204,14 @@ if [ "$INFRA_PROVIDER" = "bicep" ] && [ ! -f "$MAIN_BICEP" ]; then
 fi
 
 ###############################################################################
-# ADR-0001 rev. 5: resolve and materialize the Agent Landing Zone deployment topology
+# Materialize the canonical native application selection.
 ###############################################################################
-# Resolve the topology (fresh default, sticky existing/persisted-classic,
-# explicit override, or a fail-closed error with migration guidance on
-# conflicting persisted signals) before composing main.parameters.json.
-# Materializing DEPLOYMENT_TOPOLOGY (and the paired legacy flags) into both
-# the process environment and the azd environment here is what lets
-# preDeploy/postProvision read back the exact same decision later via
-# 'config.deployment.topology --describe', with no further Azure CLI lookups
-# and no duplicated detection logic.
-echo "${CYAN}Resolving Agent Landing Zone deployment topology...${NC}"
+# No persisted-state classification or implicit feature defaults.
+echo "${CYAN}Resolving native application host and mode...${NC}"
 TOPOLOGY_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.topology)"
 TOPOLOGY_EXIT=$?
 if [ $TOPOLOGY_EXIT -ne 0 ]; then
-    echo "${YELLOW}Error: Agent Landing Zone deployment topology resolution failed.${NC}"
+    echo "${YELLOW}Error: Native application selection failed.${NC}"
     exit $TOPOLOGY_EXIT
 fi
 FIREWALL_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.firewall --input "$PROJECT_ROOT/main.parameters.json")"

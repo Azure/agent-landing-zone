@@ -19,6 +19,20 @@ try {
     $json = Get-Content $compiled -Raw
     $actual = $json | ConvertFrom-Json -AsHashtable -Depth 100
     $actualBefore = ConvertTo-Json -InputObject $actual -Depth 100 -Compress
+    $native = Get-NativePlatformProjection
+    $peRule = $native.changes.resources.changes.privateEndpoints.changes.properties.changes.parameters.changes.endpoints.changes.value
+    $dnsRule = $native.changes.variables.changes._dnsZonesList
+    # The native delta prepends one gated DTS entry. Every legacy endpoint
+    # and DNS branch must remain byte-identical, not merely retain its count.
+    if (-not $peRule.before.StartsWith('[concat(') -or
+        -not $peRule.after.EndsWith($peRule.before.Substring('[concat('.Length))) {
+        throw 'SCOPED: native PE projection rewrites a legacy endpoint.'
+    }
+    $dnsPrefix = "[if(variables('_deployPrivateDnsZones'), concat("
+    if (-not $dnsRule.before.StartsWith($dnsPrefix) -or
+        -not $dnsRule.after.EndsWith($dnsRule.before.Substring($dnsPrefix.Length))) {
+        throw 'SCOPED: native DNS projection rewrites a legacy zone.'
+    }
     # Pin the complete native empty-list branch and nonempty-list passthrough,
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
@@ -48,6 +62,23 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'native scheduler enabled by default'; Change = { param($t) $t.parameters.deployDurableTaskScheduler.defaultValue = $true } },
+        @{ Name = 'native scheduler moved to Foundry'; Change = { param($t) $t.resources.durableTask.resourceGroup = "[variables('_foundryResourceGroupName')]" } },
+        @{ Name = 'native scheduler isolation gate lost'; Change = { param($t) $t.resources.durableTask.properties.parameters.networkIsolation.value = $false } },
+        @{ Name = 'native scheduler public access widened'; Change = { param($t) $t.resources.durableTask.properties.template.resources[0].properties.publicNetworkAccess = 'Enabled' } },
+        @{ Name = 'native scheduler public IP allowlist injected'; Change = { param($t) $t.resources.durableTask.properties.template.resources[0].properties.ipAllowlist = @('*') } },
+        @{ Name = 'native module extra resource'; Change = { param($t) $t.resources.durableTask.properties.template.resources += @{ type = 'Microsoft.Storage/storageAccounts'; name = 'unexpected' } } },
+        @{ Name = 'native grants broadened to scheduler'; Change = { param($t) $t.resources.durableTaskRoles.properties.parameters.roleAssignments.value[0].resourceId = "[reference('durableTask').outputs.backend.value.resourceId]" } },
+        @{ Name = 'native grants broadened to ingestion'; Change = { param($t) $t.resources.durableTaskRoles.condition = $t.resources.durableTaskRoles.condition.Replace("createArray('frontend', 'orchestrator')", "createArray('frontend', 'orchestrator', 'dataingest')") } },
+        @{ Name = 'native role GUID drift'; Change = { param($t) $t.variables['_1._3'].DurableTaskDataContributor.guid = '00000000-0000-0000-0000-000000000000' } },
+        @{ Name = 'native endpoint guessed'; Change = { param($t) $t.resources.durableTask.properties.template.outputs.backend.value.endpoint = 'https://guessed.durabletask.io' } },
+        @{ Name = 'native handoff selector lost'; Change = { param($t) $t.outputs.HOSTED_AGENT_DEPLOYMENT.value.durableTask = "[reference('durableTask').outputs.backend.value]" } },
+        @{ Name = 'native PE isolation gate lost'; Change = { param($t) $t.resources.privateEndpoints.properties.parameters.endpoints.value = $peRule.after.Replace("and(variables('_networkIsolation'), parameters('deployDurableTaskScheduler'))", "parameters('deployDurableTaskScheduler')") } },
+        @{ Name = 'native PE group drift'; Change = { param($t) $t.resources.privateEndpoints.properties.parameters.endpoints.value = $peRule.after.Replace("createArray('scheduler')", "createArray('account')") } },
+        @{ Name = 'native DNS policy ownership lost'; Change = { param($t) $t.resources.privateEndpoints.properties.parameters.endpoints.value = $peRule.after.Replace("if(parameters('policyManagedPrivateDns'), null(),", "if(false(), null(),") } },
+        @{ Name = 'native DNS reuse gate lost'; Change = { param($t) $t.variables._dnsZonesList = $dnsRule.after.Replace("empty(parameters('existingPrivateDnsZoneDurableTaskResourceId'))", "true()") } },
+        @{ Name = 'native DNS zone drift'; Change = { param($t) $t.variables._dnsZonesList = $dnsRule.after.Replace('privatelink.durabletask.io', 'privatelink.example.invalid') } },
+        @{ Name = 'native ingress forwarding lost'; Change = { param($t) $t.resources.containerApps.properties.parameters.disableIngress.value = $false } },
         @{ Name = 'embedding fallback SKU restored'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'GlobalStandard', 'capacity', 10", "'Standard', 'capacity', 10") } },
         @{ Name = 'embedding fallback custom SKU drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'GlobalStandard', 'capacity', 10", "'DataZoneStandard', 'capacity', 10") } },
         @{ Name = 'embedding fallback model drift'; Change = { param($t) $t.resources.aiFoundry.properties.parameters.aiModelDeployments = $selection.Replace("'text-embedding-3-large'", "'text-embedding-3-small'") } },
@@ -139,7 +170,9 @@ try {
             }
         }
     }
-    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) + @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection))
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
+        @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection)) +
+        @(Get-SubnetDeltaPaths $native)
     if ($subnetPaths.Count -eq 0) { throw 'Subnet normalization has no exact deploying delta assertions.' }
     foreach ($path in $subnetPaths) {
         $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100
@@ -161,7 +194,7 @@ try {
         }
         if (-not $caught) { throw "Subnet normalizer swallowed mutation at /$($path -join '/')." }
     }
-    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) graph and $($subnetPaths.Count) subnet/Basic-delta mutations rejected; original fingerprints unchanged."
+    Write-Host "Scoped graph normalization passed: exact projections, immutable actual graph, $($mutations.Count) graph and $($subnetPaths.Count) subnet/Basic/native-delta mutations rejected; original fingerprints unchanged."
 }
 finally {
     if (Test-Path $compiled) { Remove-Item -LiteralPath $compiled -Force }

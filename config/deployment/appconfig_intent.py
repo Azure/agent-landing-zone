@@ -3,7 +3,7 @@
 The CLI caller supplies a fresh, validated selected azd snapshot. The current
 root parameter document is required even on a clean runner; ignored generated
 tfvars and process guesses are never reconstruction sources. Runtime authority
-still belongs to the existing appconfig/continuity/platform publishers.
+still belongs to the existing appconfig/governance/platform publishers.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from pathlib import Path
 import re
 from typing import Mapping, TypedDict
 
-from config.continuity.settings import public_settings as continuity_settings
 from config.deployment.input_types import INPUT_TYPES
 from config.deployment.resolution import resolve_parameters
 from config.deployment.resource_groups import resolve_resource_groups
@@ -147,7 +146,7 @@ def _validate_metadata(setting: Setting, *, controlled: bool = False) -> None:
     if content_type.startswith("application/vnd.microsoft.appconfig.keyvaultref+json"):
         raise ValueError(
             f"{setting['name']}: runtime Key Vault-reference overrides have no generic "
-            "publication contract; configure the existing governance/continuity owner instead."
+            "publication contract; configure the existing governance owner instead."
         )
     if controlled and content_type != ("application/json" if setting["name"] == "CONTAINER_APPS" else "text/plain"):
         raise ValueError(f"{setting['name']}: authority-controlled contentType cannot be overridden.")
@@ -167,11 +166,16 @@ def prepare_publication(intent: RuntimeIntent, authority: Mapping[str, str]) -> 
     """
     policy = ownership()
     for setting in intent.explicit:
+        if setting["name"] in policy["retired"]:
+            raise ValueError(
+                f"{setting['name']}: obsolete runtime setting; select "
+                "ORCHESTRATION_HOST and APPLICATION_MODE with explicit native feature flags."
+            )
         if not is_runtime(setting, intent, policy):
             continue
         name = setting["name"]
         if name in policy["ownerReferences"]:
-            raise ValueError(f"{name}: use its existing governance/continuity owner; explicit runtime-reference overrides are unsupported.")
+            raise ValueError(f"{name}: use its existing governance owner; explicit runtime-reference overrides are unsupported.")
         controlled = name not in policy["ordinary"]
         _validate_metadata(setting, controlled=controlled)
         if controlled:
@@ -190,6 +194,8 @@ def prepare_publication(intent: RuntimeIntent, authority: Mapping[str, str]) -> 
         if is_runtime(Setting(name=name, value=value, label=policy["label"], contentType="text/plain"), intent, policy)
     }
     for setting in intent.effective:
+        if setting["name"] in policy["retired"]:
+            raise ValueError(f"{setting['name']}: obsolete settings cannot be published by the native lifecycle.")
         if not is_runtime(setting, intent, policy):
             continue
         name, value = setting["name"], setting["value"]
@@ -203,16 +209,8 @@ def prepare_publication(intent: RuntimeIntent, authority: Mapping[str, str]) -> 
             result[name] = setting
         elif name in policy["evidence"]:
             result[name] = Setting(name=name, value=policy["evidence"][name], label=policy["label"], contentType="text/plain")
-        # Generated derived values are desires, not proof of completed cutover.
+        # Generated derived values are desires, not proof of completed deployment.
         # Their existing owner's authority above controls what is actually written.
-    if any(policy["ordinary"].get(name) == "continuity" for name in result):
-        from config.continuity.setup import validate_continuity_settings
-        continuity = continuity_settings({})
-        continuity.update({name: s["value"] for name, s in result.items() if name in continuity})
-        validate_continuity_settings(
-            continuity, deployment_topology=authority.get("DEPLOYMENT_TOPOLOGY", ""),
-            chat_backend=authority.get("CHAT_BACKEND", ""),
-        )
-    return [setting for name, setting in result.items() if name != "CHAT_BACKEND"] + (
-        [result["CHAT_BACKEND"]] if "CHAT_BACKEND" in result else []
-    )
+    if set(authority).intersection(policy["retired"]):
+        raise ValueError("Obsolete runtime authority cannot be published by the native lifecycle.")
+    return list(result.values())

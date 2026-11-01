@@ -146,6 +146,10 @@ variable "additionalAppConfigurationSettings" {
     condition     = length(distinct([for s in var.additionalAppConfigurationSettings : jsonencode([s.name, s.label == null ? var.appConfigLabel : s.label])])) == length(var.additionalAppConfigurationSettings)
     error_message = "Additional App Configuration name/label pairs must be unique."
   }
+  validation {
+    condition     = alltrue([for s in var.additionalAppConfigurationSettings : !contains(jsondecode(file("${path.module}/../../config/deployment/appconfig_ownership.json")).retired, s.name)])
+    error_message = "Obsolete application settings are unsupported. Configure ORCHESTRATION_HOST=hosted|container_apps and APPLICATION_MODE=conversational|workflow|both with independent native feature flags."
+  }
 }
 variable "networkIsolation" {
   type     = bool
@@ -696,6 +700,43 @@ variable "deployAcrTaskAgentPool" {
   default  = true
   nullable = false
 }
+variable "deployDurableTaskScheduler" {
+  type    = bool
+  default = false
+}
+variable "durableTaskSchedulerName" {
+  type    = string
+  default = null
+}
+variable "durableTaskHubName" {
+  type    = string
+  default = "agent-lz"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9-]{3,64}$", var.durableTaskHubName))
+    error_message = "Task hub names require 3-64 letters, digits or hyphens."
+  }
+}
+variable "durableTaskSchedulerSku" {
+  type    = string
+  default = "Consumption"
+  validation {
+    condition     = contains(["Consumption", "Dedicated"], var.durableTaskSchedulerSku)
+    error_message = "Select Consumption or Dedicated."
+  }
+}
+variable "existingPrivateDnsZoneDurableTaskResourceId" {
+  type    = string
+  default = ""
+}
+variable "durableTaskSchedulerCapacity" {
+  type    = number
+  default = 1
+  validation {
+    condition     = var.durableTaskSchedulerCapacity >= 1 && floor(var.durableTaskSchedulerCapacity) == var.durableTaskSchedulerCapacity
+    error_message = "Scheduler capacity must be a positive integer."
+  }
+}
+
 variable "prepareHostedAgent" {
   type     = bool
   default  = false
@@ -1221,18 +1262,19 @@ variable "modelDeploymentList" {
 }
 variable "containerAppsList" {
   type = list(object({
-    name           = optional(string)
-    external       = bool
-    service_name   = string
-    profile_name   = string
-    min_replicas   = number
-    max_replicas   = number
-    canonical_name = string
-    roles          = list(string)
-    image          = optional(string)
-    cpu            = optional(number)
-    memory         = optional(string)
-    target_port    = optional(number, 8080)
+    name            = optional(string)
+    external        = bool
+    disable_ingress = optional(bool, false)
+    service_name    = string
+    profile_name    = string
+    min_replicas    = number
+    max_replicas    = number
+    canonical_name  = string
+    roles           = list(string)
+    image           = optional(string)
+    cpu             = optional(number)
+    memory          = optional(string)
+    target_port     = optional(number, 8080)
     dapr = optional(object({
       enabled          = bool
       appId            = optional(string)

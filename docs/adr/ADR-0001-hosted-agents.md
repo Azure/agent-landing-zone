@@ -7,6 +7,12 @@ Date: 2026-08-05
 Deciders: Paulo (GPT-RAG maintainer), with architecture analysis (Martin) and
 implementation analysis (Guido).
 
+> Native-runtime revision: [ADR-0034](ADR-0034-native-agent-and-workflow-hosting.md)
+> supersedes the stateless Hosted adapter and classic-only execution assumptions
+> for the new native MAF runtime. The historical decisions and evidence below
+> remain applicable to deployments using their original component combination.
+> Identity and document-authorization requirements are retained.
+
 ## TL;DR (one sentence)
 
 We decided that fresh GPT-RAG deployments will use Microsoft Foundry hosted

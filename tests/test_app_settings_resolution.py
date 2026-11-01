@@ -39,16 +39,16 @@ def test_explicit_name_label_and_content_type_override_generated_defaults(compos
     assert other_label in settings
     assert {**custom, "contentType": "text/plain"} in settings
     assert len({(item["name"], item["label"]) for item in settings}) == len(settings)
-    assert settings[-1]["name"] == "CHAT_BACKEND"  # cutover selector stays last
+    assert not any(item["name"] == "CHAT_BACKEND" for item in settings)
 
 
 def test_additional_settings_resolve_once_and_retain_literal_native_json(compose):
     text = 'literal ${DO_NOT_EXPAND}; "quote"; \\slash\ncafé $HOME'
     settings = compose(
-        [{"name": "HOSTED_HISTORY_MAX_ITEMS", "value": "${CUSTOM_LIMIT=100}"}],
+        [{"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "${CUSTOM_LIMIT=100}"}],
         {"CUSTOM_LIMIT": text, "DO_NOT_EXPAND": "must-not-appear"},
     )
-    entry = next(item for item in settings if item["name"] == "HOSTED_HISTORY_MAX_ITEMS")
+    entry = next(item for item in settings if item["name"] == "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS")
     assert entry["value"] == text
     assert "$" not in render_template({"settings": settings})
 
@@ -66,7 +66,7 @@ def test_reserved_infrastructure_settings_reject_instead_of_disappearing(compose
 @pytest.mark.parametrize("name,value", [
     ("CHAT_BACKEND", "hosted_agent"),
     ("DEPLOYMENT_TOPOLOGY", "hosted-no-panel"),
-    ("DEPLOY_INGESTION_CONTAINER_APP", "false"),
+    ("DEPLOY_INGESTION_CONTAINER_APP", "true"),
     ("DEPLOY_HOSTED_AGENT", "true"),
     ("HOSTED_AGENT_BASE_URL", "https://unverified.invalid"),
     ("HOSTED_AGENT_IMAGE_VERSION", "unverified"),
@@ -82,16 +82,16 @@ def test_reserved_infrastructure_settings_reject_instead_of_disappearing(compose
     ("HOSTED_CONVERSATION_CAPABILITY_KEY", "unsafe"),
 ])
 def test_protected_fields_cannot_bypass_authoritative_resolution(compose, name, value):
-    with pytest.raises(ValueError, match="protected"):
+    with pytest.raises(ValueError, match="protected|obsolete"):
         compose([{"name": name, "value": value}])
 
 
-def test_matching_protected_defaults_remain_compatible(compose):
+def test_matching_current_protected_defaults_remain_compatible(compose):
     settings = compose([
-        {"name": "HOSTED_CONTINUITY_ENABLED", "value": "false"},
-        {"name": "HOSTED_CONVERSATION_OWNER_BINDING_VALIDATED", "value": "false"},
+        {"name": "ENABLE_CHAT_HISTORY", "value": "false"},
+        {"name": "ENABLE_USER_FEEDBACK", "value": "false"},
     ])
-    assert next(item for item in settings if item["name"] == "HOSTED_CONTINUITY_ENABLED")["value"] == "false"
+    assert next(item for item in settings if item["name"] == "ENABLE_CHAT_HISTORY")["value"] == "false"
 
 
 def test_non_runtime_labels_are_distinct_even_for_controlled_names(compose):

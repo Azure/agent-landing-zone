@@ -22,6 +22,12 @@ gates are met — see "Adoption and migration".)<br>
 **Owners:** GPT-RAG maintainer (Paulo), architecture analysis, with gpt-rag-ui,
 gpt-rag-orchestrator, and gpt-rag-ingestion component owners
 
+> Native-runtime revision: [ADR-0034](ADR-0034-native-agent-and-workflow-hosting.md)
+> replaces mandatory stateless execution and classic conversation API coupling
+> for the new native MAF runtime. Owner authorization, least privilege and the
+> separation of product metadata from execution state remain required.
+> Historical contracts below describe their original component combination.
+
 ## Context
 
 ADR-0001 packaged GPT-RAG orchestration as a Foundry hosted agent, made the

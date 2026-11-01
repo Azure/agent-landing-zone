@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from config.appdefinition import expand_profiles, load_definition
+from config.appdefinition.profiles import SCOPE_COSMOS
+from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
 from config.appdefinition.__main__ import main as cli_main
 from config.appdefinition.roles import (
     RoleAssignmentError,
@@ -133,7 +135,7 @@ class RoleAssignmentTests(unittest.TestCase):
         vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "exactly one"):
-                assign_hosted_roles({"name": "agent"}, "22222222-2222-4222-8222-222222222222",
+                assign_hosted_roles({"name": "agent", "profiles": ["secret-reader"]}, "22222222-2222-4222-8222-222222222222",
                                     CONTEXT, run_az=az)
         self.assertEqual([], az.creates())
 
@@ -151,7 +153,8 @@ class RoleAssignmentTests(unittest.TestCase):
             }])
 
         actual = discover_component_identities(
-            bundled(), {"AZURE_RESOURCE_GROUP": RG}, hosted_orchestration=True, run_az=az
+            bundled(), {"AZURE_RESOURCE_GROUP": RG, "DEPLOY_INGESTION_CONTAINER_APP": "true"},
+            hosted_orchestration=True, run_az=az
         )
         self.assertEqual({"ui": "c-frontend", "ingestion": "c-dataingest"}, actual)
         self.assertTrue(all(call[:2] == ["containerapp", "list"] for call in calls))
@@ -219,10 +222,13 @@ class RoleAssignmentTests(unittest.TestCase):
 
     def test_assigns_missing_roles_then_converges(self) -> None:
         az = FakeAz()
-        environment = CONTEXT
+        environment = {**CONTEXT, "DEPLOY_INGESTION_CONTAINER_APP": "true"}
         created = assign_roles(bundled(), environment, hosted_orchestration=False, run_az=az)
         planned = plan_assignments(bundled(), hosted_orchestration=False)
-        self.assertEqual(len(planned), len(created))
+        # Bundled profile provenance retains ingestion's old conversation-store
+        # declaration, but native grants must never expose UI metadata by
+        # assigning an account-wide Cosmos writer. Feature grants are narrow.
+        self.assertEqual(len([item for item in planned if item.assignment.scope != SCOPE_COSMOS]), len(created))
         guids = load_role_guids(ROOT)
         rbac = [c for c in az.creates() if c[:2] == ["role", "assignment"]]
         self.assertIn(
@@ -233,12 +239,36 @@ class RoleAssignmentTests(unittest.TestCase):
         )
         # Foundry account storage is never chosen for the storage scope.
         self.assertFalse(any(f"{SUB}/Microsoft.Storage/storageAccounts/staifx" in call for call in az.calls))
+        self.assertFalse(any("Microsoft.KeyVault" in str(call) for call in az.calls))
         cosmos = [c for c in az.creates() if c[0] == "cosmosdb"]
-        self.assertEqual({"p-orch", "p-ing"}, {c[c.index("--principal-id") + 1] for c in cosmos})
+        self.assertEqual({"ingestion"}, {item.component for item in planned if item.assignment.scope == SCOPE_COSMOS})
+        self.assertEqual([], cosmos, "Native UI metadata must not be exposed by account-wide profile grants")
 
         az.calls.clear()
         self.assertEqual([], assign_roles(bundled(), environment, hosted_orchestration=False, run_az=az))
         self.assertEqual([], az.creates())
+
+    def test_loaded_native_default_does_not_assign_legacy_cosmos_profiles(self) -> None:
+        for host in ("hosted", "container_apps"):
+            with self.subTest(host=host):
+                environment = {
+                    **CONTEXT, DEFINITION_ENV: str(ROOT / "app-definition.json"),
+                    "APPLICATION_MODE": "conversational", "ORCHESTRATION_HOST": host,
+                    "ENABLE_CHAT_HISTORY": "false", "ENABLE_USER_FEEDBACK": "false", "NL2SQL_ENABLED": "false",
+                }
+                definition = load_selected_definition(environment, repo_root=ROOT)
+                self.assertTrue(definition.bundled)
+                az = FakeAz()
+                created = assign_roles(
+                    definition, environment, hosted_orchestration=host == "hosted", run_az=az,
+                )
+                self.assertEqual(
+                    {"ui"} if host == "hosted" else {"ui", "orchestrator"},
+                    {item.component for item in created},
+                )
+                self.assertFalse(any(item.assignment.scope == "cosmosDbAccount" for item in created))
+                self.assertFalse(any(call[0] == "cosmosdb" or "Microsoft.DocumentDB" in str(call) for call in az.calls))
+                self.assertFalse(any("Microsoft.KeyVault" in str(call) for call in az.calls))
 
     def test_missing_container_app_fails_with_actionable_error(self) -> None:
         az = FakeAz()
@@ -252,12 +282,15 @@ class RoleAssignmentTests(unittest.TestCase):
         vaults = [{"name": "kv-a", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-a"}, {"name": "kv-b", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-b"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):
             with self.assertRaisesRegex(RoleAssignmentError, "AZURE_KEY_VAULT_NAME"):
-                assign_roles(bundled(), CONTEXT, hosted_orchestration=False, run_az=az)
+                assign_hosted_roles(
+                    {"name": "agent", "profiles": ["secret-reader"]},
+                    "22222222-2222-4222-8222-222222222222", CONTEXT, run_az=az,
+                )
             self.assertEqual([], az.creates(), "no partial assignment before the failure")
-            created = assign_roles(
-                bundled(),
+            created = assign_hosted_roles(
+                {"name": "agent", "profiles": ["secret-reader"]},
+                "22222222-2222-4222-8222-222222222222",
                 {**CONTEXT, "KEY_VAULT_URI": "https://kv-b.vault.azure.net/"},
-                hosted_orchestration=False,
                 run_az=az,
             )
         self.assertTrue(created)
@@ -265,7 +298,7 @@ class RoleAssignmentTests(unittest.TestCase):
         self.assertFalse(any(f"{SUB}/Microsoft.KeyVault/vaults/kv-a" in call for call in az.creates()))
 
     def test_cli_assign_roles_exit_codes(self) -> None:
-        environment = {**CONTEXT, "DEPLOYMENT_TOPOLOGY": "classic", "AGENTLZ_APP_DEFINITION": ""}
+        environment = {**CONTEXT, "ORCHESTRATION_HOST": "container_apps", "AGENTLZ_APP_DEFINITION": "", "DEPLOY_INGESTION_CONTAINER_APP": "true"}
         with patch.dict("os.environ", environment), patch("config.deployment.appconfig._run_az", FakeAz()):
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(0, cli_main(["--assign-roles"]))

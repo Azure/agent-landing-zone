@@ -20,7 +20,7 @@ def ownership() -> dict:
     policy = json.loads(OWNERSHIP_PATH.read_text(encoding="utf-8"))
     if not isinstance(policy, dict) or policy.get("schemaVersion") != 1 or policy.get("label") != "agent-lz":
         raise ValueError("Unsupported App Configuration ownership inventory.")
-    for key in ("controlled", "ownerReferences", "patterns", "applicationSuffixes"):
+    for key in ("controlled", "retired", "ownerReferences", "patterns", "applicationSuffixes"):
         if not isinstance(policy.get(key), list) or not all(isinstance(item, str) for item in policy[key]):
             raise ValueError("Invalid App Configuration ownership inventory.")
     for key in ("evidence", "ordinary"):
@@ -58,7 +58,7 @@ def merge_app_configuration_settings(
 ) -> list[dict[str, object]]:
     """Explicit name+label wins ordinary defaults, never security evidence.
 
-    Preserve generated order (especially the final cutover selector). Matching
+    Preserve generated order. Matching
     protected defaults are allowed for compatibility with the shipped template;
     differing values/content types fail, rather than being silently erased.
     """
@@ -89,6 +89,8 @@ def merge_app_configuration_settings(
             )
         if item["name"] in _RESERVED_KEYS or item["name"].endswith("_APIKEY"):
             raise ValueError("additionalAppConfigurationSettings contains a reserved infrastructure key.")
+        if item["name"] in policy["retired"]:
+            raise ValueError(f"{item['name']}: obsolete deployment setting; configure canonical host/mode and native feature flags.")
         key = (item["name"], item["label"] if item.get("label") is not None else default_label)
         if key in explicit:
             raise ValueError("Duplicate additionalAppConfigurationSettings name+label.")

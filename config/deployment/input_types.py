@@ -28,7 +28,7 @@ _GROUPS: dict[InputKind, str] = {
         storageAccountAllowSharedKeyAccess deployCosmosDb deployContainerApps
         deployContainerRegistry deployContainerEnv deploySubnets deployNsgs
         deployAzureFirewall enableFirewallDnsProxy deployAcrTaskAgentPool
-        prepareHostedAgent grantHostedAgentProjectManager deployHostedAgent
+        prepareHostedAgent grantHostedAgentProjectManager deployHostedAgent deployDurableTaskScheduler
         extendFirewallForJumpboxBootstrap extendFirewallForAcrTaskBuilds
         bastionEnableTunneling enableAcsMediaEgress sideBySideDeploy deploySoftware
         deployAfProject deployAAfAgentSvc aiFoundryDisableLocalAuth enableAgenticRetrieval
@@ -36,7 +36,7 @@ _GROUPS: dict[InputKind, str] = {
         useZoneRedundancy enableCosmosAnalyticalStorage
         deployJumpbox deployBastion deployNatGateway deployVM
     """,
-    "int": "acrTaskAgentPoolCount dbDatabaseThroughput",
+    "int": "acrTaskAgentPoolCount dbDatabaseThroughput durableTaskSchedulerCapacity",
     "array": """
         allowedIpRanges vnetAddressPrefixes additionalAcrTaskBuildFqdns
         bastionAllowedSourceIPs foundryIqIngestionPermissionOptions
@@ -86,6 +86,8 @@ _GROUPS: dict[InputKind, str] = {
         hubIntegrationHubVnetResourceId existingBastionResourceId existingNatGatewayResourceId
         existingJumpboxResourceId aiFoundryProjectDisplayName aiFoundryProjectDescription
         storageAccountNetworkAclsBypass
+        durableTaskSchedulerName durableTaskHubName durableTaskSchedulerSku
+        existingPrivateDnsZoneDurableTaskResourceId
     """,
 }
 

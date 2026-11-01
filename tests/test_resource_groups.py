@@ -971,8 +971,10 @@ class HookTests(ScratchTest):
             script = (ROOT / "scripts" / f"preProvision.{suffix}").read_text(encoding="utf-8")
             validate = script.index("config.appdefinition")
             bootstrap = script.index("config.deployment.resource_groups")
+            selection = script.index("config.deployment.topology")
+            self.assertLess(selection, validate)
             self.assertLess(validate, bootstrap)
-            self.assertLess(bootstrap, script.index("config.deployment.topology"))
+            self.assertLess(bootstrap, script.index("config.deployment.topology", bootstrap))
             self.assertLess(bootstrap, script.index("config.deployment.composition"))
             self.assertIn("--azure-dir", script)
             self.assertIn("--env-name", script)
@@ -1065,7 +1067,7 @@ class HookTests(ScratchTest):
                 before = json.loads(json.dumps(requested))
                 composed = compose_parameters(requested, {
                     "NETWORK_ISOLATION": "true",
-                    "DEPLOYMENT_TOPOLOGY": "classic",
+                    "ORCHESTRATION_HOST": "container_apps",
                 })
                 self.assertEqual(before, requested, "Composition must not mutate operator input.")
                 for name, value in {
@@ -1119,6 +1121,11 @@ class HookTests(ScratchTest):
                 "  $global:LASTEXITCODE = [int]$env:RG_CODE\n"
                 f"  '{selection}'\n"
                 " } elseif ($args[1] -like '*config.deployment.topology*') {\n"
+                "  if ($args -contains '--describe') {\n"
+                "   Add-Content -LiteralPath $env:TRACE -Value selection_validated\n"
+                "   $global:LASTEXITCODE = 0\n"
+                "   return\n"
+                "  }\n"
                 "  if ($env:AZURE_RESOURCE_GROUP -ne 'rg-ai' -or "
                 "$env:AZURE_APP_RESOURCE_GROUP -ne 'rg-app' -or "
                 "$env:AZURE_NETWORK_RESOURCE_GROUP -ne 'rg-net' -or "
@@ -1151,6 +1158,8 @@ class HookTests(ScratchTest):
                 f"printf '%s\\n' '{selection}'; " + 'exit "$RG_CODE";;\n'
                 '*"import json, sys"*) exec "$REAL_PYTHON" "$@";;\n'
                 'config.deployment.topology) '
+                'if [ "$3" = --describe ]; then '
+                'echo selection_validated >> "$TRACE"; exit 0; fi; '
                 '[ "$AZURE_RESOURCE_GROUP" = rg-ai ] && '
                 '[ "$AZURE_APP_RESOURCE_GROUP" = rg-app ] && '
                 '[ "$AZURE_NETWORK_RESOURCE_GROUP" = rg-net ] && '
@@ -1168,7 +1177,7 @@ class HookTests(ScratchTest):
         result = subprocess.run(command, cwd=self.scratch, env=environment,
                                 capture_output=True, text=True, timeout=30)
         group_module = "terraform_groups" if provider == "terraform" else "resource_groups"
-        expected = ["appdefinition"] + ([group_module] if not app_code else [])
+        expected = ["selection_validated", "appdefinition"] + ([group_module] if not app_code else [])
         if inspect_defaults:
             expected.append("defaults_exported")
         self.assertEqual(expected, trace.read_text(encoding="utf-8-sig").splitlines(), result.stdout + result.stderr)

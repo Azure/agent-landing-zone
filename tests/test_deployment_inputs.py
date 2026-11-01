@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment.composition import compose_parameters, panel_database_containers
+from config.deployment.composition import compose_parameters
 from config.deployment.app_settings import substitute_values
 from config.deployment.provider import resolve_provider
 from config.deployment.resolution import resolve_parameters
@@ -33,7 +33,8 @@ ENVIRONMENT = {
     "ENABLE_AGENTIC_RETRIEVAL": "false",
     "USE_EXISTING_VNET": "false",
     "SIDE_BY_SIDE": "true",
-    "DEPLOYMENT_TOPOLOGY": "classic",
+    "ORCHESTRATION_HOST": "container_apps",
+    "APPLICATION_MODE": "conversational",
     "TF_STATE_RESOURCE_GROUP": "rg-independent-state",
     "TF_STATE_STORAGE_ACCOUNT": "fixturestate001",
     "TF_STATE_CONTAINER": "tfstate",
@@ -88,10 +89,11 @@ def test_embedding_sku_survives_both_provider_input_adapters(selection):
         }
 
 
-@pytest.mark.parametrize("topology", ["classic", "hosted-panel", "hosted-no-panel"])
-def test_common_resolution_preserves_bicep_composition(topology):
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
+@pytest.mark.parametrize("mode", ["conversational", "workflow", "both"])
+def test_common_resolution_preserves_bicep_composition(host, mode):
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        **ENVIRONMENT, "ORCHESTRATION_HOST": host, "APPLICATION_MODE": mode,
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
     }
     original = values()
@@ -107,13 +109,14 @@ def test_common_resolution_preserves_bicep_composition(topology):
     assert original == before
 
 
-@pytest.mark.parametrize("topology,enabled", [
-    ("classic", True), ("hosted-panel", True), ("hosted-no-panel", False),
+@pytest.mark.parametrize("mode,enabled", [
+    ("conversational", False), ("workflow", True), ("both", True),
 ])
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
 @pytest.mark.parametrize("ingestion", ["true", "false"])
-def test_cosmos_is_selected_by_consumers_in_both_providers(topology, enabled, ingestion):
+def test_cosmos_is_selected_by_consumers_in_both_providers(host, mode, enabled, ingestion):
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        **ENVIRONMENT, "ORCHESTRATION_HOST": host, "APPLICATION_MODE": mode,
         "DEPLOY_INGESTION_CONTAINER_APP": ingestion,
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
     }
@@ -131,7 +134,7 @@ def test_cosmos_is_selected_by_consumers_in_both_providers(topology, enabled, in
 @pytest.mark.parametrize("selection,enabled", [("true", True), ("false", False)])
 def test_hosted_cosmos_explicit_opt_in_and_opt_out(selection, enabled):
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+        **ENVIRONMENT, "ORCHESTRATION_HOST": "hosted",
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
         "DEPLOY_COSMOS_DB": selection,
     }
@@ -139,15 +142,14 @@ def test_hosted_cosmos_explicit_opt_in_and_opt_out(selection, enabled):
     assert compose_inputs(values(), environment)["deployCosmosDb"] is enabled
 
 
-@pytest.mark.parametrize("topology", ["classic", "hosted-panel", "hosted-no-panel"])
-def test_required_cosmos_cannot_be_explicitly_disabled(topology):
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
+@pytest.mark.parametrize("mode", ["workflow", "both"])
+def test_required_cosmos_cannot_be_explicitly_disabled(host, mode):
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        **ENVIRONMENT, "ORCHESTRATION_HOST": host, "APPLICATION_MODE": mode,
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
         "DEPLOY_COSMOS_DB": "false",
     }
-    if topology == "hosted-no-panel":
-        environment["PRESERVE_CLASSIC_RUNTIME"] = "true"
     with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
         compose_parameters(source(), environment)
     with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
@@ -164,8 +166,8 @@ def test_cosmos_selection_rejects_non_boolean_values(selection):
 
 
 @pytest.mark.parametrize("kind", ["containerapp", "azure.ai.agent"])
-@pytest.mark.parametrize("topology", ["hosted-no-panel", "hosted-panel"])
-def test_custom_conversation_store_retains_its_containers(tmp_path, kind, topology):
+@pytest.mark.parametrize("host", ["hosted", "container_apps"])
+def test_custom_conversation_store_retains_its_containers(tmp_path, kind, host):
     definition = tmp_path / "app-definition.json"
     definition.write_text(json.dumps({
         "id": "custom-cosmos",
@@ -175,7 +177,7 @@ def test_custom_conversation_store_retains_its_containers(tmp_path, kind, topolo
         }],
     }), encoding="utf-8")
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": topology,
+        **ENVIRONMENT, "ORCHESTRATION_HOST": host,
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
         "AGENTLZ_APP_DEFINITION": str(definition),
     }
@@ -186,10 +188,6 @@ def test_custom_conversation_store_retains_its_containers(tmp_path, kind, topolo
     assert terraform["databaseContainersList"] == bicep["databaseContainersList"]["value"]
     expected_names = {container["name"] for container in values()["databaseContainersList"]}
     assert expected_names <= {container["name"] for container in terraform["databaseContainersList"]}
-    if topology == "hosted-panel":
-        assert {container["name"] for container in panel_database_containers()} <= {
-            container["name"] for container in terraform["databaseContainersList"]
-        }
     environment["DEPLOY_COSMOS_DB"] = "false"
     with pytest.raises(ValueError, match="DEPLOY_COSMOS_DB=false conflicts"):
         compose_parameters(source(), environment)
@@ -199,7 +197,7 @@ def test_custom_conversation_store_retains_its_containers(tmp_path, kind, topolo
 
 def test_custom_component_without_cosmos_capability_does_not_enable_storage():
     environment = {
-        **ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": "hosted-no-panel",
+        **ENVIRONMENT, "ORCHESTRATION_HOST": "hosted",
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://fixture/.default",
         "AGENTLZ_APP_DEFINITION": "samples/custom-app/containerapp",
     }
@@ -235,7 +233,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 217
+    assert len(declarations) == 223
     original = values()
     for name, kind in declarations:
         if name in original:
@@ -344,7 +342,7 @@ def test_invalid_inputs_fail_explicitly(name, value, match):
 
 def test_hosted_guards_and_custom_apps_and_images_remain_common():
     with pytest.raises(ValueError, match="HOSTED_AGENT_RESOURCE_SCOPE"):
-        compose_inputs(values(), {**ENVIRONMENT, "DEPLOYMENT_TOPOLOGY": "hosted-panel"})
+        compose_inputs(values(), {**ENVIRONMENT, "ORCHESTRATION_HOST": "hosted"})
     result = compose_inputs(values(), {
         **ENVIRONMENT, "AGENTLZ_APP_DEFINITION": "samples/custom-app/containerapp",
     }, existing_images={"web": "example.azurecr.io/web@sha256:" + "a" * 64})
@@ -439,6 +437,7 @@ def test_cli_uses_explicit_azd_store_snapshot_and_never_logs_values(tmp_path):
     # Give the subprocess an isolated, valid project rather than the worktree.
     (tmp_path / "manifest.json").write_text("{}")
     (tmp_path / "azure.yaml").write_text("name: fixture\n")
+    (tmp_path / "app-definition.json").write_bytes((ROOT / "app-definition.json").read_bytes())
     environment_dir = tmp_path / ".azure/fixture"
     environment_dir.mkdir(parents=True)
     (environment_dir / ".env").touch()

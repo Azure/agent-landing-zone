@@ -75,6 +75,10 @@ $manifestSource = Join-Path $projectRoot "manifest.json"
 Import-AzdEnvironment
 # END azd environment import
 
+# Resolve current-product intent before any Azure change; obsolete inputs fail closed.
+Invoke-PythonModule -ModuleName 'config.deployment.topology' -Arguments @('--describe') | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "Native application selection failed; provisioning has not started."; exit $LASTEXITCODE }
+
 # BEGIN infrastructure provider validation
 $providerOutput = Invoke-PythonModule -ModuleName 'config.deployment.provider' -Arguments @('--repo-root', $projectRoot)
 if ($LASTEXITCODE -ne 0) {
@@ -184,15 +188,8 @@ if ($infrastructureProvider -eq 'bicep' -and -not (Test-Path -LiteralPath $mainB
 
 $parameterSource = Join-Path $projectRoot "main.parameters.json"
 
-# ADR-0001 rev. 5: resolve and materialize the Agent Landing Zone deployment topology
-# (fresh default, sticky existing/persisted-classic, explicit override, or a
-# fail-closed error with migration guidance on conflicting persisted signals)
-# before composing main.parameters.json. Materializing DEPLOYMENT_TOPOLOGY
-# (and the paired legacy flags) into both the process environment and the azd
-# environment here is what lets preDeploy/postProvision read back the exact
-# same decision later via 'config.deployment.topology --describe', with no
-# further Azure CLI lookups and no duplicated detection logic.
-Write-Host "Resolving Agent Landing Zone deployment topology..." -ForegroundColor Cyan
+# Persist canonical host/mode and independent features using the shared resolver.
+Write-Host "Resolving native application host and mode..." -ForegroundColor Cyan
 Push-Location $projectRoot
 try {
     $topologyOutput = Invoke-PythonModule -ModuleName 'config.deployment.topology'
@@ -201,7 +198,7 @@ try {
     Pop-Location
 }
 if ($topologyExitCode -ne 0) {
-    Write-Host "Error: Agent Landing Zone deployment topology resolution failed." -ForegroundColor Red
+    Write-Host "Error: Native application selection failed." -ForegroundColor Red
     exit $topologyExitCode
 }
 $azureEnvName = $env:AZURE_ENV_NAME
