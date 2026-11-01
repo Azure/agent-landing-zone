@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+## [v6.0.0] - 2026-11-01
+
+### Changed
+
+- Run native Microsoft Agent Framework conversations and human-reviewed workflows on Foundry Hosted Agents or the standalone Durable Extension on Azure Container Apps.
+- Select only `ORCHESTRATION_HOST=hosted|container_apps` and `APPLICATION_MODE=conversational|workflow|both`, defaulting to Hosted/conversational. The bundled application includes the authenticated UI on either host. Custom-only definitions retain their declared components.
+- Keep native execution state separate from product ownership and optional features. History, feedback and private attachments remain independently disabled by default. Workflow/both requires ownership/action metadata even with history disabled.
+- Preserve optional NL2SQL and explicit tool configuration, use managed-identity DTS authentication, and align Bicep, Terraform, App Configuration and both lifecycle-hook implementations.
+- Retire classic, panel, preservation and cutover deployment controls. This major release uses the new native configuration for fresh deployments.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-ui | v3.5.0 |
+| agent-app-orchestrator | v6.0.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Actual integration CI passed 1,308 Python tests and 816 subtests, with 14 skipped.
+- Bicep build, lint and all 17 offline foundation contracts passed. Terraform formatting, readonly initialization, validation and the complete mocked suite passed on Ubuntu and Windows. Module pins, provider lock and incorporated-foundation provenance are unchanged.
+- The exact released runtime/UI sources and platform producer inputs passed 114 linked functional checks. The final eight producer checks passed without rerunning the earlier 106 component checks. Published noneditable SDK provenance and unchanged source hashes were verified.
+- Validation is local and static. No Azure deployment, live model calls, private-network validation or deployed Bicep/Terraform parity is claimed. Azure what-if was skipped because OIDC is not configured.
+
+[Integration checks](https://github.com/Azure/agent-landing-zone/actions/runs/41323471408)
+
 ## [v5.6.0] - 2026-10-30
 
 ### Changed
