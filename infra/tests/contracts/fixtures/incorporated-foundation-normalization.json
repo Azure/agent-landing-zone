@@ -5580,7 +5580,7 @@
                     "name": "agent-app-orchestrator",
                     "repo": "https://github.com/Azure/agent-app-orchestrator.git",
                     "branch": "feature/nl2sql-mcp-cosmos",
-                    "commit": "2ea7eb20a6c012d4050e476af585ff5b1ba77d0d"
+                    "commit": "e8a405fabe8a1185bcba2b0169eae0ae13743e66"
                   },
                   {
                     "name": "agent-app-ingestion",
