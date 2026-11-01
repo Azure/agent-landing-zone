@@ -69,6 +69,7 @@ locals {
     AZURE_CONTAINER_REGISTRY_RESOURCE_ID = tostring(var.deployContainerRegistry || local.effective_flags.hosted_prerequisites ? local.hosted_registry.resource_id : "")
     AZURE_CONTAINER_REGISTRY_ENDPOINT    = tostring(var.deployContainerRegistry || local.effective_flags.hosted_prerequisites ? local.hosted_registry.endpoint : "")
     HOSTED_AGENT_DEPLOYMENT = {
+      durableTask = local.durable_backend
       workloadEgress = {
         networkIsolation        = tobool(var.networkIsolation)
         managedFirewallPolicyId = tostring(local.network_context.firewall_policy_id)

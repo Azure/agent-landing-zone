@@ -712,6 +712,7 @@ resource "azapi_resource" "network_firewall_rules" {
 locals {
   network_dns_suffix = "${var.useExistingVNet ? "-byon" : ""}${var.dnsZoneLinkSuffix == "" ? "" : "-${var.dnsZoneLinkSuffix}"}"
   network_dns_specs = {
+    DurableTask     = { name = "privatelink.durabletask.io", link = "durabletask", byo = var.existingPrivateDnsZoneDurableTaskResourceId, enabled = var.deployDurableTaskScheduler }
     CogSvcs         = { name = "privatelink.cognitiveservices.azure.com", link = "cogsvcs", byo = var.existingPrivateDnsZoneCogSvcsResourceId, enabled = true }
     OpenAi          = { name = "privatelink.openai.azure.com", link = "openai", byo = var.existingPrivateDnsZoneOpenAiResourceId, enabled = true }
     AiServices      = { name = "privatelink.services.ai.azure.com", link = "aiservices", byo = var.existingPrivateDnsZoneAiServicesResourceId, enabled = true }
@@ -781,6 +782,11 @@ locals {
   # Filtering a mixed map later still leaves its resource node dependent on
   # compute_context; Foundry connections must not acquire that dependency.
   network_application_endpoint_specs = {
+    durableTask = {
+      enabled    = var.deployDurableTaskScheduler, target = var.deployDurableTaskScheduler ? azapi_resource.durable_scheduler[0].id : ""
+      name       = "pe-dts-${local.resource_token}"
+      connection = "durableTaskConnection", subnet = "applicationPe", groups = ["scheduler"], zones = ["DurableTask"], zone_group = "durableTaskDnsZoneGroup"
+    }
     storage = {
       enabled    = var.deployStorageAccount, target = local.data_context.storage.id
       name       = "${local.network_abbreviations.networking.privateEndpoint}${local.resource_names.storageAccountName}"

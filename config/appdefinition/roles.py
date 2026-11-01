@@ -335,6 +335,11 @@ def assign_roles(
         definition, hosted_orchestration=hosted_orchestration,
         deploy_ingestion=resolve_ingestion_selection(environment),
     )
+    from config.deployment.native import selected as native_selected
+    if definition.bundled and native_selected(environment):
+        # The bundled legacy conversation-store profile is not a native
+        # checkpoint/metadata consumer. Native feature grants are container scoped.
+        planned = [item for item in planned if item.assignment.scope != SCOPE_COSMOS]
     return _assign_planned(planned, environment, run_az=run_az, role_guids=role_guids)
 
 

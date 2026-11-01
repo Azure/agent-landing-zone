@@ -10,6 +10,12 @@ pending as adoption work — see "Adoption and migration")<br>
 **Date:** 2026-08-07<br>
 **Owners:** GPT-RAG maintainer (Paulo), architecture analysis, with gpt-rag-ui and gpt-rag-orchestrator component owners (revised after independent security review)
 
+> Native-runtime revision: [ADR-0034](ADR-0034-native-agent-and-workflow-hosting.md)
+> supersedes mandatory stateless generation and manual BFF transcript replay
+> for the new native MAF runtime. It does not invalidate the identity-boundary
+> findings or promise checkpoint portability across hosts or agent versions.
+> The historical evidence below is retained for the original deployment model.
+
 > **Revision note (2026-08-07, superseded in part by ADR-0004).** Three points
 > in this ADR are tightened after security review and after live OQ-OWN
 > evidence, and this ADR is updated to match:

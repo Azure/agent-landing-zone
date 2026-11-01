@@ -177,8 +177,7 @@ def test_recomposition_preserves_persisted_azd_setting(proxy, hosted):
     source = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
     environment = {
         "ENABLE_FIREWALL_DNS_PROXY": proxy,
-        "DEPLOY_HOSTED_AGENT_ORCHESTRATION": hosted,
-        "DEPLOY_ADMINISTRATIVE_PANEL": "false",
+        "ORCHESTRATION_HOST": "hosted" if hosted == "true" else "container_apps",
         "HOSTED_AGENT_RESOURCE_SCOPE": "api://test-agent/.default",
     }
     first = compose_parameters(source, environment)

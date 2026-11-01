@@ -178,10 +178,10 @@ def _foundation_reader(environment, calls):
 
 def test_foundation_verifies_every_destination_and_project_without_changing_runtime():
     calls = []
-    environment = {**BASE, "DEPLOYMENT_TOPOLOGY": "hosted-panel"}
+    environment = {**BASE, "ORCHESTRATION_HOST": "hosted", "APPLICATION_MODE": "both"}
     outputs.verify_foundation(environment, run_az=_foundation_reader(environment, calls))
     assert {c[c.index("--name") + 1] for c in calls if c[:2] == ["group", "show"]} == {"rg-app", "rg-ai", "rg-net"}
-    assert environment["DEPLOYMENT_TOPOLOGY"] == "hosted-panel"
+    assert environment["ORCHESTRATION_HOST"] == "hosted"
     assert any(c[:2] == ["resource", "show"] and BASE["AZURE_AI_PROJECT_RESOURCE_ID"] in c for c in calls)
     assert not any("create" in c or "set" in c for c in calls)
 
@@ -189,7 +189,7 @@ def test_foundation_verifies_every_destination_and_project_without_changing_runt
 @pytest.mark.parametrize("group", ["rg-ai(team)", "rg-équipe", "rg-٣"])
 def test_classic_foundation_accepts_shared_resolver_valid_foundry_groups(group):
     environment = {
-        **BASE, "DEPLOYMENT_TOPOLOGY": "classic",
+        **BASE, "ORCHESTRATION_HOST": "container_apps",
         "AZURE_RESOURCE_GROUP": group,
         "AZURE_AI_PROJECT_RESOURCE_ID": BASE["AZURE_AI_PROJECT_RESOURCE_ID"].replace("rg-ai", group),
     }
@@ -199,7 +199,7 @@ def test_classic_foundation_accepts_shared_resolver_valid_foundry_groups(group):
     assert environment["AZURE_AI_PROJECT_RESOURCE_ID"] in next(
         call for call in calls if call[:2] == ["resource", "show"]
     )
-    assert environment["DEPLOYMENT_TOPOLOGY"] == "classic"
+    assert environment["ORCHESTRATION_HOST"] == "container_apps"
 
 
 @pytest.mark.parametrize("wrong_binding", ["subscription", "group", "endpoint"])
@@ -315,12 +315,12 @@ def test_image_discovery_and_runtime_selection_remain_application_owned(applicat
     from config.deployment.composition import resolve_mode
     env = {
         **BASE, "AZURE_APP_RESOURCE_GROUP": application, "AZURE_NETWORK_RESOURCE_GROUP": network,
-        "DEPLOYMENT_TOPOLOGY": "hosted-no-panel", "AGENTLZ_APP_DEFINITION": "",
+        "ORCHESTRATION_HOST": "hosted", "AGENTLZ_APP_DEFINITION": "",
     }
     with patch("config.deployment.existing_images.discover_existing_images", return_value={"frontend": "cr.azurecr.io/ui@sha256:" + "a" * 64}) as read:
         plan = definition_placeholder_plan(env)
     assert plan["ui"].endswith("a" * 64)
-    assert resolve_mode(env).value == "hosted-no-panel"
+    assert resolve_mode(env).value == "hosted"
     assert read.call_args.args[0] == (application or "rg-ai")
 
 

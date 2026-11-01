@@ -350,7 +350,7 @@ def publish(endpoint: str, settings: Mapping[str, str]) -> None:
 def main(argv: list[str] | None = None) -> int:
     from config.appdefinition import AppDefinitionError, load_selected_definition, validate_definition
     from config.appdefinition.roles import RoleAssignmentError, discover_component_identities
-    from config.deployment.composition import DeploymentMode, DeploymentTopologyError, resolve_mode
+    from config.deployment.composition import DeploymentTopologyError, resolve_mode
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -375,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
             definition = validate_definition(load_selected_definition(environment))
             identities = discover_component_identities(
                 definition, environment,
-                hosted_orchestration=resolve_mode(environment) is not DeploymentMode.CLASSIC,
+                hosted_orchestration=resolve_mode(environment).value == "hosted",
             )
         document = build_platform_outputs(environment, identities)
         validate_platform_outputs(document)
