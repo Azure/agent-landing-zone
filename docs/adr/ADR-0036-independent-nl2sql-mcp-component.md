@@ -1,6 +1,6 @@
 # ADR-0036: Independent NL2SQL capability in Agent App MCP Server
 
-**Status:** Accepted for implementation, release not published<br>
+**Status:** Accepted, toolset selection superseded by ADR-0037<br>
 **Date:** 2026-11-01<br>
 **Owners:** Agent Landing Zone maintainers
 
@@ -65,10 +65,11 @@ signature, audience, lifetime, application role and allowed caller identity.
 The MCP identity owns model/catalog/declared-secret access, while the consumer
 receives MCP invocation authorization, not SQL/catalog grants.
 
-`DEPLOY_AGENT_APP_MCP=false` is the generic component switch. Selection adds
-Cosmos as a required application dependency and provisions the Container App.
-No second NL2SQL or vector-search enable switch is required. Generic Cosmos
-provisioning and custom-only applications remain usable without MCP.
+`DEPLOY_AGENT_APP_MCP=false` is the generic component switch. ADR-0037
+separates server selection from explicit `MCP_TOOLSETS` selection. Only the
+selected NL2SQL toolset requires the application Cosmos catalog and model
+dependencies. Generic Cosmos provisioning and custom-only applications remain
+usable without MCP.
 
 Foundation changes belong to the platform's Bicep and Terraform. Add vector
 capability and new container policies without removing existing capabilities,

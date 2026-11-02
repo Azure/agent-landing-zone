@@ -186,6 +186,8 @@ def build_settings(
                 "principalId": discovered["principalId"], "fqdn": discovered["fqdn"],
             })
         settings["CONTAINER_APPS"] = json.dumps(containers, separators=(",", ":"))
+        if "MCP_TOOLSETS" in environment:
+            settings["MCP_TOOLSETS"] = json.dumps(mcp_config.toolsets(environment))
         settings.update(source_public_settings(environment))
         return settings
     deploy_ingestion = resolve_ingestion_selection(environment)

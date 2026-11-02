@@ -91,7 +91,7 @@ def resolve_application(environment: Mapping[str, str]) -> NativeApplication:
 
 def nl2sql_selected(environment: Mapping[str, str]) -> bool:
     if boolean(environment, "NL2SQL_ENABLED"):
-        raise ValueError("Direct NL2SQL is retired. Select DEPLOY_AGENT_APP_MCP=true instead of NL2SQL_ENABLED.")
+        raise ValueError('Direct NL2SQL is retired. Select DEPLOY_AGENT_APP_MCP=true and MCP_TOOLSETS=["nl2sql"] instead of NL2SQL_ENABLED.')
     return False
 
 

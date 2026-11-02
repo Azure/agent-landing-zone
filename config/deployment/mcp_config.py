@@ -18,18 +18,43 @@ def selected(environment: Mapping[str, str]) -> bool:
     return boolean(environment, DEPLOY_AGENT_APP_MCP)
 
 
+def toolsets(environment: Mapping[str, str]) -> list[str]:
+    value = json.loads(environment.get("MCP_TOOLSETS", "[]"))
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(name, str) or name != "nl2sql" for name in value)
+        or len(value) != len(set(value))
+    ):
+        raise ValueError("MCP_TOOLSETS must be a JSON array of unique supported toolsets: nl2sql.")
+    return value
+
+
+def validate_selection(environment: Mapping[str, str]) -> None:
+    if toolsets(environment) and not selected(environment):
+        raise ValueError("MCP_TOOLSETS requires DEPLOY_AGENT_APP_MCP=true in the reference application.")
+
+
+def nl2sql_enabled(environment: Mapping[str, str]) -> bool:
+    return "nl2sql" in toolsets(environment)
+
+
 def retained_catalog(environment: Mapping[str, str]) -> bool:
     # The shared hook persists catalog ownership independently of the server.
     return boolean(environment, "COSMOS_VECTOR_SEARCH_ENABLED")
 
 
 def vector_required(environment: Mapping[str, str]) -> bool:
-    return selected(environment) or retained_catalog(environment)
+    return nl2sql_enabled(environment) or retained_catalog(environment)
 
 
 def settings(environment: Mapping[str, str]) -> dict[str, str]:
     result = {
         DEPLOY_AGENT_APP_MCP: str(selected(environment)).lower(),
+        "MCP_TOOLSETS": json.dumps(toolsets(environment)),
+    }
+    if not vector_required(environment):
+        return result
+    result.update({
         "MCP_SOURCES_CONTAINER": environment.get(
             "MCP_SOURCES_CONTAINER", "mcp-sources"
         ),
@@ -37,18 +62,24 @@ def settings(environment: Mapping[str, str]) -> dict[str, str]:
             "MCP_METADATA_CONTAINER", "mcp-nl2sql-metadata"
         ),
         "MCP_EMBEDDING_DIMENSIONS": environment.get("MCP_EMBEDDING_DIMENSIONS", "3072"),
-        "MCP_QUERY_TIMEOUT_SECONDS": environment.get("MCP_QUERY_TIMEOUT_SECONDS", "75"),
-        "MCP_METADATA_TOP_K": environment.get("MCP_METADATA_TOP_K", "8"),
-        "MCP_SQL_SECRET_NAMES": environment.get("MCP_SQL_SECRET_NAMES", "[]"),
-    }
+    })
     for key in ("MCP_SOURCES_CONTAINER", "MCP_METADATA_CONTAINER"):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,254}", result[key]):
             raise ValueError(f"{key} must be a valid Cosmos container name.")
     if result["MCP_SOURCES_CONTAINER"] == result["MCP_METADATA_CONTAINER"]:
         raise ValueError("MCP source and vector metadata containers must be distinct.")
+    dimensions = result["MCP_EMBEDDING_DIMENSIONS"]
+    if not dimensions.isdecimal() or not 1 <= int(dimensions) <= 4096:
+        raise ValueError("MCP_EMBEDDING_DIMENSIONS must be an integer between 1 and 4096.")
+    if not nl2sql_enabled(environment):
+        return result
+    result.update({
+        "MCP_QUERY_TIMEOUT_SECONDS": environment.get("MCP_QUERY_TIMEOUT_SECONDS", "75"),
+        "MCP_METADATA_TOP_K": environment.get("MCP_METADATA_TOP_K", "8"),
+        "MCP_SQL_SECRET_NAMES": environment.get("MCP_SQL_SECRET_NAMES", "[]"),
+    })
     for key, minimum, maximum in (
-        ("MCP_EMBEDDING_DIMENSIONS", 1, 4096),
-        ("MCP_QUERY_TIMEOUT_SECONDS", 31, 300),
+        ("MCP_QUERY_TIMEOUT_SECONDS", 1, 75),
         ("MCP_METADATA_TOP_K", 1, 32),
     ):
         value = result[key]
@@ -148,7 +179,9 @@ def consumer_settings(
             "Agent App MCP conflicts with an existing external MCP endpoint. Select one explicitly."
         )
     timeout = int(environment.get("MCP_CLIENT_TIMEOUT", "90"))
-    if timeout <= int(settings(environment)["MCP_QUERY_TIMEOUT_SECONDS"]):
+    if timeout <= 0:
+        raise ValueError("MCP_CLIENT_TIMEOUT must be positive.")
+    if nl2sql_enabled(environment) and timeout <= int(settings(environment)["MCP_QUERY_TIMEOUT_SECONDS"]):
         raise ValueError(
             "MCP_CLIENT_TIMEOUT must exceed the complete MCP query deadline."
         )
