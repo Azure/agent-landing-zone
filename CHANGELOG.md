@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v7.0.0] - 2026-11-02
 
 ### Changed
 
@@ -28,6 +28,34 @@
 - Refresh immutable Azure login, Terraform setup and artifact-upload action
   pins for Node 24 runners. Keep Terraform 1.13.0, readonly initialization,
   both operating-system contract gates and optional OIDC behavior unchanged.
+
+### Migration
+
+- Upgrade the complete component/configuration combination. The native
+  orchestrator consumes SQL tools from Agent App MCP Server rather than the
+  former direct SQL/Fabric/DAX settings.
+- Select reference server compute with `DEPLOY_AGENT_APP_MCP=true` and its SQL
+  tools with `MCP_TOOLSETS=["nl2sql"]`, then redeploy. Keep catalog data,
+  identity bindings and approved read-only SQL permissions.
+- Rollback restores the prior complete combination and deployment state,
+  retaining catalog data. Review retained grants deliberately on deselection.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.5.0 |
+| agent-app-orchestrator | v7.0.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Focused application-composition and exact-pin contracts passed against the
+  real bundled application definition. Full provider/lifecycle CI covers
+  Bicep build/lint/offline contracts and Terraform on Ubuntu and Windows.
+- Infrastructure provider lock, module pins and provenance are unchanged.
+- Validation is local and CI-based. No Azure deployment, live model or SQL
+  calls, private-network validation or deployed provider parity is claimed.
 
 ## [v6.0.0] - 2026-11-01
 
