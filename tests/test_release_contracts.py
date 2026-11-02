@@ -29,10 +29,10 @@ class IntegrationPinTests(unittest.TestCase):
             "agent-app-mcp", "agent-app-orchestrator", "agent-app-ingestion", "agent-app-ui",
         }, set(components))
         for name, ref_key, ref, commit in (
-            ("agent-app-mcp", "branch", "feature/nl2sql-mcp-cosmos",
-             "a824bae8631e49066741ceedfd72e243c9e217d0"),
-            ("agent-app-orchestrator", "branch", "feature/nl2sql-mcp-cosmos",
-             "53b63422d1c2628ad02a0253651e8cf7068ed1e9"),
+            ("agent-app-mcp", "tag", "v2.0.0",
+             "e462d929ce02a74813feff9288d155098295691c"),
+            ("agent-app-orchestrator", "tag", "v7.0.0",
+             "b89684b67f991b337e3519620210a6469622fc29"),
             ("agent-app-ingestion", "tag", "v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
             ("agent-app-ui", "tag", "v3.5.0", "3961224368685cd0e96966c18496adb8b6626987"),
         ):

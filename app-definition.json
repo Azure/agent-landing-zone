@@ -8,7 +8,7 @@
       "name": "mcp",
       "kind": "containerapp",
       "path": "mcp",
-      "source": { "commit": "a824bae8631e49066741ceedfd72e243c9e217d0" },
+      "source": { "commit": "e462d929ce02a74813feff9288d155098295691c" },
       "profiles": [],
       "egress": [
         {
@@ -33,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "53b63422d1c2628ad02a0253651e8cf7068ed1e9" },
+      "source": { "commit": "b89684b67f991b337e3519620210a6469622fc29" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {

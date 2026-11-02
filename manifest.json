@@ -12,8 +12,8 @@
     {
       "name": "agent-app-mcp",
       "repo": "https://github.com/Azure/agent-app-mcp.git",
-      "branch": "feature/nl2sql-mcp-cosmos",
-      "commit": "a824bae8631e49066741ceedfd72e243c9e217d0"
+      "tag": "v2.0.0",
+      "commit": "e462d929ce02a74813feff9288d155098295691c"
     },
     {
       "name": "agent-app-ui",
@@ -24,8 +24,8 @@
     {
       "name": "agent-app-orchestrator",
       "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-      "branch": "feature/nl2sql-mcp-cosmos",
-      "commit": "53b63422d1c2628ad02a0253651e8cf7068ed1e9"
+      "tag": "v7.0.0",
+      "commit": "b89684b67f991b337e3519620210a6469622fc29"
     },
     {
       "name": "agent-app-ingestion",
