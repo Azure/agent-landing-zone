@@ -240,7 +240,7 @@ class CapabilityProfileTests(unittest.TestCase):
         self.assertTrue(trio.bundled)
         for component in trio.document["components"]:
             if component["name"] == "mcp":
-                self.assertEqual(["model-user"], component["profiles"])
+                self.assertEqual([], component["profiles"])
                 self.assertNotIn("SearchIndexDataReader", role_names(component["profiles"]))
                 continue
             canonical = TRIO_CANONICAL[component["name"]]
