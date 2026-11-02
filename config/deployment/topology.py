@@ -12,11 +12,14 @@ from config.deployment.composition import (
     describe_application, materialized_settings, validate_hosted_prerequisites,
 )
 from config.deployment.native import NativeApplication, OrchestrationHost, resolve_application
+from config.retrieval.settings import public_settings
 
 
 def resolve_environment_plan(environment: Mapping[str, str]) -> NativeApplication:
     """Explicit current-product intent only; no persisted-state classification."""
-    return resolve_application(environment)
+    app = resolve_application(environment)
+    public_settings(environment, hosted=app.host is OrchestrationHost.HOSTED)
+    return app
 
 
 def main() -> int:

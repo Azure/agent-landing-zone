@@ -2689,14 +2689,16 @@ module aiFoundryConnectionSearch 'modules/ai-foundry/connection-ai-search.bicep'
 // Dedicated AI Search connection for Foundry IQ knowledge bases. This is kept
 // separate from SEARCH_CONNECTION_ID so application search and knowledge-base
 // lifecycle can evolve independently.
-module aiFoundryKnowledgeBaseSearchConnection 'modules/ai-foundry/connection-ai-search.bicep' = if (deployAiFoundry && deploySearchService && retrievalBackend == 'foundry_iq') {
+module aiFoundryKnowledgeBaseSearchConnection 'modules/ai-foundry/connection-knowledge-base.bicep' = if (deployAiFoundry && deployAfProject && deploySearchService && retrievalBackend == 'foundry_iq') {
   scope: resourceGroup(_foundryResourceGroupName)
   name: 'connection-foundry-iq-search-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
     aiProjectName: aiFoundry!.outputs.aiProjectName
-    connectedResourceName: searchService!.outputs.name
-    aiSearchConnectionName: knowledgeBaseConnectionName
+    knowledgeBaseConnectionName: knowledgeBaseConnectionName
+    searchEndpoint: searchService!.outputs.endpoint
+    knowledgeBaseName: knowledgeBaseName
+    knowledgeApiVersion: foundryIqApiVersion
   }
   dependsOn: [
     aiFoundry!
@@ -2938,7 +2940,7 @@ module durableTaskRoles 'modules/security/resource-role-assignment.bicep' = [
         {
           roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.DurableTaskDataContributor.guid)
           resourceId: durableTask!.outputs.backend.taskHubResourceId
-          principalId: _useUAI ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: _useUAI ? containerAppsUAI[i]!.outputs.principalId : containerApps[i]!.outputs.systemAssignedMIPrincipalId!
           principalType: 'ServicePrincipal'
         }
       ]
@@ -2983,8 +2985,9 @@ var _containerRuntimeEnv = [
   { name: 'ENABLE_AGENTIC_RETRIEVAL',  value: toLower(string(enableAgenticRetrieval)) }
   { name: 'RETRIEVAL_BACKEND',         value: retrievalBackend }
   { name: 'KNOWLEDGE_BASE_NAME',       value: retrievalBackend == 'foundry_iq' ? knowledgeBaseName : '' }
+  { name: 'TOOLBOX_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? '${aiFoundryProjectEndpoint}/toolboxes/${knowledgeBaseName}/mcp?api-version=v1' : '' }
   { name: 'KNOWLEDGE_BASE_ENDPOINT',   value: retrievalBackend == 'foundry_iq' ? 'https://${resourceNames.searchServiceName}.search.windows.net' : '' }
-  { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_foundryResourceGroupName}/providers/Microsoft.CognitiveServices/accounts/${resourceNames.aiFoundryAccountName}/projects/${resourceNames.aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
+  { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_foundryResourceGroupName}/providers/Microsoft.CognitiveServices/accounts/${resourceNames.aiFoundryAccountName}/projects/${resourceNames.aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
   { name: 'FOUNDRY_IQ_API_VERSION',    value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : '' }
@@ -3691,6 +3694,23 @@ module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/co
 // (guid(principalId, roleDefinitionId, resourceId)), so consolidating the
 // deployment invocations does not change the deployed role assignment set.
 // Cosmos DB data-plane assignments stay in their dedicated module below.
+module assignAgentConsumerRoles 'modules/security/resource-role-assignment.bicep' = [
+  for (app, i) in containerAppsList: if (_deployContainerApps && deployAiFoundry && deployAfProject && contains(app.roles, const.roles.FoundryAgentConsumer.key)) {
+    scope: resourceGroup(_foundryResourceGroupName)
+    name: 'agent-consumer-${app.service_name}-${resourceToken}'
+    params: {
+      roleAssignments: [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.FoundryAgentConsumer.guid)
+          principalId: _useUAI ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          resourceId: aiFoundryProjectResourceId
+          principalType: 'ServicePrincipal'
+        }
+      ]
+    }
+  }
+]
+
 module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep' = [
   for (app, i) in containerAppsList: if (_deployContainerApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
     name: 'assignContainerAppRoles-${app.service_name}'
@@ -4139,7 +4159,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'SEARCH_SERVICE_RESOURCE_ID', value: deploySearchService ? searchService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SEARCH_SHARED_PRIVATE_LINKS', value: string(searchSharedPrivateLinkReadinessManifest), label: appConfigLabel, contentType: 'application/json' }
       #disable-next-line BCP318
-      { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry ? aiFoundryKnowledgeBaseSearchConnection.outputs.searchConnectionId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry && deployAfProject ? aiFoundryKnowledgeBaseSearchConnection.outputs.connectionId : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'AZURE_SPEECH_RESOURCE_ID', value: deploySpeechService ? speechService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       
@@ -4190,6 +4210,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       #disable-next-line BCP318
       { name: 'SEARCH_CONNECTION_ID', value: deploySearchService && deployAiFoundry ? aiFoundryConnectionSearch.outputs.searchConnectionId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'KNOWLEDGE_BASE_NAME', value: retrievalBackend == 'foundry_iq' ? knowledgeBaseName : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'TOOLBOX_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? '${aiFoundryProjectEndpoint}/toolboxes/${knowledgeBaseName}/mcp?api-version=v1' : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'BING_CONNECTION_ID', value: deployGroundingWithBing && deployAiFoundry ? bingSearchConnection!.outputs.bingConnectionId : '', label: appConfigLabel, contentType: 'text/plain' }
 
@@ -4273,7 +4294,7 @@ output KNOWLEDGE_BASE_NAME string = retrievalBackend == 'foundry_iq' ? knowledge
 #disable-next-line BCP318
 output KNOWLEDGE_BASE_ENDPOINT string = retrievalBackend == 'foundry_iq' && deploySearchService ? searchService.outputs.endpoint : ''
 #disable-next-line BCP318
-output KNOWLEDGE_BASE_CONNECTION_ID string = retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry ? aiFoundryKnowledgeBaseSearchConnection.outputs.searchConnectionId : ''
+output KNOWLEDGE_BASE_CONNECTION_ID string = retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry && deployAfProject ? aiFoundryKnowledgeBaseSearchConnection.outputs.connectionId : ''
 output FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME string = retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : ''
 output FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND string = effectiveFoundryIqKnowledgeSourceKind
 

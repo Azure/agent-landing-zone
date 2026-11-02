@@ -117,8 +117,9 @@ locals {
     ENABLE_AGENTIC_RETRIEVAL                    = tostring(var.enableAgenticRetrieval)
     RETRIEVAL_BACKEND                           = var.retrievalBackend
     KNOWLEDGE_BASE_NAME                         = var.retrievalBackend == "foundry_iq" ? var.knowledgeBaseName : ""
+    TOOLBOX_ENDPOINT                            = var.retrievalBackend == "foundry_iq" && var.deployAiFoundry && var.deployAfProject && var.deploySearchService ? "${local.foundry_context.project_endpoint}/toolboxes/${var.knowledgeBaseName}/mcp?api-version=v1" : ""
     KNOWLEDGE_BASE_ENDPOINT                     = var.retrievalBackend == "foundry_iq" ? "https://${local.resource_names.searchServiceName}.search.windows.net" : ""
-    KNOWLEDGE_BASE_CONNECTION_ID                = var.retrievalBackend == "foundry_iq" ? "/subscriptions/${local.deployment_context.subscription_id}/resourceGroups/${local.deployment_context.foundry_rg}/providers/Microsoft.CognitiveServices/accounts/${local.resource_names.aiFoundryAccountName}/projects/${local.resource_names.aiFoundryProjectName}/connections/${var.knowledgeBaseConnectionName}" : ""
+    KNOWLEDGE_BASE_CONNECTION_ID                = var.retrievalBackend == "foundry_iq" && var.deployAiFoundry && var.deployAfProject && var.deploySearchService ? "/subscriptions/${local.deployment_context.subscription_id}/resourceGroups/${local.deployment_context.foundry_rg}/providers/Microsoft.CognitiveServices/accounts/${local.resource_names.aiFoundryAccountName}/projects/${local.resource_names.aiFoundryProjectName}/connections/${var.knowledgeBaseConnectionName}" : ""
     FOUNDRY_IQ_API_VERSION                      = var.retrievalBackend == "foundry_iq" ? var.foundryIqApiVersion : ""
     FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN = var.retrievalBackend == "foundry_iq" ? var.foundryIqKnowledgeRetrievalBillingPlan : ""
     FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME            = var.retrievalBackend == "foundry_iq" ? var.foundryIqKnowledgeSourceName : ""

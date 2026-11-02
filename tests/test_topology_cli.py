@@ -81,3 +81,19 @@ def test_resolver_never_reads_existing_deployment_state():
     assert app.host == "hosted" and not app.metadata
     assert not hasattr(topology, "read_persisted_settings")
     assert not hasattr(topology, "resource_group_has_resources")
+
+
+def test_shared_service_profile_is_validated_by_existing_cross_platform_preprovision_entrypoint():
+    selection = {
+        "HOSTED_AGENT_AUTH_MODE": "service_identity",
+        "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]",
+    }
+    with patch("subprocess.run", side_effect=AssertionError("Azure reads are forbidden")):
+        assert topology.resolve_environment_plan(selection).host == "hosted"
+        with pytest.raises(ValueError, match="WORK_IQ_ENABLED"):
+            topology.resolve_environment_plan({**selection, "WORK_IQ_ENABLED": "true"})
+        with pytest.raises(ValueError, match="explicitly approved"):
+            topology.resolve_environment_plan({**selection, "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "null"})
+    for hook in ("preProvision.ps1", "preProvision.sh"):
+        source = (ROOT / "scripts" / hook).read_text()
+        assert source.index("config.deployment.topology") < source.index("config.deployment.provider")

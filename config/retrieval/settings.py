@@ -1,4 +1,4 @@
-"""Public settings for the implemented native Search delegation route.
+"""Public settings for the native Search route and its structural auth profiles.
 
 An empty mode denotes no Hosted route (the Container Apps host).
 It is not a service-identity fallback. Source credentials remain request-local in
@@ -7,7 +7,7 @@ the UI/runtime; provisioning publishes neither tokens nor an identity envelope.
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Any, Mapping
 from uuid import UUID
 
 from config.deployment.composition import is_truthy
@@ -23,6 +23,13 @@ SOURCE_ID_KEYS = (
     "SHAREPOINT_INDEXED_APPLICATION_ID",
     "SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID",
 )
+
+
+def hosted_auth_mode(settings: Mapping[str, Any]) -> str:
+    value = settings.get("HOSTED_AGENT_AUTH_MODE") or "user_delegated"
+    if not isinstance(value, str) or value.strip() not in {"user_delegated", "service_identity"}:
+        raise ValueError("HOSTED_AGENT_AUTH_MODE must be user_delegated or service_identity.")
+    return value.strip()
 
 
 def source_public_settings(environment: Mapping[str, str]) -> dict[str, str]:
@@ -64,19 +71,17 @@ def public_settings(
 ) -> dict[str, str]:
     """Resolve the route before discovery/publication, preserving request auth."""
     validate_auth_mode(environment)
+    mode = hosted_auth_mode(environment)
     if not hosted:
+        if mode == "service_identity":
+            raise ValueError("HOSTED_AGENT_AUTH_MODE=service_identity requires ORCHESTRATION_HOST=hosted.")
         return {RETRIEVAL_AUTH_MODE: ""}
-    if (environment.get("HOSTED_AGENT_AUTH_MODE") or "user_delegated").strip() != "user_delegated":
-        raise ValueError(
-            "Native protected retrieval requires HOSTED_AGENT_AUTH_MODE=user_delegated; "
-            "service credentials authenticate Search transport only."
-        )
     if is_truthy(environment.get("ALLOW_ANONYMOUS")):
         raise ValueError("Native protected retrieval requires ALLOW_ANONYMOUS=false.")
     backend = (environment.get("RETRIEVAL_BACKEND") or "foundry_iq").strip()
     if backend not in SEARCH_BACKENDS:
         raise ValueError("RETRIEVAL_BACKEND must be foundry_iq or ai_search for native Search retrieval.")
-    if backend == "foundry_iq":
+    if backend == "foundry_iq" and mode == "user_delegated":
         forward = environment.get("FOUNDRY_IQ_FORWARD_SOURCE_AUTH")
         if forward is not None and not is_truthy(forward):
             raise ValueError(
@@ -87,5 +92,5 @@ def public_settings(
     # never change source flags, invent app audiences or remove a KB member here.
     return {
         RETRIEVAL_AUTH_MODE: NATIVE_SEARCH,
-        "HOSTED_AGENT_AUTH_MODE": "user_delegated",
+        "HOSTED_AGENT_AUTH_MODE": mode,
     }
