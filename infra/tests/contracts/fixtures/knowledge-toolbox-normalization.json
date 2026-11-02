@@ -1,0 +1,2429 @@
+{
+  "description": "Exact optional-delegation managed Toolbox connection, binding and project-scoped caller-role delta. Historical fingerprints are unchanged.",
+  "sourceBaseline": "b8285c4",
+  "bicepVersion": "0.42.1",
+  "projection": {
+    "kind": "object",
+    "changes": {
+      "metadata": {
+        "kind": "object",
+        "changes": {
+          "_generator": {
+            "kind": "object",
+            "changes": {
+              "templateHash": {
+                "kind": "changed",
+                "before": "16628016361815852887",
+                "after": "15595852277510516286"
+              }
+            }
+          }
+        }
+      },
+      "outputs": {
+        "kind": "object",
+        "changes": {
+          "KNOWLEDGE_BASE_CONNECTION_ID": {
+            "kind": "object",
+            "changes": {
+              "value": {
+                "kind": "changed",
+                "before": "[if(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), parameters('deployAiFoundry')), reference('aiFoundryKnowledgeBaseSearchConnection').outputs.searchConnectionId.value, '')]",
+                "after": "[if(and(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), parameters('deployAiFoundry')), parameters('deployAfProject')), reference('aiFoundryKnowledgeBaseSearchConnection').outputs.connectionId.value, '')]"
+              }
+            }
+          }
+        }
+      },
+      "resources": {
+        "kind": "object",
+        "changes": {
+          "aiFoundryKnowledgeBaseSearchConnection": {
+            "kind": "object",
+            "changes": {
+              "condition": {
+                "kind": "changed",
+                "before": "[and(and(parameters('deployAiFoundry'), parameters('deploySearchService')), equals(parameters('retrievalBackend'), 'foundry_iq'))]",
+                "after": "[and(and(and(parameters('deployAiFoundry'), parameters('deployAfProject')), parameters('deploySearchService')), equals(parameters('retrievalBackend'), 'foundry_iq'))]"
+              },
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "aiSearchConnectionName": {
+                        "kind": "removed",
+                        "before": {
+                          "value": "[parameters('knowledgeBaseConnectionName')]"
+                        }
+                      },
+                      "connectedResourceName": {
+                        "kind": "removed",
+                        "before": {
+                          "value": "[reference('searchService').outputs.name.value]"
+                        }
+                      },
+                      "knowledgeApiVersion": {
+                        "kind": "added",
+                        "after": {
+                          "value": "[parameters('foundryIqApiVersion')]"
+                        }
+                      },
+                      "knowledgeBaseConnectionName": {
+                        "kind": "added",
+                        "after": {
+                          "value": "[parameters('knowledgeBaseConnectionName')]"
+                        }
+                      },
+                      "knowledgeBaseName": {
+                        "kind": "added",
+                        "after": {
+                          "value": "[parameters('knowledgeBaseName')]"
+                        }
+                      },
+                      "searchEndpoint": {
+                        "kind": "added",
+                        "after": {
+                          "value": "[reference('searchService').outputs.endpoint.value]"
+                        }
+                      }
+                    },
+                    "beforeKeys": [
+                      "aiFoundryName",
+                      "aiProjectName",
+                      "connectedResourceName",
+                      "aiSearchConnectionName"
+                    ],
+                    "afterKeys": [
+                      "aiFoundryName",
+                      "aiProjectName",
+                      "knowledgeBaseConnectionName",
+                      "searchEndpoint",
+                      "knowledgeBaseName",
+                      "knowledgeApiVersion"
+                    ]
+                  },
+                  "template": {
+                    "kind": "object",
+                    "changes": {
+                      "metadata": {
+                        "kind": "object",
+                        "changes": {
+                          "_generator": {
+                            "kind": "object",
+                            "changes": {
+                              "templateHash": {
+                                "kind": "changed",
+                                "before": "4127944734531634783",
+                                "after": "2530841008605255669"
+                              }
+                            }
+                          },
+                          "description": {
+                            "kind": "changed",
+                            "before": "Create an Azure AI Search connection in Azure AI Foundry account.",
+                            "after": "Project MCP connection to a Search knowledge base using project managed identity."
+                          },
+                          "name": {
+                            "kind": "changed",
+                            "before": "ai-foundry-connection-ai-search",
+                            "after": "ai-foundry-connection-knowledge-base"
+                          }
+                        }
+                      },
+                      "outputs": {
+                        "kind": "object",
+                        "changes": {
+                          "connectionId": {
+                            "kind": "added",
+                            "after": {
+                              "type": "string",
+                              "value": "[resourceId('Microsoft.CognitiveServices/accounts/projects/connections', parameters('aiFoundryName'), parameters('aiProjectName'), parameters('knowledgeBaseConnectionName'))]"
+                            }
+                          },
+                          "connectionName": {
+                            "kind": "removed",
+                            "before": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "The name of the AI Search connection."
+                              },
+                              "value": "[parameters('aiSearchConnectionName')]"
+                            }
+                          },
+                          "searchConnectionId": {
+                            "kind": "removed",
+                            "before": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Connection ID path under the AI services project."
+                              },
+                              "value": "[format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.CognitiveServices/accounts/{2}/projects/{3}/connections/{4}', subscription().subscriptionId, resourceGroup().name, parameters('aiFoundryName'), parameters('aiProjectName'), parameters('aiSearchConnectionName'))]"
+                            }
+                          }
+                        },
+                        "beforeKeys": [
+                          "searchConnectionId",
+                          "connectionName"
+                        ],
+                        "afterKeys": [
+                          "connectionId"
+                        ]
+                      },
+                      "parameters": {
+                        "kind": "object",
+                        "changes": {
+                          "aiFoundryName": {
+                            "kind": "object",
+                            "changes": {
+                              "metadata": {
+                                "kind": "removed",
+                                "before": {
+                                  "description": "Required. The name of the Azure AI Foundry account."
+                                }
+                              }
+                            },
+                            "beforeKeys": [
+                              "type",
+                              "metadata"
+                            ],
+                            "afterKeys": [
+                              "type"
+                            ]
+                          },
+                          "aiProjectName": {
+                            "kind": "object",
+                            "changes": {
+                              "metadata": {
+                                "kind": "removed",
+                                "before": {
+                                  "description": "Required. The name of the Azure AI Foundry project."
+                                }
+                              }
+                            },
+                            "beforeKeys": [
+                              "type",
+                              "metadata"
+                            ],
+                            "afterKeys": [
+                              "type"
+                            ]
+                          },
+                          "aiSearchConnectionName": {
+                            "kind": "removed",
+                            "before": {
+                              "type": "string",
+                              "defaultValue": "[format('{0}-connection', parameters('connectedResourceName'))]",
+                              "metadata": {
+                                "description": "Optional. The name to assign to the AI Search connection."
+                              }
+                            }
+                          },
+                          "connectedResourceName": {
+                            "kind": "removed",
+                            "before": {
+                              "type": "string",
+                              "metadata": {
+                                "description": "Required. The name of the Azure AI Search service to connect."
+                              }
+                            }
+                          },
+                          "knowledgeApiVersion": {
+                            "kind": "added",
+                            "after": {
+                              "type": "string"
+                            }
+                          },
+                          "knowledgeBaseConnectionName": {
+                            "kind": "added",
+                            "after": {
+                              "type": "string"
+                            }
+                          },
+                          "knowledgeBaseName": {
+                            "kind": "added",
+                            "after": {
+                              "type": "string"
+                            }
+                          },
+                          "searchEndpoint": {
+                            "kind": "added",
+                            "after": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "beforeKeys": [
+                          "aiFoundryName",
+                          "aiProjectName",
+                          "connectedResourceName",
+                          "aiSearchConnectionName"
+                        ],
+                        "afterKeys": [
+                          "aiFoundryName",
+                          "aiProjectName",
+                          "knowledgeBaseConnectionName",
+                          "searchEndpoint",
+                          "knowledgeBaseName",
+                          "knowledgeApiVersion"
+                        ]
+                      },
+                      "resources": {
+                        "kind": "array",
+                        "count": 1,
+                        "changes": {
+                          "0": {
+                            "kind": "object",
+                            "changes": {
+                              "apiVersion": {
+                                "kind": "changed",
+                                "before": "2025-06-01",
+                                "after": "2025-04-01-preview"
+                              },
+                              "name": {
+                                "kind": "changed",
+                                "before": "[format('{0}/{1}', parameters('aiFoundryName'), parameters('aiSearchConnectionName'))]",
+                                "after": "[format('{0}/{1}/{2}', parameters('aiFoundryName'), parameters('aiProjectName'), parameters('knowledgeBaseConnectionName'))]"
+                              },
+                              "properties": {
+                                "kind": "object",
+                                "changes": {
+                                  "audience": {
+                                    "kind": "added",
+                                    "after": "https://search.azure.com/"
+                                  },
+                                  "authType": {
+                                    "kind": "changed",
+                                    "before": "AAD",
+                                    "after": "ProjectManagedIdentity"
+                                  },
+                                  "category": {
+                                    "kind": "changed",
+                                    "before": "CognitiveSearch",
+                                    "after": "RemoteTool"
+                                  },
+                                  "metadata": {
+                                    "kind": "object",
+                                    "changes": {
+                                      "ResourceId": {
+                                        "kind": "removed",
+                                        "before": "[resourceId('Microsoft.Search/searchServices', parameters('connectedResourceName'))]"
+                                      },
+                                      "location": {
+                                        "kind": "removed",
+                                        "before": "[reference(resourceId('Microsoft.Search/searchServices', parameters('connectedResourceName')), '2025-02-01-preview', 'full').location]"
+                                      }
+                                    },
+                                    "beforeKeys": [
+                                      "ApiType",
+                                      "ResourceId",
+                                      "location"
+                                    ],
+                                    "afterKeys": [
+                                      "ApiType"
+                                    ]
+                                  },
+                                  "target": {
+                                    "kind": "changed",
+                                    "before": "[reference(resourceId('Microsoft.Search/searchServices', parameters('connectedResourceName')), '2025-02-01-preview').endpoint]",
+                                    "after": "[format('{0}/knowledgebases/{1}/mcp?api-version={2}', parameters('searchEndpoint'), parameters('knowledgeBaseName'), parameters('knowledgeApiVersion'))]"
+                                  }
+                                },
+                                "beforeKeys": [
+                                  "category",
+                                  "target",
+                                  "authType",
+                                  "isSharedToAll",
+                                  "metadata"
+                                ],
+                                "afterKeys": [
+                                  "category",
+                                  "authType",
+                                  "target",
+                                  "audience",
+                                  "isSharedToAll",
+                                  "metadata"
+                                ]
+                              },
+                              "type": {
+                                "kind": "changed",
+                                "before": "Microsoft.CognitiveServices/accounts/connections",
+                                "after": "Microsoft.CognitiveServices/accounts/projects/connections"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "appConfigPopulate": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "parameters": {
+                    "kind": "object",
+                    "changes": {
+                      "keyValues": {
+                        "kind": "object",
+                        "changes": {
+                          "value": {
+                            "kind": "changed",
+                            "before": "[concat(filter(concat(if(variables('_deployContainerApps'), reference('containerAppsSettings').outputs.containerAppsEndpoints.value, createArray()), if(variables('_deployContainerApps'), reference('containerAppsSettings').outputs.containerAppsName.value, createArray()), variables('_modelDeploymentNamesSettings'), variables('_databaseContainerNamesSettings'), variables('_storageContainerNamesSettings'), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SUBSCRIPTION_ID', 'value', subscription().subscriptionId, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_RESOURCE_GROUP', 'value', resourceGroup().name, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_APP_RESOURCE_GROUP', 'value', variables('_applicationResourceGroupName'), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'AZURE_NETWORK_RESOURCE_GROUP', 'value', variables('_networkResourceGroupName'), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'LOCATION', 'value', parameters('location'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENVIRONMENT_NAME', 'value', parameters('environmentName'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOYMENT_NAME', 'value', deployment().name, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RESOURCE_TOKEN', 'value', parameters('resourceToken'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'NETWORK_ISOLATION', 'value', toLower(string(variables('_networkIsolation'))), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_RAG_INDEX_NAME', 'value', format('ragindex-{0}', parameters('resourceToken')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENABLE_AGENTIC_RETRIEVAL', 'value', toLower(string(parameters('enableAgenticRetrieval'))), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RETRIEVAL_BACKEND', 'value', parameters('retrievalBackend'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_PATTERN', 'value', parameters('foundryIqPattern'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_API_VERSION', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqApiVersion'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeRetrievalBillingPlan'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeSourceName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', 'value', variables('effectiveFoundryIqKnowledgeSourceKind'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_STORAGE_CONTAINER_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqStorageContainerName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_STORAGE_FOLDER_PATH', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqStorageFolderPath'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_IS_ADLS_GEN2', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), toLower(string(parameters('foundryIqIsAdlsGen2'))), 'false'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_CONTENT_EXTRACTION_MODE', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqContentExtractionMode'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_AI_SERVICES_ENDPOINT', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), if(not(empty(parameters('foundryIqAiServicesEndpoint'))), parameters('foundryIqAiServicesEndpoint'), format('https://{0}.services.ai.azure.com/', variables('resourceNames').aiFoundryAccountName)), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), string(variables('effectiveFoundryIqIngestionPermissionOptions')), '[]'), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_SEARCH_INDEX_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSearchIndexName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSemanticConfigurationName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SOURCE_DATA_FIELDS', 'value', string(parameters('foundryIqSourceDataFields')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_SEARCH_FIELDS', 'value', string(parameters('foundryIqSearchFields')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_BASE_FILTER', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqBaseFilter'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_FILTER_ADD_ON_ENABLED', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), toLower(string(parameters('foundryIqFilterAddOnEnabled'))), 'false'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SECURITY_FIELD_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSecurityFieldName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqMaxOutputDocuments'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'USE_UAI', 'value', string(variables('_useUAI')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'LOG_LEVEL', 'value', 'INFO', 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENABLE_CONSOLE_LOGGING', 'value', 'true', 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RELEASE', 'value', variables('_manifest').tag, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', 'value', if(not(empty(if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')))), split(split(if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')), ';')[0], '=')[1], ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KEY_VAULT_RESOURCE_ID', 'value', if(parameters('deployKeyVault'), reference('keyVault').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_ACCOUNT_RESOURCE_ID', 'value', if(parameters('deployStorageAccount'), reference('storageAccount').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID', 'value', if(and(parameters('deployStorageAccount'), equals(length(variables('_documentsContainers')), 1)), format('{0}/blobServices/default/containers/{1}', reference('storageAccount').outputs.resourceId.value, variables('_documentsContainers')[0].name), ''), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'APP_INSIGHTS_RESOURCE_ID', 'value', if(variables('_hasExistingAI'), parameters('existingApplicationInsightsResourceId'), if(variables('_createAppInsights'), reference('appInsights').outputs.resourceId.value, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'LOG_ANALYTICS_RESOURCE_ID', 'value', if(variables('_hasExistingLaw'), parameters('existingLogAnalyticsWorkspaceResourceId'), if(variables('_createLogAnalytics'), reference('logAnalytics').outputs.resourceId.value, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_RESOURCE_ID', 'value', if(parameters('deployContainerEnv'), reference('containerEnv').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', 'value', if(parameters('deployAiFoundry'), reference('aiFoundry').outputs.accountResourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_RESOURCE_ID', 'value', if(parameters('deployAiFoundry'), reference('aiFoundry').outputs.projectResourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_UAI_RESOURCE_ID', 'value', if(and(parameters('deploySearchService'), variables('_useUAI')), reference('searchServiceUAI').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_RESOURCE_ID', 'value', if(parameters('deploySearchService'), reference('searchService').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SHARED_PRIVATE_LINKS', 'value', string(variables('searchSharedPrivateLinkReadinessManifest')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'KNOWLEDGE_BASE_CONNECTION_ID', 'value', if(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), parameters('deployAiFoundry')), reference('aiFoundryKnowledgeBaseSearchConnection').outputs.searchConnectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_RESOURCE_ID', 'value', if(parameters('deploySpeechService'), reference('speechService').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_NAME', 'value', variables('resourceNames').aiFoundryAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_NAME', 'value', variables('resourceNames').aiFoundryProjectName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_STORAGE_ACCOUNT_NAME', 'value', variables('resourceNames').aiFoundryStorageAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APP_CONFIG_NAME', 'value', variables('resourceNames').appConfigName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APP_INSIGHTS_NAME', 'value', variables('resourceNames').appInsightsName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_NAME', 'value', variables('resourceNames').containerEnvName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_REGISTRY_NAME', 'value', variables('resourceNames').containerRegistryName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_REGISTRY_LOGIN_SERVER', 'value', format('{0}.azurecr.io', variables('resourceNames').containerRegistryName), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DATABASE_ACCOUNT_NAME', 'value', if(parameters('deployCosmosDb'), variables('resourceNames').dbAccountName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DATABASE_NAME', 'value', if(parameters('deployCosmosDb'), variables('resourceNames').dbDatabaseName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_NAME', 'value', variables('resourceNames').searchServiceName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_RESOURCE_NAME', 'value', if(parameters('deploySpeechService'), variables('resourceNames').speechServiceName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_REGION', 'value', if(parameters('deploySpeechService'), variables('_speechServiceLocation'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_ACCOUNT_NAME', 'value', variables('resourceNames').storageAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_APP_CONFIG', 'value', string(parameters('deployAppConfig')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_KEY_VAULT', 'value', string(parameters('deployKeyVault')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_LOG_ANALYTICS', 'value', string(parameters('deployLogAnalytics')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_APP_INSIGHTS', 'value', string(parameters('deployAppInsights')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_SEARCH_SERVICE', 'value', string(parameters('deploySearchService')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_SPEECH_SERVICE', 'value', string(parameters('deploySpeechService')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_STORAGE_ACCOUNT', 'value', string(parameters('deployStorageAccount')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_COSMOS_DB', 'value', string(parameters('deployCosmosDb')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_APPS', 'value', string(parameters('deployContainerApps')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_REGISTRY', 'value', string(parameters('deployContainerRegistry')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_ENV', 'value', string(parameters('deployContainerEnv')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KEY_VAULT_URI', 'value', if(parameters('deployKeyVault'), reference('keyVault').outputs.properties.value.vaultUri, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_BLOB_ENDPOINT', 'value', if(parameters('deployStorageAccount'), reference('storageAccount').outputs.primaryBlobEndpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_ENDPOINT', 'value', if(parameters('deployAiFoundry'), format('https://{0}.cognitiveservices.azure.com/', reference('aiFoundry').outputs.aiServicesName.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_ENDPOINT', 'value', if(parameters('deployAiFoundry'), format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.aiServicesName.value, reference('aiFoundry').outputs.aiProjectName.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_QUERY_ENDPOINT', 'value', if(parameters('deploySearchService'), reference('searchService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KNOWLEDGE_BASE_ENDPOINT', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), reference('searchService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_ENDPOINT', 'value', if(parameters('deploySpeechService'), reference('speechService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_CONNECTION_ID', 'value', if(and(parameters('deploySearchService'), parameters('deployAiFoundry')), reference('aiFoundryConnectionSearch').outputs.searchConnectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KNOWLEDGE_BASE_NAME', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('knowledgeBaseName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'BING_CONNECTION_ID', 'value', if(and(parameters('deployGroundingWithBing'), parameters('deployAiFoundry')), reference('bingSearchConnection').outputs.bingConnectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_PRINCIPAL_ID', 'value', if(parameters('deployContainerEnv'), if(variables('_useUAI'), reference('containerEnvUAI').outputs.principalId.value, coalesce(tryGet(reference('containerEnv').outputs.identity.value, 'principalId'), '')), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_PRINCIPAL_ID', 'value', if(parameters('deploySearchService'), if(variables('_useUAI'), reference('searchServiceUAI').outputs.principalId.value, reference('searchService').outputs.systemAssignedMIPrincipalId.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_APPS', 'value', if(variables('_deployContainerApps'), string(reference('containerAppsSettings').outputs.containerAppsList.value), '[]'), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'MODEL_DEPLOYMENTS', 'value', string(variables('_modelDeploymentSettings')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'))), lambda('kv', not(contains(variables('_additionalAppConfigKeys'), if(empty(lambdaVariables('kv').label), lambdaVariables('kv').name, format('{0}${1}', lambdaVariables('kv').name, lambdaVariables('kv').label)))))), variables('_normalizedAdditionalAppConfigSettings'))]",
+                            "after": "[concat(filter(concat(if(variables('_deployContainerApps'), reference('containerAppsSettings').outputs.containerAppsEndpoints.value, createArray()), if(variables('_deployContainerApps'), reference('containerAppsSettings').outputs.containerAppsName.value, createArray()), variables('_modelDeploymentNamesSettings'), variables('_databaseContainerNamesSettings'), variables('_storageContainerNamesSettings'), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SUBSCRIPTION_ID', 'value', subscription().subscriptionId, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_RESOURCE_GROUP', 'value', resourceGroup().name, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_APP_RESOURCE_GROUP', 'value', variables('_applicationResourceGroupName'), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'AZURE_NETWORK_RESOURCE_GROUP', 'value', variables('_networkResourceGroupName'), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'LOCATION', 'value', parameters('location'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENVIRONMENT_NAME', 'value', parameters('environmentName'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOYMENT_NAME', 'value', deployment().name, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RESOURCE_TOKEN', 'value', parameters('resourceToken'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'NETWORK_ISOLATION', 'value', toLower(string(variables('_networkIsolation'))), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_RAG_INDEX_NAME', 'value', format('ragindex-{0}', parameters('resourceToken')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENABLE_AGENTIC_RETRIEVAL', 'value', toLower(string(parameters('enableAgenticRetrieval'))), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RETRIEVAL_BACKEND', 'value', parameters('retrievalBackend'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_PATTERN', 'value', parameters('foundryIqPattern'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_API_VERSION', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqApiVersion'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeRetrievalBillingPlan'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeSourceName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', 'value', variables('effectiveFoundryIqKnowledgeSourceKind'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_STORAGE_CONTAINER_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqStorageContainerName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_STORAGE_FOLDER_PATH', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqStorageFolderPath'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_IS_ADLS_GEN2', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), toLower(string(parameters('foundryIqIsAdlsGen2'))), 'false'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_CONTENT_EXTRACTION_MODE', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), parameters('foundryIqContentExtractionMode'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_AI_SERVICES_ENDPOINT', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), if(not(empty(parameters('foundryIqAiServicesEndpoint'))), parameters('foundryIqAiServicesEndpoint'), format('https://{0}.services.ai.azure.com/', variables('resourceNames').aiFoundryAccountName)), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), not(equals(parameters('foundryIqPattern'), 'searchIndex'))), string(variables('effectiveFoundryIqIngestionPermissionOptions')), '[]'), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_SEARCH_INDEX_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSearchIndexName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSemanticConfigurationName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SOURCE_DATA_FIELDS', 'value', string(parameters('foundryIqSourceDataFields')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_SEARCH_FIELDS', 'value', string(parameters('foundryIqSearchFields')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'FOUNDRY_IQ_BASE_FILTER', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqBaseFilter'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_FILTER_ADD_ON_ENABLED', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), toLower(string(parameters('foundryIqFilterAddOnEnabled'))), 'false'), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_SECURITY_FIELD_NAME', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSecurityFieldName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqMaxOutputDocuments'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'USE_UAI', 'value', string(variables('_useUAI')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'LOG_LEVEL', 'value', 'INFO', 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'ENABLE_CONSOLE_LOGGING', 'value', 'true', 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'RELEASE', 'value', variables('_manifest').tag, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', 'value', if(not(empty(if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')))), split(split(if(variables('_hasExistingAI'), coalesce(parameters('existingApplicationInsightsConnectionString'), ''), if(variables('_createAppInsights'), reference('appInsights').outputs.properties.value.ConnectionString, '')), ';')[0], '=')[1], ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KEY_VAULT_RESOURCE_ID', 'value', if(parameters('deployKeyVault'), reference('keyVault').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_ACCOUNT_RESOURCE_ID', 'value', if(parameters('deployStorageAccount'), reference('storageAccount').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID', 'value', if(and(parameters('deployStorageAccount'), equals(length(variables('_documentsContainers')), 1)), format('{0}/blobServices/default/containers/{1}', reference('storageAccount').outputs.resourceId.value, variables('_documentsContainers')[0].name), ''), 'label', 'agent-lz', 'contentType', 'text/plain'), createObject('name', 'APP_INSIGHTS_RESOURCE_ID', 'value', if(variables('_hasExistingAI'), parameters('existingApplicationInsightsResourceId'), if(variables('_createAppInsights'), reference('appInsights').outputs.resourceId.value, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'LOG_ANALYTICS_RESOURCE_ID', 'value', if(variables('_hasExistingLaw'), parameters('existingLogAnalyticsWorkspaceResourceId'), if(variables('_createLogAnalytics'), reference('logAnalytics').outputs.resourceId.value, '')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_RESOURCE_ID', 'value', if(parameters('deployContainerEnv'), reference('containerEnv').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', 'value', if(parameters('deployAiFoundry'), reference('aiFoundry').outputs.accountResourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_RESOURCE_ID', 'value', if(parameters('deployAiFoundry'), reference('aiFoundry').outputs.projectResourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_UAI_RESOURCE_ID', 'value', if(and(parameters('deploySearchService'), variables('_useUAI')), reference('searchServiceUAI').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_RESOURCE_ID', 'value', if(parameters('deploySearchService'), reference('searchService').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SHARED_PRIVATE_LINKS', 'value', string(variables('searchSharedPrivateLinkReadinessManifest')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'KNOWLEDGE_BASE_CONNECTION_ID', 'value', if(and(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), parameters('deployAiFoundry')), parameters('deployAfProject')), reference('aiFoundryKnowledgeBaseSearchConnection').outputs.connectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_RESOURCE_ID', 'value', if(parameters('deploySpeechService'), reference('speechService').outputs.resourceId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_NAME', 'value', variables('resourceNames').aiFoundryAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_NAME', 'value', variables('resourceNames').aiFoundryProjectName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_STORAGE_ACCOUNT_NAME', 'value', variables('resourceNames').aiFoundryStorageAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APP_CONFIG_NAME', 'value', variables('resourceNames').appConfigName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'APP_INSIGHTS_NAME', 'value', variables('resourceNames').appInsightsName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_NAME', 'value', variables('resourceNames').containerEnvName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_REGISTRY_NAME', 'value', variables('resourceNames').containerRegistryName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_REGISTRY_LOGIN_SERVER', 'value', format('{0}.azurecr.io', variables('resourceNames').containerRegistryName), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DATABASE_ACCOUNT_NAME', 'value', if(parameters('deployCosmosDb'), variables('resourceNames').dbAccountName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DATABASE_NAME', 'value', if(parameters('deployCosmosDb'), variables('resourceNames').dbDatabaseName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_NAME', 'value', variables('resourceNames').searchServiceName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_RESOURCE_NAME', 'value', if(parameters('deploySpeechService'), variables('resourceNames').speechServiceName, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_REGION', 'value', if(parameters('deploySpeechService'), variables('_speechServiceLocation'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_ACCOUNT_NAME', 'value', variables('resourceNames').storageAccountName, 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_APP_CONFIG', 'value', string(parameters('deployAppConfig')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_KEY_VAULT', 'value', string(parameters('deployKeyVault')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_LOG_ANALYTICS', 'value', string(parameters('deployLogAnalytics')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_APP_INSIGHTS', 'value', string(parameters('deployAppInsights')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_SEARCH_SERVICE', 'value', string(parameters('deploySearchService')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_SPEECH_SERVICE', 'value', string(parameters('deploySpeechService')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_STORAGE_ACCOUNT', 'value', string(parameters('deployStorageAccount')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_COSMOS_DB', 'value', string(parameters('deployCosmosDb')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_APPS', 'value', string(parameters('deployContainerApps')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_REGISTRY', 'value', string(parameters('deployContainerRegistry')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'DEPLOY_CONTAINER_ENV', 'value', string(parameters('deployContainerEnv')), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KEY_VAULT_URI', 'value', if(parameters('deployKeyVault'), reference('keyVault').outputs.properties.value.vaultUri, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'STORAGE_BLOB_ENDPOINT', 'value', if(parameters('deployStorageAccount'), reference('storageAccount').outputs.primaryBlobEndpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_ACCOUNT_ENDPOINT', 'value', if(parameters('deployAiFoundry'), format('https://{0}.cognitiveservices.azure.com/', reference('aiFoundry').outputs.aiServicesName.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AI_FOUNDRY_PROJECT_ENDPOINT', 'value', if(parameters('deployAiFoundry'), format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.aiServicesName.value, reference('aiFoundry').outputs.aiProjectName.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_QUERY_ENDPOINT', 'value', if(parameters('deploySearchService'), reference('searchService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KNOWLEDGE_BASE_ENDPOINT', 'value', if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deploySearchService')), reference('searchService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'AZURE_SPEECH_ENDPOINT', 'value', if(parameters('deploySpeechService'), reference('speechService').outputs.endpoint.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_CONNECTION_ID', 'value', if(and(parameters('deploySearchService'), parameters('deployAiFoundry')), reference('aiFoundryConnectionSearch').outputs.searchConnectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'KNOWLEDGE_BASE_NAME', 'value', if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('knowledgeBaseName'), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'TOOLBOX_ENDPOINT', 'value', if(and(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deployAiFoundry')), parameters('deployAfProject')), parameters('deploySearchService')), format('{0}/toolboxes/{1}/mcp?api-version=v1', format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.aiServicesName.value, reference('aiFoundry').outputs.aiProjectName.value), parameters('knowledgeBaseName')), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'BING_CONNECTION_ID', 'value', if(and(parameters('deployGroundingWithBing'), parameters('deployAiFoundry')), reference('bingSearchConnection').outputs.bingConnectionId.value, ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_ENV_PRINCIPAL_ID', 'value', if(parameters('deployContainerEnv'), if(variables('_useUAI'), reference('containerEnvUAI').outputs.principalId.value, coalesce(tryGet(reference('containerEnv').outputs.identity.value, 'principalId'), '')), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'SEARCH_SERVICE_PRINCIPAL_ID', 'value', if(parameters('deploySearchService'), if(variables('_useUAI'), reference('searchServiceUAI').outputs.principalId.value, reference('searchService').outputs.systemAssignedMIPrincipalId.value), ''), 'label', parameters('appConfigLabel'), 'contentType', 'text/plain'), createObject('name', 'CONTAINER_APPS', 'value', if(variables('_deployContainerApps'), string(reference('containerAppsSettings').outputs.containerAppsList.value), '[]'), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'), createObject('name', 'MODEL_DEPLOYMENTS', 'value', string(variables('_modelDeploymentSettings')), 'label', parameters('appConfigLabel'), 'contentType', 'application/json'))), lambda('kv', not(contains(variables('_additionalAppConfigKeys'), if(empty(lambdaVariables('kv').label), lambdaVariables('kv').name, format('{0}${1}', lambdaVariables('kv').name, lambdaVariables('kv').label)))))), variables('_normalizedAdditionalAppConfigSettings'))]"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "assignAgentConsumerRoles": {
+            "kind": "added",
+            "after": {
+              "copy": {
+                "name": "assignAgentConsumerRoles",
+                "count": "[length(parameters('containerAppsList'))]"
+              },
+              "condition": "[and(and(and(variables('_deployContainerApps'), parameters('deployAiFoundry')), parameters('deployAfProject')), contains(parameters('containerAppsList')[copyIndex()].roles, variables('_1.roles').FoundryAgentConsumer.key))]",
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[format('agent-consumer-{0}-{1}', parameters('containerAppsList')[copyIndex()].service_name, parameters('resourceToken'))]",
+              "resourceGroup": "[variables('_foundryResourceGroupName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "roleAssignments": {
+                    "value": [
+                      {
+                        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('_1.roles').FoundryAgentConsumer.guid)]",
+                        "principalId": "[if(variables('_useUAI'), reference(format('containerAppsUAI[{0}]', copyIndex())).outputs.principalId.value, reference(format('containerApps[{0}]', copyIndex())).outputs.systemAssignedMIPrincipalId.value)]",
+                        "resourceId": "[reference('aiFoundry').outputs.projectResourceId.value]",
+                        "principalType": "ServicePrincipal"
+                      }
+                    ]
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "languageVersion": "2.0",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.42.1.51946",
+                      "templateHash": "4447600592370161114"
+                    }
+                  },
+                  "definitions": {
+                    "roleAssignmentInfo": {
+                      "type": "object",
+                      "properties": {
+                        "roleDefinitionId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Role definition ID for the RBAC role to assign to the identity."
+                          }
+                        },
+                        "principalId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Principal ID of the identity to assign to."
+                          }
+                        },
+                        "resourceId": {
+                          "type": "string",
+                          "metadata": {
+                            "description": "Resource ID to assing too."
+                          }
+                        },
+                        "principalType": {
+                          "type": "string",
+                          "allowedValues": [
+                            "Device",
+                            "ForeignGroup",
+                            "Group",
+                            "ServicePrincipal",
+                            "User"
+                          ],
+                          "metadata": {
+                            "description": "Type of principal to assign the role to."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "name": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "roleAssignments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/roleAssignmentInfo"
+                      },
+                      "defaultValue": [],
+                      "metadata": {
+                        "description": "Role assignments to create."
+                      }
+                    }
+                  },
+                  "resources": {
+                    "roleAssignment": {
+                      "copy": {
+                        "name": "roleAssignment",
+                        "count": "[length(parameters('roleAssignments'))]"
+                      },
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('role-{0}-{1}-{2}', take(parameters('name'), 31), uniqueString(parameters('name')), copyIndex())]",
+                      "subscriptionId": "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), subscription().subscriptionId, split(parameters('roleAssignments')[copyIndex()].resourceId, '/')[2])]",
+                      "resourceGroup": "[if(empty(parameters('roleAssignments')[copyIndex()].resourceId), resourceGroup().name, split(parameters('roleAssignments')[copyIndex()].resourceId, '/')[4])]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "roleAssignments": {
+                            "value": [
+                              "[parameters('roleAssignments')[copyIndex()]]"
+                            ]
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "languageVersion": "2.0",
+                          "contentVersion": "1.0.0.0",
+                          "definitions": {
+                            "roleAssignmentInfo": {
+                              "type": "object",
+                              "properties": {
+                                "resourceId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Resource ID for target role assingment."
+                                  }
+                                },
+                                "roleDefinitionId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Role definition ID for the RBAC role to assign to the identity."
+                                  }
+                                },
+                                "principalId": {
+                                  "type": "string",
+                                  "metadata": {
+                                    "description": "Principal ID of the identity to assign to."
+                                  }
+                                },
+                                "principalType": {
+                                  "type": "string",
+                                  "allowedValues": [
+                                    "Device",
+                                    "ForeignGroup",
+                                    "Group",
+                                    "ServicePrincipal",
+                                    "User"
+                                  ],
+                                  "metadata": {
+                                    "description": "Type of the principal ID."
+                                  }
+                                }
+                              },
+                              "metadata": {
+                                "description": "Role assignment information for an identity."
+                              }
+                            }
+                          },
+                          "parameters": {
+                            "roleAssignments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/definitions/roleAssignmentInfo"
+                              },
+                              "defaultValue": [],
+                              "metadata": {
+                                "description": "Role assignments to create for the resource."
+                              }
+                            }
+                          },
+                          "resources": {
+                            "assignment": {
+                              "copy": {
+                                "name": "assignment",
+                                "count": "[length(parameters('roleAssignments'))]"
+                              },
+                              "type": "Microsoft.Authorization/roleAssignments",
+                              "apiVersion": "2022-04-01",
+                              "name": "[guid(parameters('roleAssignments')[copyIndex()].principalId, parameters('roleAssignments')[copyIndex()].roleDefinitionId, parameters('roleAssignments')[copyIndex()].resourceId)]",
+                              "scope": "[if(or(empty(parameters('roleAssignments')[copyIndex()].resourceId), equals(toLower(parameters('roleAssignments')[copyIndex()].resourceId), toLower(resourceGroup().id))), '', parameters('roleAssignments')[copyIndex()].resourceId)]",
+                              "properties": {
+                                "principalId": "[parameters('roleAssignments')[copyIndex()].principalId]",
+                                "roleDefinitionId": "[parameters('roleAssignments')[copyIndex()].roleDefinitionId]",
+                                "principalType": "[parameters('roleAssignments')[copyIndex()].principalType]"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "aiFoundry",
+                "[format('containerApps[{0}]', copyIndex())]",
+                "[format('containerAppsUAI[{0}]', copyIndex())]"
+              ]
+            }
+          },
+          "firewall": {
+            "kind": "object",
+            "changes": {
+              "properties": {
+                "kind": "object",
+                "changes": {
+                  "template": {
+                    "kind": "object",
+                    "changes": {
+                      "metadata": {
+                        "kind": "object",
+                        "changes": {
+                          "_generator": {
+                            "kind": "object",
+                            "changes": {
+                              "templateHash": {
+                                "kind": "changed",
+                                "before": "12606235335634393575",
+                                "after": "15686777219755594489"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "variables": {
+                        "kind": "object",
+                        "changes": {
+                          "_1._3": {
+                            "kind": "object",
+                            "changes": {
+                              "FoundryAgentConsumer": {
+                                "kind": "added",
+                                "after": {
+                                  "guid": "eed3b665-ab3a-47b6-8f48-c9382fb1dad6",
+                                  "key": "FoundryAgentConsumer"
+                                }
+                              }
+                            },
+                            "beforeKeys": [
+                              "DurableTaskDataContributor",
+                              "AcrDelete",
+                              "AcrImageSigner",
+                              "AcrPull",
+                              "AcrPush",
+                              "AcrQuarantineReader",
+                              "AcrQuarantineWriter",
+                              "AksClusterAdminRole",
+                              "AksClusterMonitoringUser",
+                              "AksClusterUserRole",
+                              "AksContributorRole",
+                              "AksFleetManagerContributorRole",
+                              "AksFleetManagerRBACAdmin",
+                              "AksFleetManagerRBACClusterAdmin",
+                              "AksFleetManagerRBACReader",
+                              "AksFleetManagerRBACWriter",
+                              "AksRBACAdmin",
+                              "AksRBACClusterAdmin",
+                              "AksRBACReader",
+                              "AksRBACWriter",
+                              "AppComplianceAutomationAdministrator",
+                              "AppComplianceAutomationReader",
+                              "AppConfigurationDataOwner",
+                              "AppConfigurationDataReader",
+                              "ApplicationInsightsComponentContributor",
+                              "ApplicationInsightsSnapshotDebugger",
+                              "AttestationContributor",
+                              "AttestationReader",
+                              "AutomationContributor",
+                              "AutomationJobOperator",
+                              "AutomationOperator",
+                              "AutomationRunbookOperator",
+                              "AvereContributor",
+                              "AvereOperator",
+                              "AzureAIAdministrator",
+                              "AzureAIDeveloper",
+                              "AzureAIEnterpriseNetworkConnectionApprover",
+                              "AzureAIInferenceDeploymentOperator",
+                              "AzureAIProjectManager",
+                              "AzureAISafetyEvaluator",
+                              "AzureAIUser",
+                              "AzureApiCenterComplianceManager",
+                              "AzureApiCenterDataReader",
+                              "AzureApiCenterServiceContributor",
+                              "AzureApiCenterServiceReader",
+                              "AzureArcEnabledKubernetesClusterUser",
+                              "AzureArcKubernetesAdmin",
+                              "AzureArcKubernetesClusterAdmin",
+                              "AzureArcKubernetesViewer",
+                              "AzureArcKubernetesWriter",
+                              "AzureConnectedMachineOnboarding",
+                              "AzureConnectedMachineResourceAdministrator",
+                              "AzureConnectedMachineResourceManager",
+                              "AzureConnectedSQLServerOnboarding",
+                              "AzureContainerStorageOperator",
+                              "AzureContainerStorageOwner",
+                              "AzureDigitalTwinsDataOwner",
+                              "AzureDigitalTwinsDataReader",
+                              "AzureEventHubsDataOwner",
+                              "AzureEventHubsDataReceiver",
+                              "AzureEventHubsDataSender",
+                              "AzureFrontDoorDomainContributor",
+                              "AzureFrontDoorDomainReader",
+                              "AzureFrontDoorProfileReader",
+                              "AzureFrontDoorSecretReader",
+                              "AzureMLComputeOperator",
+                              "AzureMLDataScientist",
+                              "AzureMapsDataContributor",
+                              "AzureMapsDataReader",
+                              "AzureRelayListener",
+                              "AzureRelayOwner",
+                              "AzureRelaySender",
+                              "AzureServiceBusDataOwner",
+                              "AzureServiceBusDataReceiver",
+                              "AzureServiceBusDataSender",
+                              "AzureSpringCloudConfigServerContributor",
+                              "AzureSpringCloudConfigServerReader",
+                              "AzureSpringCloudDataReader",
+                              "AzureSpringCloudServiceRegistryContributor",
+                              "AzureSpringCloudServiceRegistryReader",
+                              "AzureStackRegistrationOwner",
+                              "BackupContributor",
+                              "BackupOperator",
+                              "BackupReader",
+                              "BillingReader",
+                              "BizTalkContributor",
+                              "BlueprintContributor",
+                              "BlueprintOperator",
+                              "CarbonOptimizationReader",
+                              "CdnEndpointContributor",
+                              "CdnEndpointReader",
+                              "CdnProfileContributor",
+                              "CdnProfileReader",
+                              "ClassicNetworkContributor",
+                              "ClassicStorageAccountContributor",
+                              "ClassicStorageAccountKeyOperatorServiceRole",
+                              "ClassicVirtualMachineContributor",
+                              "CognitiveServicesContributor",
+                              "CognitiveServicesCustomVisionContributor",
+                              "CognitiveServicesCustomVisionDeployment",
+                              "CognitiveServicesCustomVisionLabeler",
+                              "CognitiveServicesCustomVisionReader",
+                              "CognitiveServicesCustomVisionTrainer",
+                              "CognitiveServicesDataReader",
+                              "CognitiveServicesFaceRecognizer",
+                              "CognitiveServicesMetricsAdvisorAdministrator",
+                              "CognitiveServicesOpenAIContributor",
+                              "CognitiveServicesOpenAIUser",
+                              "CognitiveServicesQnAMakerEditor",
+                              "CognitiveServicesQnAMakerReader",
+                              "CognitiveServicesUsagesReader",
+                              "CognitiveServicesUser",
+                              "ContainerAppReader",
+                              "ContainerAppsConnectedEnvironmentsContributor",
+                              "ContainerAppsConnectedEnvironmentsReader",
+                              "ContainerAppsContributor",
+                              "ContainerAppsJobsContributor",
+                              "ContainerAppsJobsOperator",
+                              "ContainerAppsJobsReader",
+                              "ContainerAppsManagedEnvironmentsContributor",
+                              "ContainerAppsManagedEnvironmentsReader",
+                              "ContainerAppsOperator",
+                              "ContainerAppsSessionExecutor",
+                              "ContainerAppsSessionPoolsContributor",
+                              "ContainerRegistryRepositoryWriter",
+                              "ContainerRegistryTasksContributor",
+                              "ContainerRegistryContributorDataAccessConfigurationAdministrator",
+                              "Contributor",
+                              "CosmosBackupOperator",
+                              "CosmosDBAccountReaderRole",
+                              "CosmosDBBuiltInDataContributor",
+                              "CosmosDBBuiltInDataReader",
+                              "CosmosDBOperator",
+                              "CosmosRestoreOperator",
+                              "CostManagementContributor",
+                              "CostManagementReader",
+                              "DataBoxContributor",
+                              "DataBoxReader",
+                              "DataFactoryContributor",
+                              "DataLakeAnalyticsDeveloper",
+                              "DataOperatorForManagedDisks",
+                              "DataPurger",
+                              "DefenderForStorageDataScanner",
+                              "DesktopVirtualizationApplicationGroupContributor",
+                              "DesktopVirtualizationApplicationGroupReader",
+                              "DesktopVirtualizationContributor",
+                              "DesktopVirtualizationHostPoolContributor",
+                              "DesktopVirtualizationHostPoolReader",
+                              "DesktopVirtualizationReader",
+                              "DesktopVirtualizationSessionHostOperator",
+                              "DesktopVirtualizationUser",
+                              "DesktopVirtualizationUserSessionOperator",
+                              "DesktopVirtualizationWorkspaceContributor",
+                              "DesktopVirtualizationWorkspaceReader",
+                              "DevTestLabsUser",
+                              "DeviceUpdateAdministrator",
+                              "DeviceUpdateContentAdministrator",
+                              "DeviceUpdateContentReader",
+                              "DeviceUpdateDeploymentsAdministrator",
+                              "DeviceUpdateDeploymentsReader",
+                              "DeviceUpdateReader",
+                              "DiskBackupReader",
+                              "DiskPoolOperator",
+                              "DiskRestoreOperator",
+                              "DiskSnapshotContributor",
+                              "DnsZoneContributor",
+                              "DocumentDBAccountContributor",
+                              "DomainServicesContributor",
+                              "DomainServicesReader",
+                              "ElasticSANOwner",
+                              "ElasticSANReader",
+                              "ElasticSANVolumeGroupOwner",
+                              "EventGridContributor",
+                              "EventGridDataSender",
+                              "EventGridEventSubscriptionContributor",
+                              "EventGridEventSubscriptionReader",
+                              "FhirDataContributor",
+                              "FhirDataExporter",
+                              "FhirDataImporter",
+                              "FhirDataReader",
+                              "FhirDataWriter",
+                              "GrafanaAdmin",
+                              "GrafanaEditor",
+                              "GrafanaViewer",
+                              "HdInsightClusterOperator",
+                              "HdInsightDomainServicesContributor",
+                              "HierarchySettingsAdministrator",
+                              "IntegrationServiceEnvironmentContributor",
+                              "IntegrationServiceEnvironmentDeveloper",
+                              "IntelligentSystemsAccountContributor",
+                              "IotHubDataContributor",
+                              "IotHubDataReader",
+                              "IotHubRegistryContributor",
+                              "IotHubTwinContributor",
+                              "KeyVaultAdministrator",
+                              "KeyVaultCertificateUser",
+                              "KeyVaultCertificatesOfficer",
+                              "KeyVaultContributor",
+                              "KeyVaultCryptoOfficer",
+                              "KeyVaultCryptoServiceEncryptionUser",
+                              "KeyVaultCryptoServiceReleaseUser",
+                              "KeyVaultCryptoUser",
+                              "KeyVaultDataAccessAdministrator",
+                              "KeyVaultReader",
+                              "KeyVaultSecretsOfficer",
+                              "KeyVaultSecretsUser",
+                              "KubernetesAgentlessOperator",
+                              "KubernetesClusterAzureArcOnboarding",
+                              "KubernetesExtensionContributor",
+                              "LabAssistant",
+                              "LabContributor",
+                              "LabCreator",
+                              "LabOperator",
+                              "LabServicesContributor",
+                              "LabServicesReader",
+                              "LoadTestContributor",
+                              "LoadTestOwner",
+                              "LoadTestReader",
+                              "LogAnalyticsContributor",
+                              "LogAnalyticsReader",
+                              "LogicAppContributor",
+                              "LogicAppOperator",
+                              "LogicAppsStandardContributor",
+                              "LogicAppsStandardDeveloper",
+                              "LogicAppsStandardOperator",
+                              "LogicAppsStandardReader",
+                              "ManagedApplicationContributorRole",
+                              "ManagedApplicationOperatorRole",
+                              "ManagedApplicationsReader",
+                              "ManagedHSMContributor",
+                              "ManagedIdentityContributor",
+                              "ManagedIdentityOperator",
+                              "ManagedServicesRegistrationAssignmentDeleteRole",
+                              "ManagementGroupContributor",
+                              "ManagementGroupReader",
+                              "MediaServicesAccountAdministrator",
+                              "MediaServicesLiveEventsAdministrator",
+                              "MediaServicesMediaOperator",
+                              "MediaServicesPolicyAdministrator",
+                              "MediaServicesStreamingEndpointsAdministrator",
+                              "MicrosoftSentinelAutomationContributor",
+                              "MicrosoftSentinelContributor",
+                              "MicrosoftSentinelPlaybookOperator",
+                              "MicrosoftSentinelReader",
+                              "MicrosoftSentinelResponder",
+                              "MonitoringContributor",
+                              "MonitoringMetricsPublisher",
+                              "MonitoringReader",
+                              "NetworkContributor",
+                              "NewRelicAPMAccountContributor",
+                              "Owner",
+                              "PolicyInsightsDataWriter",
+                              "PrivateDNSZoneContributor",
+                              "QuotaRequestOperator",
+                              "Reader",
+                              "ReaderAndDataAccess",
+                              "RedisCacheContributor",
+                              "RemoteRenderingAdministrator",
+                              "RemoteRenderingClient",
+                              "ReservationPurchaser",
+                              "ReservationsAdministrator",
+                              "ReservationsReader",
+                              "ResourcePolicyContributor",
+                              "RoleBasedAccessControlAdministrator",
+                              "ScheduledPatchingContributor",
+                              "SchedulerJobCollectionsContributor",
+                              "SchemaRegistryContributor",
+                              "SchemaRegistryReader",
+                              "SearchIndexDataContributor",
+                              "SearchIndexDataReader",
+                              "SearchServiceContributor",
+                              "SecurityAdmin",
+                              "SecurityAssessmentContributor",
+                              "SecurityReader",
+                              "ServicesHubOperator",
+                              "SignalRAccessKeyReader",
+                              "SignalRAppServer",
+                              "SignalRRestAPIOwner",
+                              "SignalRRestAPIReader",
+                              "SignalRServiceOwner",
+                              "SignalRWebPubSubContributor",
+                              "SiteRecoveryContributor",
+                              "SiteRecoveryOperator",
+                              "SiteRecoveryReader",
+                              "SpatialAnchorsAccountContributor",
+                              "SpatialAnchorsAccountOwner",
+                              "SpatialAnchorsAccountReader",
+                              "SqlDBContributor",
+                              "SqlManagedInstanceContributor",
+                              "SqlSecurityManager",
+                              "SqlServerContributor",
+                              "StorageAccountBackupContributor",
+                              "StorageAccountContributor",
+                              "StorageAccountKeyOperatorServiceRole",
+                              "StorageBlobDataContributor",
+                              "StorageBlobDataOwner",
+                              "StorageBlobDataReader",
+                              "StorageBlobDelegator",
+                              "StorageFileDataPrivilegedContributor",
+                              "StorageFileDataPrivilegedReader",
+                              "StorageFileDataSMBShareContributor",
+                              "StorageFileDataSMBShareElevatedContributor",
+                              "StorageFileDataSMBShareReader",
+                              "StorageQueueDataContributor",
+                              "StorageQueueDataMessageProcessor",
+                              "StorageQueueDataMessageSender",
+                              "StorageQueueDataReader",
+                              "StorageTableDataContributor",
+                              "StorageTableDataReader",
+                              "StreamAnalyticsQueryTester",
+                              "SupportRequestContributor",
+                              "TagContributor",
+                              "TemplateSpecContributor",
+                              "TemplateSpecReader",
+                              "TrafficManagerContributor",
+                              "UserAccessAdministrator",
+                              "VirtualMachineAdministratorLogin",
+                              "VirtualMachineContributor",
+                              "VirtualMachineDataAccessAdministrator",
+                              "VirtualMachineLocalUserLogin",
+                              "VirtualMachineUserLogin",
+                              "WebPlanContributor",
+                              "WebsiteContributor",
+                              "WindowsAdminCenterAdministratorLogin",
+                              "WorkbookContributor",
+                              "WorkbookReader"
+                            ],
+                            "afterKeys": [
+                              "DurableTaskDataContributor",
+                              "AcrDelete",
+                              "AcrImageSigner",
+                              "AcrPull",
+                              "AcrPush",
+                              "AcrQuarantineReader",
+                              "AcrQuarantineWriter",
+                              "AksClusterAdminRole",
+                              "AksClusterMonitoringUser",
+                              "AksClusterUserRole",
+                              "AksContributorRole",
+                              "AksFleetManagerContributorRole",
+                              "AksFleetManagerRBACAdmin",
+                              "AksFleetManagerRBACClusterAdmin",
+                              "AksFleetManagerRBACReader",
+                              "AksFleetManagerRBACWriter",
+                              "AksRBACAdmin",
+                              "AksRBACClusterAdmin",
+                              "AksRBACReader",
+                              "AksRBACWriter",
+                              "AppComplianceAutomationAdministrator",
+                              "AppComplianceAutomationReader",
+                              "AppConfigurationDataOwner",
+                              "AppConfigurationDataReader",
+                              "ApplicationInsightsComponentContributor",
+                              "ApplicationInsightsSnapshotDebugger",
+                              "AttestationContributor",
+                              "AttestationReader",
+                              "AutomationContributor",
+                              "AutomationJobOperator",
+                              "AutomationOperator",
+                              "AutomationRunbookOperator",
+                              "AvereContributor",
+                              "AvereOperator",
+                              "AzureAIAdministrator",
+                              "AzureAIDeveloper",
+                              "AzureAIEnterpriseNetworkConnectionApprover",
+                              "AzureAIInferenceDeploymentOperator",
+                              "AzureAIProjectManager",
+                              "AzureAISafetyEvaluator",
+                              "AzureAIUser",
+                              "FoundryAgentConsumer",
+                              "AzureApiCenterComplianceManager",
+                              "AzureApiCenterDataReader",
+                              "AzureApiCenterServiceContributor",
+                              "AzureApiCenterServiceReader",
+                              "AzureArcEnabledKubernetesClusterUser",
+                              "AzureArcKubernetesAdmin",
+                              "AzureArcKubernetesClusterAdmin",
+                              "AzureArcKubernetesViewer",
+                              "AzureArcKubernetesWriter",
+                              "AzureConnectedMachineOnboarding",
+                              "AzureConnectedMachineResourceAdministrator",
+                              "AzureConnectedMachineResourceManager",
+                              "AzureConnectedSQLServerOnboarding",
+                              "AzureContainerStorageOperator",
+                              "AzureContainerStorageOwner",
+                              "AzureDigitalTwinsDataOwner",
+                              "AzureDigitalTwinsDataReader",
+                              "AzureEventHubsDataOwner",
+                              "AzureEventHubsDataReceiver",
+                              "AzureEventHubsDataSender",
+                              "AzureFrontDoorDomainContributor",
+                              "AzureFrontDoorDomainReader",
+                              "AzureFrontDoorProfileReader",
+                              "AzureFrontDoorSecretReader",
+                              "AzureMLComputeOperator",
+                              "AzureMLDataScientist",
+                              "AzureMapsDataContributor",
+                              "AzureMapsDataReader",
+                              "AzureRelayListener",
+                              "AzureRelayOwner",
+                              "AzureRelaySender",
+                              "AzureServiceBusDataOwner",
+                              "AzureServiceBusDataReceiver",
+                              "AzureServiceBusDataSender",
+                              "AzureSpringCloudConfigServerContributor",
+                              "AzureSpringCloudConfigServerReader",
+                              "AzureSpringCloudDataReader",
+                              "AzureSpringCloudServiceRegistryContributor",
+                              "AzureSpringCloudServiceRegistryReader",
+                              "AzureStackRegistrationOwner",
+                              "BackupContributor",
+                              "BackupOperator",
+                              "BackupReader",
+                              "BillingReader",
+                              "BizTalkContributor",
+                              "BlueprintContributor",
+                              "BlueprintOperator",
+                              "CarbonOptimizationReader",
+                              "CdnEndpointContributor",
+                              "CdnEndpointReader",
+                              "CdnProfileContributor",
+                              "CdnProfileReader",
+                              "ClassicNetworkContributor",
+                              "ClassicStorageAccountContributor",
+                              "ClassicStorageAccountKeyOperatorServiceRole",
+                              "ClassicVirtualMachineContributor",
+                              "CognitiveServicesContributor",
+                              "CognitiveServicesCustomVisionContributor",
+                              "CognitiveServicesCustomVisionDeployment",
+                              "CognitiveServicesCustomVisionLabeler",
+                              "CognitiveServicesCustomVisionReader",
+                              "CognitiveServicesCustomVisionTrainer",
+                              "CognitiveServicesDataReader",
+                              "CognitiveServicesFaceRecognizer",
+                              "CognitiveServicesMetricsAdvisorAdministrator",
+                              "CognitiveServicesOpenAIContributor",
+                              "CognitiveServicesOpenAIUser",
+                              "CognitiveServicesQnAMakerEditor",
+                              "CognitiveServicesQnAMakerReader",
+                              "CognitiveServicesUsagesReader",
+                              "CognitiveServicesUser",
+                              "ContainerAppReader",
+                              "ContainerAppsConnectedEnvironmentsContributor",
+                              "ContainerAppsConnectedEnvironmentsReader",
+                              "ContainerAppsContributor",
+                              "ContainerAppsJobsContributor",
+                              "ContainerAppsJobsOperator",
+                              "ContainerAppsJobsReader",
+                              "ContainerAppsManagedEnvironmentsContributor",
+                              "ContainerAppsManagedEnvironmentsReader",
+                              "ContainerAppsOperator",
+                              "ContainerAppsSessionExecutor",
+                              "ContainerAppsSessionPoolsContributor",
+                              "ContainerRegistryRepositoryWriter",
+                              "ContainerRegistryTasksContributor",
+                              "ContainerRegistryContributorDataAccessConfigurationAdministrator",
+                              "Contributor",
+                              "CosmosBackupOperator",
+                              "CosmosDBAccountReaderRole",
+                              "CosmosDBBuiltInDataContributor",
+                              "CosmosDBBuiltInDataReader",
+                              "CosmosDBOperator",
+                              "CosmosRestoreOperator",
+                              "CostManagementContributor",
+                              "CostManagementReader",
+                              "DataBoxContributor",
+                              "DataBoxReader",
+                              "DataFactoryContributor",
+                              "DataLakeAnalyticsDeveloper",
+                              "DataOperatorForManagedDisks",
+                              "DataPurger",
+                              "DefenderForStorageDataScanner",
+                              "DesktopVirtualizationApplicationGroupContributor",
+                              "DesktopVirtualizationApplicationGroupReader",
+                              "DesktopVirtualizationContributor",
+                              "DesktopVirtualizationHostPoolContributor",
+                              "DesktopVirtualizationHostPoolReader",
+                              "DesktopVirtualizationReader",
+                              "DesktopVirtualizationSessionHostOperator",
+                              "DesktopVirtualizationUser",
+                              "DesktopVirtualizationUserSessionOperator",
+                              "DesktopVirtualizationWorkspaceContributor",
+                              "DesktopVirtualizationWorkspaceReader",
+                              "DevTestLabsUser",
+                              "DeviceUpdateAdministrator",
+                              "DeviceUpdateContentAdministrator",
+                              "DeviceUpdateContentReader",
+                              "DeviceUpdateDeploymentsAdministrator",
+                              "DeviceUpdateDeploymentsReader",
+                              "DeviceUpdateReader",
+                              "DiskBackupReader",
+                              "DiskPoolOperator",
+                              "DiskRestoreOperator",
+                              "DiskSnapshotContributor",
+                              "DnsZoneContributor",
+                              "DocumentDBAccountContributor",
+                              "DomainServicesContributor",
+                              "DomainServicesReader",
+                              "ElasticSANOwner",
+                              "ElasticSANReader",
+                              "ElasticSANVolumeGroupOwner",
+                              "EventGridContributor",
+                              "EventGridDataSender",
+                              "EventGridEventSubscriptionContributor",
+                              "EventGridEventSubscriptionReader",
+                              "FhirDataContributor",
+                              "FhirDataExporter",
+                              "FhirDataImporter",
+                              "FhirDataReader",
+                              "FhirDataWriter",
+                              "GrafanaAdmin",
+                              "GrafanaEditor",
+                              "GrafanaViewer",
+                              "HdInsightClusterOperator",
+                              "HdInsightDomainServicesContributor",
+                              "HierarchySettingsAdministrator",
+                              "IntegrationServiceEnvironmentContributor",
+                              "IntegrationServiceEnvironmentDeveloper",
+                              "IntelligentSystemsAccountContributor",
+                              "IotHubDataContributor",
+                              "IotHubDataReader",
+                              "IotHubRegistryContributor",
+                              "IotHubTwinContributor",
+                              "KeyVaultAdministrator",
+                              "KeyVaultCertificateUser",
+                              "KeyVaultCertificatesOfficer",
+                              "KeyVaultContributor",
+                              "KeyVaultCryptoOfficer",
+                              "KeyVaultCryptoServiceEncryptionUser",
+                              "KeyVaultCryptoServiceReleaseUser",
+                              "KeyVaultCryptoUser",
+                              "KeyVaultDataAccessAdministrator",
+                              "KeyVaultReader",
+                              "KeyVaultSecretsOfficer",
+                              "KeyVaultSecretsUser",
+                              "KubernetesAgentlessOperator",
+                              "KubernetesClusterAzureArcOnboarding",
+                              "KubernetesExtensionContributor",
+                              "LabAssistant",
+                              "LabContributor",
+                              "LabCreator",
+                              "LabOperator",
+                              "LabServicesContributor",
+                              "LabServicesReader",
+                              "LoadTestContributor",
+                              "LoadTestOwner",
+                              "LoadTestReader",
+                              "LogAnalyticsContributor",
+                              "LogAnalyticsReader",
+                              "LogicAppContributor",
+                              "LogicAppOperator",
+                              "LogicAppsStandardContributor",
+                              "LogicAppsStandardDeveloper",
+                              "LogicAppsStandardOperator",
+                              "LogicAppsStandardReader",
+                              "ManagedApplicationContributorRole",
+                              "ManagedApplicationOperatorRole",
+                              "ManagedApplicationsReader",
+                              "ManagedHSMContributor",
+                              "ManagedIdentityContributor",
+                              "ManagedIdentityOperator",
+                              "ManagedServicesRegistrationAssignmentDeleteRole",
+                              "ManagementGroupContributor",
+                              "ManagementGroupReader",
+                              "MediaServicesAccountAdministrator",
+                              "MediaServicesLiveEventsAdministrator",
+                              "MediaServicesMediaOperator",
+                              "MediaServicesPolicyAdministrator",
+                              "MediaServicesStreamingEndpointsAdministrator",
+                              "MicrosoftSentinelAutomationContributor",
+                              "MicrosoftSentinelContributor",
+                              "MicrosoftSentinelPlaybookOperator",
+                              "MicrosoftSentinelReader",
+                              "MicrosoftSentinelResponder",
+                              "MonitoringContributor",
+                              "MonitoringMetricsPublisher",
+                              "MonitoringReader",
+                              "NetworkContributor",
+                              "NewRelicAPMAccountContributor",
+                              "Owner",
+                              "PolicyInsightsDataWriter",
+                              "PrivateDNSZoneContributor",
+                              "QuotaRequestOperator",
+                              "Reader",
+                              "ReaderAndDataAccess",
+                              "RedisCacheContributor",
+                              "RemoteRenderingAdministrator",
+                              "RemoteRenderingClient",
+                              "ReservationPurchaser",
+                              "ReservationsAdministrator",
+                              "ReservationsReader",
+                              "ResourcePolicyContributor",
+                              "RoleBasedAccessControlAdministrator",
+                              "ScheduledPatchingContributor",
+                              "SchedulerJobCollectionsContributor",
+                              "SchemaRegistryContributor",
+                              "SchemaRegistryReader",
+                              "SearchIndexDataContributor",
+                              "SearchIndexDataReader",
+                              "SearchServiceContributor",
+                              "SecurityAdmin",
+                              "SecurityAssessmentContributor",
+                              "SecurityReader",
+                              "ServicesHubOperator",
+                              "SignalRAccessKeyReader",
+                              "SignalRAppServer",
+                              "SignalRRestAPIOwner",
+                              "SignalRRestAPIReader",
+                              "SignalRServiceOwner",
+                              "SignalRWebPubSubContributor",
+                              "SiteRecoveryContributor",
+                              "SiteRecoveryOperator",
+                              "SiteRecoveryReader",
+                              "SpatialAnchorsAccountContributor",
+                              "SpatialAnchorsAccountOwner",
+                              "SpatialAnchorsAccountReader",
+                              "SqlDBContributor",
+                              "SqlManagedInstanceContributor",
+                              "SqlSecurityManager",
+                              "SqlServerContributor",
+                              "StorageAccountBackupContributor",
+                              "StorageAccountContributor",
+                              "StorageAccountKeyOperatorServiceRole",
+                              "StorageBlobDataContributor",
+                              "StorageBlobDataOwner",
+                              "StorageBlobDataReader",
+                              "StorageBlobDelegator",
+                              "StorageFileDataPrivilegedContributor",
+                              "StorageFileDataPrivilegedReader",
+                              "StorageFileDataSMBShareContributor",
+                              "StorageFileDataSMBShareElevatedContributor",
+                              "StorageFileDataSMBShareReader",
+                              "StorageQueueDataContributor",
+                              "StorageQueueDataMessageProcessor",
+                              "StorageQueueDataMessageSender",
+                              "StorageQueueDataReader",
+                              "StorageTableDataContributor",
+                              "StorageTableDataReader",
+                              "StreamAnalyticsQueryTester",
+                              "SupportRequestContributor",
+                              "TagContributor",
+                              "TemplateSpecContributor",
+                              "TemplateSpecReader",
+                              "TrafficManagerContributor",
+                              "UserAccessAdministrator",
+                              "VirtualMachineAdministratorLogin",
+                              "VirtualMachineContributor",
+                              "VirtualMachineDataAccessAdministrator",
+                              "VirtualMachineLocalUserLogin",
+                              "VirtualMachineUserLogin",
+                              "WebPlanContributor",
+                              "WebsiteContributor",
+                              "WindowsAdminCenterAdministratorLogin",
+                              "WorkbookContributor",
+                              "WorkbookReader"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "beforeKeys": [
+          "componentFlagValidation",
+          "bastionNsg",
+          "appGwNsg",
+          "aiGatewayNsg",
+          "routeTable",
+          "networkLayoutValidation",
+          "virtualNetworkSubnets",
+          "virtualNetwork",
+          "spokeToHubPeering",
+          "testVmBastionHost",
+          "firewall",
+          "defaultRoute",
+          "testVmUAI",
+          "testVm",
+          "natGateway",
+          "assignTestVmRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorTestVm",
+          "cse",
+          "privateDnsZones",
+          "privateEndpoints",
+          "aiFoundryUAI",
+          "aiFoundryStorageAccount",
+          "aiFoundry",
+          "bingSearchConnection",
+          "aiFoundryBingConnection",
+          "aiFoundryConnectionSearch",
+          "aiFoundryKnowledgeBaseSearchConnection",
+          "aiFoundryConnectionInsights",
+          "aiFoundryConnectionStorage",
+          "appInsights",
+          "privateLinkScope",
+          "privateEndpointPrivateLinkScope",
+          "containerEnvUAI",
+          "containerEnv",
+          "containerRegistryUAI",
+          "containerRegistry",
+          "acrTaskAgentPool",
+          "durableTask",
+          "durableTaskRoles",
+          "containerAppsUAI",
+          "containerApps",
+          "cosmosUAI",
+          "cosmosDBAccount",
+          "cosmosSqlDatabase",
+          "keyVault",
+          "logAnalytics",
+          "searchServiceUAI",
+          "searchService",
+          "searchFoundrySharedPrivateLinks",
+          "searchServiceAIFoundry",
+          "speechService",
+          "storageAccount",
+          "assignExecutorRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorExecutor",
+          "assignContainerAppRoles",
+          "assignCrossServiceRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorContainerApps",
+          "appConfig",
+          "containerAppsSettings",
+          "publicIngressM",
+          "appConfigKeyVaultPopulate",
+          "cosmosConfigKeyVaultPopulate",
+          "appConfigPopulate"
+        ],
+        "afterKeys": [
+          "componentFlagValidation",
+          "bastionNsg",
+          "appGwNsg",
+          "aiGatewayNsg",
+          "routeTable",
+          "networkLayoutValidation",
+          "virtualNetworkSubnets",
+          "virtualNetwork",
+          "spokeToHubPeering",
+          "testVmBastionHost",
+          "firewall",
+          "defaultRoute",
+          "testVmUAI",
+          "testVm",
+          "natGateway",
+          "assignTestVmRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorTestVm",
+          "cse",
+          "privateDnsZones",
+          "privateEndpoints",
+          "aiFoundryUAI",
+          "aiFoundryStorageAccount",
+          "aiFoundry",
+          "bingSearchConnection",
+          "aiFoundryBingConnection",
+          "aiFoundryConnectionSearch",
+          "aiFoundryKnowledgeBaseSearchConnection",
+          "aiFoundryConnectionInsights",
+          "aiFoundryConnectionStorage",
+          "appInsights",
+          "privateLinkScope",
+          "privateEndpointPrivateLinkScope",
+          "containerEnvUAI",
+          "containerEnv",
+          "containerRegistryUAI",
+          "containerRegistry",
+          "acrTaskAgentPool",
+          "durableTask",
+          "durableTaskRoles",
+          "containerAppsUAI",
+          "containerApps",
+          "cosmosUAI",
+          "cosmosDBAccount",
+          "cosmosSqlDatabase",
+          "keyVault",
+          "logAnalytics",
+          "searchServiceUAI",
+          "searchService",
+          "searchFoundrySharedPrivateLinks",
+          "searchServiceAIFoundry",
+          "speechService",
+          "storageAccount",
+          "assignExecutorRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorExecutor",
+          "assignAgentConsumerRoles",
+          "assignContainerAppRoles",
+          "assignCrossServiceRoles",
+          "assignCosmosDBCosmosDbBuiltInDataContributorContainerApps",
+          "appConfig",
+          "containerAppsSettings",
+          "publicIngressM",
+          "appConfigKeyVaultPopulate",
+          "cosmosConfigKeyVaultPopulate",
+          "appConfigPopulate"
+        ]
+      },
+      "variables": {
+        "kind": "object",
+        "changes": {
+          "_1._3": {
+            "kind": "object",
+            "changes": {
+              "FoundryAgentConsumer": {
+                "kind": "added",
+                "after": {
+                  "guid": "eed3b665-ab3a-47b6-8f48-c9382fb1dad6",
+                  "key": "FoundryAgentConsumer"
+                }
+              }
+            },
+            "beforeKeys": [
+              "DurableTaskDataContributor",
+              "AcrDelete",
+              "AcrImageSigner",
+              "AcrPull",
+              "AcrPush",
+              "AcrQuarantineReader",
+              "AcrQuarantineWriter",
+              "AksClusterAdminRole",
+              "AksClusterMonitoringUser",
+              "AksClusterUserRole",
+              "AksContributorRole",
+              "AksFleetManagerContributorRole",
+              "AksFleetManagerRBACAdmin",
+              "AksFleetManagerRBACClusterAdmin",
+              "AksFleetManagerRBACReader",
+              "AksFleetManagerRBACWriter",
+              "AksRBACAdmin",
+              "AksRBACClusterAdmin",
+              "AksRBACReader",
+              "AksRBACWriter",
+              "AppComplianceAutomationAdministrator",
+              "AppComplianceAutomationReader",
+              "AppConfigurationDataOwner",
+              "AppConfigurationDataReader",
+              "ApplicationInsightsComponentContributor",
+              "ApplicationInsightsSnapshotDebugger",
+              "AttestationContributor",
+              "AttestationReader",
+              "AutomationContributor",
+              "AutomationJobOperator",
+              "AutomationOperator",
+              "AutomationRunbookOperator",
+              "AvereContributor",
+              "AvereOperator",
+              "AzureAIAdministrator",
+              "AzureAIDeveloper",
+              "AzureAIEnterpriseNetworkConnectionApprover",
+              "AzureAIInferenceDeploymentOperator",
+              "AzureAIProjectManager",
+              "AzureAISafetyEvaluator",
+              "AzureAIUser",
+              "AzureApiCenterComplianceManager",
+              "AzureApiCenterDataReader",
+              "AzureApiCenterServiceContributor",
+              "AzureApiCenterServiceReader",
+              "AzureArcEnabledKubernetesClusterUser",
+              "AzureArcKubernetesAdmin",
+              "AzureArcKubernetesClusterAdmin",
+              "AzureArcKubernetesViewer",
+              "AzureArcKubernetesWriter",
+              "AzureConnectedMachineOnboarding",
+              "AzureConnectedMachineResourceAdministrator",
+              "AzureConnectedMachineResourceManager",
+              "AzureConnectedSQLServerOnboarding",
+              "AzureContainerStorageOperator",
+              "AzureContainerStorageOwner",
+              "AzureDigitalTwinsDataOwner",
+              "AzureDigitalTwinsDataReader",
+              "AzureEventHubsDataOwner",
+              "AzureEventHubsDataReceiver",
+              "AzureEventHubsDataSender",
+              "AzureFrontDoorDomainContributor",
+              "AzureFrontDoorDomainReader",
+              "AzureFrontDoorProfileReader",
+              "AzureFrontDoorSecretReader",
+              "AzureMLComputeOperator",
+              "AzureMLDataScientist",
+              "AzureMapsDataContributor",
+              "AzureMapsDataReader",
+              "AzureRelayListener",
+              "AzureRelayOwner",
+              "AzureRelaySender",
+              "AzureServiceBusDataOwner",
+              "AzureServiceBusDataReceiver",
+              "AzureServiceBusDataSender",
+              "AzureSpringCloudConfigServerContributor",
+              "AzureSpringCloudConfigServerReader",
+              "AzureSpringCloudDataReader",
+              "AzureSpringCloudServiceRegistryContributor",
+              "AzureSpringCloudServiceRegistryReader",
+              "AzureStackRegistrationOwner",
+              "BackupContributor",
+              "BackupOperator",
+              "BackupReader",
+              "BillingReader",
+              "BizTalkContributor",
+              "BlueprintContributor",
+              "BlueprintOperator",
+              "CarbonOptimizationReader",
+              "CdnEndpointContributor",
+              "CdnEndpointReader",
+              "CdnProfileContributor",
+              "CdnProfileReader",
+              "ClassicNetworkContributor",
+              "ClassicStorageAccountContributor",
+              "ClassicStorageAccountKeyOperatorServiceRole",
+              "ClassicVirtualMachineContributor",
+              "CognitiveServicesContributor",
+              "CognitiveServicesCustomVisionContributor",
+              "CognitiveServicesCustomVisionDeployment",
+              "CognitiveServicesCustomVisionLabeler",
+              "CognitiveServicesCustomVisionReader",
+              "CognitiveServicesCustomVisionTrainer",
+              "CognitiveServicesDataReader",
+              "CognitiveServicesFaceRecognizer",
+              "CognitiveServicesMetricsAdvisorAdministrator",
+              "CognitiveServicesOpenAIContributor",
+              "CognitiveServicesOpenAIUser",
+              "CognitiveServicesQnAMakerEditor",
+              "CognitiveServicesQnAMakerReader",
+              "CognitiveServicesUsagesReader",
+              "CognitiveServicesUser",
+              "ContainerAppReader",
+              "ContainerAppsConnectedEnvironmentsContributor",
+              "ContainerAppsConnectedEnvironmentsReader",
+              "ContainerAppsContributor",
+              "ContainerAppsJobsContributor",
+              "ContainerAppsJobsOperator",
+              "ContainerAppsJobsReader",
+              "ContainerAppsManagedEnvironmentsContributor",
+              "ContainerAppsManagedEnvironmentsReader",
+              "ContainerAppsOperator",
+              "ContainerAppsSessionExecutor",
+              "ContainerAppsSessionPoolsContributor",
+              "ContainerRegistryRepositoryWriter",
+              "ContainerRegistryTasksContributor",
+              "ContainerRegistryContributorDataAccessConfigurationAdministrator",
+              "Contributor",
+              "CosmosBackupOperator",
+              "CosmosDBAccountReaderRole",
+              "CosmosDBBuiltInDataContributor",
+              "CosmosDBBuiltInDataReader",
+              "CosmosDBOperator",
+              "CosmosRestoreOperator",
+              "CostManagementContributor",
+              "CostManagementReader",
+              "DataBoxContributor",
+              "DataBoxReader",
+              "DataFactoryContributor",
+              "DataLakeAnalyticsDeveloper",
+              "DataOperatorForManagedDisks",
+              "DataPurger",
+              "DefenderForStorageDataScanner",
+              "DesktopVirtualizationApplicationGroupContributor",
+              "DesktopVirtualizationApplicationGroupReader",
+              "DesktopVirtualizationContributor",
+              "DesktopVirtualizationHostPoolContributor",
+              "DesktopVirtualizationHostPoolReader",
+              "DesktopVirtualizationReader",
+              "DesktopVirtualizationSessionHostOperator",
+              "DesktopVirtualizationUser",
+              "DesktopVirtualizationUserSessionOperator",
+              "DesktopVirtualizationWorkspaceContributor",
+              "DesktopVirtualizationWorkspaceReader",
+              "DevTestLabsUser",
+              "DeviceUpdateAdministrator",
+              "DeviceUpdateContentAdministrator",
+              "DeviceUpdateContentReader",
+              "DeviceUpdateDeploymentsAdministrator",
+              "DeviceUpdateDeploymentsReader",
+              "DeviceUpdateReader",
+              "DiskBackupReader",
+              "DiskPoolOperator",
+              "DiskRestoreOperator",
+              "DiskSnapshotContributor",
+              "DnsZoneContributor",
+              "DocumentDBAccountContributor",
+              "DomainServicesContributor",
+              "DomainServicesReader",
+              "ElasticSANOwner",
+              "ElasticSANReader",
+              "ElasticSANVolumeGroupOwner",
+              "EventGridContributor",
+              "EventGridDataSender",
+              "EventGridEventSubscriptionContributor",
+              "EventGridEventSubscriptionReader",
+              "FhirDataContributor",
+              "FhirDataExporter",
+              "FhirDataImporter",
+              "FhirDataReader",
+              "FhirDataWriter",
+              "GrafanaAdmin",
+              "GrafanaEditor",
+              "GrafanaViewer",
+              "HdInsightClusterOperator",
+              "HdInsightDomainServicesContributor",
+              "HierarchySettingsAdministrator",
+              "IntegrationServiceEnvironmentContributor",
+              "IntegrationServiceEnvironmentDeveloper",
+              "IntelligentSystemsAccountContributor",
+              "IotHubDataContributor",
+              "IotHubDataReader",
+              "IotHubRegistryContributor",
+              "IotHubTwinContributor",
+              "KeyVaultAdministrator",
+              "KeyVaultCertificateUser",
+              "KeyVaultCertificatesOfficer",
+              "KeyVaultContributor",
+              "KeyVaultCryptoOfficer",
+              "KeyVaultCryptoServiceEncryptionUser",
+              "KeyVaultCryptoServiceReleaseUser",
+              "KeyVaultCryptoUser",
+              "KeyVaultDataAccessAdministrator",
+              "KeyVaultReader",
+              "KeyVaultSecretsOfficer",
+              "KeyVaultSecretsUser",
+              "KubernetesAgentlessOperator",
+              "KubernetesClusterAzureArcOnboarding",
+              "KubernetesExtensionContributor",
+              "LabAssistant",
+              "LabContributor",
+              "LabCreator",
+              "LabOperator",
+              "LabServicesContributor",
+              "LabServicesReader",
+              "LoadTestContributor",
+              "LoadTestOwner",
+              "LoadTestReader",
+              "LogAnalyticsContributor",
+              "LogAnalyticsReader",
+              "LogicAppContributor",
+              "LogicAppOperator",
+              "LogicAppsStandardContributor",
+              "LogicAppsStandardDeveloper",
+              "LogicAppsStandardOperator",
+              "LogicAppsStandardReader",
+              "ManagedApplicationContributorRole",
+              "ManagedApplicationOperatorRole",
+              "ManagedApplicationsReader",
+              "ManagedHSMContributor",
+              "ManagedIdentityContributor",
+              "ManagedIdentityOperator",
+              "ManagedServicesRegistrationAssignmentDeleteRole",
+              "ManagementGroupContributor",
+              "ManagementGroupReader",
+              "MediaServicesAccountAdministrator",
+              "MediaServicesLiveEventsAdministrator",
+              "MediaServicesMediaOperator",
+              "MediaServicesPolicyAdministrator",
+              "MediaServicesStreamingEndpointsAdministrator",
+              "MicrosoftSentinelAutomationContributor",
+              "MicrosoftSentinelContributor",
+              "MicrosoftSentinelPlaybookOperator",
+              "MicrosoftSentinelReader",
+              "MicrosoftSentinelResponder",
+              "MonitoringContributor",
+              "MonitoringMetricsPublisher",
+              "MonitoringReader",
+              "NetworkContributor",
+              "NewRelicAPMAccountContributor",
+              "Owner",
+              "PolicyInsightsDataWriter",
+              "PrivateDNSZoneContributor",
+              "QuotaRequestOperator",
+              "Reader",
+              "ReaderAndDataAccess",
+              "RedisCacheContributor",
+              "RemoteRenderingAdministrator",
+              "RemoteRenderingClient",
+              "ReservationPurchaser",
+              "ReservationsAdministrator",
+              "ReservationsReader",
+              "ResourcePolicyContributor",
+              "RoleBasedAccessControlAdministrator",
+              "ScheduledPatchingContributor",
+              "SchedulerJobCollectionsContributor",
+              "SchemaRegistryContributor",
+              "SchemaRegistryReader",
+              "SearchIndexDataContributor",
+              "SearchIndexDataReader",
+              "SearchServiceContributor",
+              "SecurityAdmin",
+              "SecurityAssessmentContributor",
+              "SecurityReader",
+              "ServicesHubOperator",
+              "SignalRAccessKeyReader",
+              "SignalRAppServer",
+              "SignalRRestAPIOwner",
+              "SignalRRestAPIReader",
+              "SignalRServiceOwner",
+              "SignalRWebPubSubContributor",
+              "SiteRecoveryContributor",
+              "SiteRecoveryOperator",
+              "SiteRecoveryReader",
+              "SpatialAnchorsAccountContributor",
+              "SpatialAnchorsAccountOwner",
+              "SpatialAnchorsAccountReader",
+              "SqlDBContributor",
+              "SqlManagedInstanceContributor",
+              "SqlSecurityManager",
+              "SqlServerContributor",
+              "StorageAccountBackupContributor",
+              "StorageAccountContributor",
+              "StorageAccountKeyOperatorServiceRole",
+              "StorageBlobDataContributor",
+              "StorageBlobDataOwner",
+              "StorageBlobDataReader",
+              "StorageBlobDelegator",
+              "StorageFileDataPrivilegedContributor",
+              "StorageFileDataPrivilegedReader",
+              "StorageFileDataSMBShareContributor",
+              "StorageFileDataSMBShareElevatedContributor",
+              "StorageFileDataSMBShareReader",
+              "StorageQueueDataContributor",
+              "StorageQueueDataMessageProcessor",
+              "StorageQueueDataMessageSender",
+              "StorageQueueDataReader",
+              "StorageTableDataContributor",
+              "StorageTableDataReader",
+              "StreamAnalyticsQueryTester",
+              "SupportRequestContributor",
+              "TagContributor",
+              "TemplateSpecContributor",
+              "TemplateSpecReader",
+              "TrafficManagerContributor",
+              "UserAccessAdministrator",
+              "VirtualMachineAdministratorLogin",
+              "VirtualMachineContributor",
+              "VirtualMachineDataAccessAdministrator",
+              "VirtualMachineLocalUserLogin",
+              "VirtualMachineUserLogin",
+              "WebPlanContributor",
+              "WebsiteContributor",
+              "WindowsAdminCenterAdministratorLogin",
+              "WorkbookContributor",
+              "WorkbookReader"
+            ],
+            "afterKeys": [
+              "DurableTaskDataContributor",
+              "AcrDelete",
+              "AcrImageSigner",
+              "AcrPull",
+              "AcrPush",
+              "AcrQuarantineReader",
+              "AcrQuarantineWriter",
+              "AksClusterAdminRole",
+              "AksClusterMonitoringUser",
+              "AksClusterUserRole",
+              "AksContributorRole",
+              "AksFleetManagerContributorRole",
+              "AksFleetManagerRBACAdmin",
+              "AksFleetManagerRBACClusterAdmin",
+              "AksFleetManagerRBACReader",
+              "AksFleetManagerRBACWriter",
+              "AksRBACAdmin",
+              "AksRBACClusterAdmin",
+              "AksRBACReader",
+              "AksRBACWriter",
+              "AppComplianceAutomationAdministrator",
+              "AppComplianceAutomationReader",
+              "AppConfigurationDataOwner",
+              "AppConfigurationDataReader",
+              "ApplicationInsightsComponentContributor",
+              "ApplicationInsightsSnapshotDebugger",
+              "AttestationContributor",
+              "AttestationReader",
+              "AutomationContributor",
+              "AutomationJobOperator",
+              "AutomationOperator",
+              "AutomationRunbookOperator",
+              "AvereContributor",
+              "AvereOperator",
+              "AzureAIAdministrator",
+              "AzureAIDeveloper",
+              "AzureAIEnterpriseNetworkConnectionApprover",
+              "AzureAIInferenceDeploymentOperator",
+              "AzureAIProjectManager",
+              "AzureAISafetyEvaluator",
+              "AzureAIUser",
+              "FoundryAgentConsumer",
+              "AzureApiCenterComplianceManager",
+              "AzureApiCenterDataReader",
+              "AzureApiCenterServiceContributor",
+              "AzureApiCenterServiceReader",
+              "AzureArcEnabledKubernetesClusterUser",
+              "AzureArcKubernetesAdmin",
+              "AzureArcKubernetesClusterAdmin",
+              "AzureArcKubernetesViewer",
+              "AzureArcKubernetesWriter",
+              "AzureConnectedMachineOnboarding",
+              "AzureConnectedMachineResourceAdministrator",
+              "AzureConnectedMachineResourceManager",
+              "AzureConnectedSQLServerOnboarding",
+              "AzureContainerStorageOperator",
+              "AzureContainerStorageOwner",
+              "AzureDigitalTwinsDataOwner",
+              "AzureDigitalTwinsDataReader",
+              "AzureEventHubsDataOwner",
+              "AzureEventHubsDataReceiver",
+              "AzureEventHubsDataSender",
+              "AzureFrontDoorDomainContributor",
+              "AzureFrontDoorDomainReader",
+              "AzureFrontDoorProfileReader",
+              "AzureFrontDoorSecretReader",
+              "AzureMLComputeOperator",
+              "AzureMLDataScientist",
+              "AzureMapsDataContributor",
+              "AzureMapsDataReader",
+              "AzureRelayListener",
+              "AzureRelayOwner",
+              "AzureRelaySender",
+              "AzureServiceBusDataOwner",
+              "AzureServiceBusDataReceiver",
+              "AzureServiceBusDataSender",
+              "AzureSpringCloudConfigServerContributor",
+              "AzureSpringCloudConfigServerReader",
+              "AzureSpringCloudDataReader",
+              "AzureSpringCloudServiceRegistryContributor",
+              "AzureSpringCloudServiceRegistryReader",
+              "AzureStackRegistrationOwner",
+              "BackupContributor",
+              "BackupOperator",
+              "BackupReader",
+              "BillingReader",
+              "BizTalkContributor",
+              "BlueprintContributor",
+              "BlueprintOperator",
+              "CarbonOptimizationReader",
+              "CdnEndpointContributor",
+              "CdnEndpointReader",
+              "CdnProfileContributor",
+              "CdnProfileReader",
+              "ClassicNetworkContributor",
+              "ClassicStorageAccountContributor",
+              "ClassicStorageAccountKeyOperatorServiceRole",
+              "ClassicVirtualMachineContributor",
+              "CognitiveServicesContributor",
+              "CognitiveServicesCustomVisionContributor",
+              "CognitiveServicesCustomVisionDeployment",
+              "CognitiveServicesCustomVisionLabeler",
+              "CognitiveServicesCustomVisionReader",
+              "CognitiveServicesCustomVisionTrainer",
+              "CognitiveServicesDataReader",
+              "CognitiveServicesFaceRecognizer",
+              "CognitiveServicesMetricsAdvisorAdministrator",
+              "CognitiveServicesOpenAIContributor",
+              "CognitiveServicesOpenAIUser",
+              "CognitiveServicesQnAMakerEditor",
+              "CognitiveServicesQnAMakerReader",
+              "CognitiveServicesUsagesReader",
+              "CognitiveServicesUser",
+              "ContainerAppReader",
+              "ContainerAppsConnectedEnvironmentsContributor",
+              "ContainerAppsConnectedEnvironmentsReader",
+              "ContainerAppsContributor",
+              "ContainerAppsJobsContributor",
+              "ContainerAppsJobsOperator",
+              "ContainerAppsJobsReader",
+              "ContainerAppsManagedEnvironmentsContributor",
+              "ContainerAppsManagedEnvironmentsReader",
+              "ContainerAppsOperator",
+              "ContainerAppsSessionExecutor",
+              "ContainerAppsSessionPoolsContributor",
+              "ContainerRegistryRepositoryWriter",
+              "ContainerRegistryTasksContributor",
+              "ContainerRegistryContributorDataAccessConfigurationAdministrator",
+              "Contributor",
+              "CosmosBackupOperator",
+              "CosmosDBAccountReaderRole",
+              "CosmosDBBuiltInDataContributor",
+              "CosmosDBBuiltInDataReader",
+              "CosmosDBOperator",
+              "CosmosRestoreOperator",
+              "CostManagementContributor",
+              "CostManagementReader",
+              "DataBoxContributor",
+              "DataBoxReader",
+              "DataFactoryContributor",
+              "DataLakeAnalyticsDeveloper",
+              "DataOperatorForManagedDisks",
+              "DataPurger",
+              "DefenderForStorageDataScanner",
+              "DesktopVirtualizationApplicationGroupContributor",
+              "DesktopVirtualizationApplicationGroupReader",
+              "DesktopVirtualizationContributor",
+              "DesktopVirtualizationHostPoolContributor",
+              "DesktopVirtualizationHostPoolReader",
+              "DesktopVirtualizationReader",
+              "DesktopVirtualizationSessionHostOperator",
+              "DesktopVirtualizationUser",
+              "DesktopVirtualizationUserSessionOperator",
+              "DesktopVirtualizationWorkspaceContributor",
+              "DesktopVirtualizationWorkspaceReader",
+              "DevTestLabsUser",
+              "DeviceUpdateAdministrator",
+              "DeviceUpdateContentAdministrator",
+              "DeviceUpdateContentReader",
+              "DeviceUpdateDeploymentsAdministrator",
+              "DeviceUpdateDeploymentsReader",
+              "DeviceUpdateReader",
+              "DiskBackupReader",
+              "DiskPoolOperator",
+              "DiskRestoreOperator",
+              "DiskSnapshotContributor",
+              "DnsZoneContributor",
+              "DocumentDBAccountContributor",
+              "DomainServicesContributor",
+              "DomainServicesReader",
+              "ElasticSANOwner",
+              "ElasticSANReader",
+              "ElasticSANVolumeGroupOwner",
+              "EventGridContributor",
+              "EventGridDataSender",
+              "EventGridEventSubscriptionContributor",
+              "EventGridEventSubscriptionReader",
+              "FhirDataContributor",
+              "FhirDataExporter",
+              "FhirDataImporter",
+              "FhirDataReader",
+              "FhirDataWriter",
+              "GrafanaAdmin",
+              "GrafanaEditor",
+              "GrafanaViewer",
+              "HdInsightClusterOperator",
+              "HdInsightDomainServicesContributor",
+              "HierarchySettingsAdministrator",
+              "IntegrationServiceEnvironmentContributor",
+              "IntegrationServiceEnvironmentDeveloper",
+              "IntelligentSystemsAccountContributor",
+              "IotHubDataContributor",
+              "IotHubDataReader",
+              "IotHubRegistryContributor",
+              "IotHubTwinContributor",
+              "KeyVaultAdministrator",
+              "KeyVaultCertificateUser",
+              "KeyVaultCertificatesOfficer",
+              "KeyVaultContributor",
+              "KeyVaultCryptoOfficer",
+              "KeyVaultCryptoServiceEncryptionUser",
+              "KeyVaultCryptoServiceReleaseUser",
+              "KeyVaultCryptoUser",
+              "KeyVaultDataAccessAdministrator",
+              "KeyVaultReader",
+              "KeyVaultSecretsOfficer",
+              "KeyVaultSecretsUser",
+              "KubernetesAgentlessOperator",
+              "KubernetesClusterAzureArcOnboarding",
+              "KubernetesExtensionContributor",
+              "LabAssistant",
+              "LabContributor",
+              "LabCreator",
+              "LabOperator",
+              "LabServicesContributor",
+              "LabServicesReader",
+              "LoadTestContributor",
+              "LoadTestOwner",
+              "LoadTestReader",
+              "LogAnalyticsContributor",
+              "LogAnalyticsReader",
+              "LogicAppContributor",
+              "LogicAppOperator",
+              "LogicAppsStandardContributor",
+              "LogicAppsStandardDeveloper",
+              "LogicAppsStandardOperator",
+              "LogicAppsStandardReader",
+              "ManagedApplicationContributorRole",
+              "ManagedApplicationOperatorRole",
+              "ManagedApplicationsReader",
+              "ManagedHSMContributor",
+              "ManagedIdentityContributor",
+              "ManagedIdentityOperator",
+              "ManagedServicesRegistrationAssignmentDeleteRole",
+              "ManagementGroupContributor",
+              "ManagementGroupReader",
+              "MediaServicesAccountAdministrator",
+              "MediaServicesLiveEventsAdministrator",
+              "MediaServicesMediaOperator",
+              "MediaServicesPolicyAdministrator",
+              "MediaServicesStreamingEndpointsAdministrator",
+              "MicrosoftSentinelAutomationContributor",
+              "MicrosoftSentinelContributor",
+              "MicrosoftSentinelPlaybookOperator",
+              "MicrosoftSentinelReader",
+              "MicrosoftSentinelResponder",
+              "MonitoringContributor",
+              "MonitoringMetricsPublisher",
+              "MonitoringReader",
+              "NetworkContributor",
+              "NewRelicAPMAccountContributor",
+              "Owner",
+              "PolicyInsightsDataWriter",
+              "PrivateDNSZoneContributor",
+              "QuotaRequestOperator",
+              "Reader",
+              "ReaderAndDataAccess",
+              "RedisCacheContributor",
+              "RemoteRenderingAdministrator",
+              "RemoteRenderingClient",
+              "ReservationPurchaser",
+              "ReservationsAdministrator",
+              "ReservationsReader",
+              "ResourcePolicyContributor",
+              "RoleBasedAccessControlAdministrator",
+              "ScheduledPatchingContributor",
+              "SchedulerJobCollectionsContributor",
+              "SchemaRegistryContributor",
+              "SchemaRegistryReader",
+              "SearchIndexDataContributor",
+              "SearchIndexDataReader",
+              "SearchServiceContributor",
+              "SecurityAdmin",
+              "SecurityAssessmentContributor",
+              "SecurityReader",
+              "ServicesHubOperator",
+              "SignalRAccessKeyReader",
+              "SignalRAppServer",
+              "SignalRRestAPIOwner",
+              "SignalRRestAPIReader",
+              "SignalRServiceOwner",
+              "SignalRWebPubSubContributor",
+              "SiteRecoveryContributor",
+              "SiteRecoveryOperator",
+              "SiteRecoveryReader",
+              "SpatialAnchorsAccountContributor",
+              "SpatialAnchorsAccountOwner",
+              "SpatialAnchorsAccountReader",
+              "SqlDBContributor",
+              "SqlManagedInstanceContributor",
+              "SqlSecurityManager",
+              "SqlServerContributor",
+              "StorageAccountBackupContributor",
+              "StorageAccountContributor",
+              "StorageAccountKeyOperatorServiceRole",
+              "StorageBlobDataContributor",
+              "StorageBlobDataOwner",
+              "StorageBlobDataReader",
+              "StorageBlobDelegator",
+              "StorageFileDataPrivilegedContributor",
+              "StorageFileDataPrivilegedReader",
+              "StorageFileDataSMBShareContributor",
+              "StorageFileDataSMBShareElevatedContributor",
+              "StorageFileDataSMBShareReader",
+              "StorageQueueDataContributor",
+              "StorageQueueDataMessageProcessor",
+              "StorageQueueDataMessageSender",
+              "StorageQueueDataReader",
+              "StorageTableDataContributor",
+              "StorageTableDataReader",
+              "StreamAnalyticsQueryTester",
+              "SupportRequestContributor",
+              "TagContributor",
+              "TemplateSpecContributor",
+              "TemplateSpecReader",
+              "TrafficManagerContributor",
+              "UserAccessAdministrator",
+              "VirtualMachineAdministratorLogin",
+              "VirtualMachineContributor",
+              "VirtualMachineDataAccessAdministrator",
+              "VirtualMachineLocalUserLogin",
+              "VirtualMachineUserLogin",
+              "WebPlanContributor",
+              "WebsiteContributor",
+              "WindowsAdminCenterAdministratorLogin",
+              "WorkbookContributor",
+              "WorkbookReader"
+            ]
+          },
+          "_containerRuntimeEnv": {
+            "kind": "changed",
+            "before": [
+              {
+                "name": "SUBSCRIPTION_ID",
+                "value": "[subscription().subscriptionId]"
+              },
+              {
+                "name": "AZURE_RESOURCE_GROUP",
+                "value": "[resourceGroup().name]"
+              },
+              {
+                "name": "AZURE_APP_RESOURCE_GROUP",
+                "value": "[variables('_applicationResourceGroupName')]"
+              },
+              {
+                "name": "AZURE_NETWORK_RESOURCE_GROUP",
+                "value": "[variables('_networkResourceGroupName')]"
+              },
+              {
+                "name": "LOCATION",
+                "value": "[parameters('location')]"
+              },
+              {
+                "name": "ENVIRONMENT_NAME",
+                "value": "[parameters('environmentName')]"
+              },
+              {
+                "name": "RESOURCE_TOKEN",
+                "value": "[parameters('resourceToken')]"
+              },
+              {
+                "name": "RELEASE",
+                "value": "[variables('_manifest').tag]"
+              },
+              {
+                "name": "NETWORK_ISOLATION",
+                "value": "[toLower(string(variables('_networkIsolation')))]"
+              },
+              {
+                "name": "USE_UAI",
+                "value": "[toLower(string(variables('_useUAI')))]"
+              },
+              {
+                "name": "ENABLE_AGENTIC_RETRIEVAL",
+                "value": "[toLower(string(parameters('enableAgenticRetrieval')))]"
+              },
+              {
+                "name": "RETRIEVAL_BACKEND",
+                "value": "[parameters('retrievalBackend')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_NAME",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('knowledgeBaseName'), '')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_ENDPOINT",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), format('https://{0}.search.windows.net', variables('resourceNames').searchServiceName), '')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_CONNECTION_ID",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.CognitiveServices/accounts/{2}/projects/{3}/connections/{4}', subscription().subscriptionId, variables('_foundryResourceGroupName'), variables('resourceNames').aiFoundryAccountName, variables('resourceNames').aiFoundryProjectName, parameters('knowledgeBaseConnectionName')), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_API_VERSION",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqApiVersion'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeRetrievalBillingPlan'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeSourceName'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND",
+                "value": "[variables('effectiveFoundryIqKnowledgeSourceKind')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED",
+                "value": "[if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), toLower(string(parameters('foundryIqFilterAddOnEnabled'))), 'false')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_SECURITY_FIELD_NAME",
+                "value": "[if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSecurityFieldName'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqMaxOutputDocuments'), '')]"
+              },
+              {
+                "name": "LOG_LEVEL",
+                "value": "INFO"
+              },
+              {
+                "name": "ENABLE_CONSOLE_LOGGING",
+                "value": "true"
+              },
+              {
+                "name": "AI_FOUNDRY_ACCOUNT_NAME",
+                "value": "[variables('resourceNames').aiFoundryAccountName]"
+              },
+              {
+                "name": "AI_FOUNDRY_PROJECT_NAME",
+                "value": "[variables('resourceNames').aiFoundryProjectName]"
+              },
+              {
+                "name": "AI_FOUNDRY_ACCOUNT_ENDPOINT",
+                "value": "[format('https://{0}.cognitiveservices.azure.com/', variables('resourceNames').aiFoundryAccountName)]"
+              },
+              {
+                "name": "AI_FOUNDRY_OPENAI_ENDPOINT",
+                "value": "[format('https://{0}.openai.azure.com/', variables('resourceNames').aiFoundryAccountName)]"
+              },
+              {
+                "name": "APP_INSIGHTS_NAME",
+                "value": "[variables('resourceNames').appInsightsName]"
+              },
+              {
+                "name": "CONTAINER_ENV_NAME",
+                "value": "[variables('resourceNames').containerEnvName]"
+              },
+              {
+                "name": "CONTAINER_REGISTRY_NAME",
+                "value": "[variables('resourceNames').containerRegistryName]"
+              },
+              {
+                "name": "CONTAINER_REGISTRY_LOGIN_SERVER",
+                "value": "[format('{0}.azurecr.io', variables('resourceNames').containerRegistryName)]"
+              },
+              {
+                "name": "DATABASE_ACCOUNT_NAME",
+                "value": "[if(parameters('deployCosmosDb'), variables('resourceNames').dbAccountName, '')]"
+              },
+              {
+                "name": "DATABASE_NAME",
+                "value": "[if(parameters('deployCosmosDb'), variables('resourceNames').dbDatabaseName, '')]"
+              },
+              {
+                "name": "SEARCH_SERVICE_NAME",
+                "value": "[variables('resourceNames').searchServiceName]"
+              },
+              {
+                "name": "STORAGE_ACCOUNT_NAME",
+                "value": "[variables('resourceNames').storageAccountName]"
+              },
+              {
+                "name": "KEY_VAULT_NAME",
+                "value": "[variables('resourceNames').keyVaultName]"
+              },
+              {
+                "name": "APP_CONFIG_NAME",
+                "value": "[variables('resourceNames').appConfigName]"
+              },
+              {
+                "name": "APP_RUNTIME_CONFIGURATION_MODE",
+                "value": "[parameters('appRuntimeConfigurationMode')]"
+              }
+            ],
+            "after": [
+              {
+                "name": "SUBSCRIPTION_ID",
+                "value": "[subscription().subscriptionId]"
+              },
+              {
+                "name": "AZURE_RESOURCE_GROUP",
+                "value": "[resourceGroup().name]"
+              },
+              {
+                "name": "AZURE_APP_RESOURCE_GROUP",
+                "value": "[variables('_applicationResourceGroupName')]"
+              },
+              {
+                "name": "AZURE_NETWORK_RESOURCE_GROUP",
+                "value": "[variables('_networkResourceGroupName')]"
+              },
+              {
+                "name": "LOCATION",
+                "value": "[parameters('location')]"
+              },
+              {
+                "name": "ENVIRONMENT_NAME",
+                "value": "[parameters('environmentName')]"
+              },
+              {
+                "name": "RESOURCE_TOKEN",
+                "value": "[parameters('resourceToken')]"
+              },
+              {
+                "name": "RELEASE",
+                "value": "[variables('_manifest').tag]"
+              },
+              {
+                "name": "NETWORK_ISOLATION",
+                "value": "[toLower(string(variables('_networkIsolation')))]"
+              },
+              {
+                "name": "USE_UAI",
+                "value": "[toLower(string(variables('_useUAI')))]"
+              },
+              {
+                "name": "ENABLE_AGENTIC_RETRIEVAL",
+                "value": "[toLower(string(parameters('enableAgenticRetrieval')))]"
+              },
+              {
+                "name": "RETRIEVAL_BACKEND",
+                "value": "[parameters('retrievalBackend')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_NAME",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('knowledgeBaseName'), '')]"
+              },
+              {
+                "name": "TOOLBOX_ENDPOINT",
+                "value": "[if(and(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deployAiFoundry')), parameters('deployAfProject')), parameters('deploySearchService')), format('https://{0}.services.ai.azure.com/api/projects/{1}/toolboxes/{2}/mcp?api-version=v1', variables('resourceNames').aiFoundryAccountName, variables('resourceNames').aiFoundryProjectName, parameters('knowledgeBaseName')), '')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_ENDPOINT",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), format('https://{0}.search.windows.net', variables('resourceNames').searchServiceName), '')]"
+              },
+              {
+                "name": "KNOWLEDGE_BASE_CONNECTION_ID",
+                "value": "[if(and(and(and(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('deployAiFoundry')), parameters('deployAfProject')), parameters('deploySearchService')), format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.CognitiveServices/accounts/{2}/projects/{3}/connections/{4}', subscription().subscriptionId, variables('_foundryResourceGroupName'), variables('resourceNames').aiFoundryAccountName, variables('resourceNames').aiFoundryProjectName, parameters('knowledgeBaseConnectionName')), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_API_VERSION",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqApiVersion'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeRetrievalBillingPlan'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqKnowledgeSourceName'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND",
+                "value": "[variables('effectiveFoundryIqKnowledgeSourceKind')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED",
+                "value": "[if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), toLower(string(parameters('foundryIqFilterAddOnEnabled'))), 'false')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_SECURITY_FIELD_NAME",
+                "value": "[if(and(equals(parameters('retrievalBackend'), 'foundry_iq'), equals(parameters('foundryIqPattern'), 'searchIndex')), parameters('foundryIqSecurityFieldName'), '')]"
+              },
+              {
+                "name": "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS",
+                "value": "[if(equals(parameters('retrievalBackend'), 'foundry_iq'), parameters('foundryIqMaxOutputDocuments'), '')]"
+              },
+              {
+                "name": "LOG_LEVEL",
+                "value": "INFO"
+              },
+              {
+                "name": "ENABLE_CONSOLE_LOGGING",
+                "value": "true"
+              },
+              {
+                "name": "AI_FOUNDRY_ACCOUNT_NAME",
+                "value": "[variables('resourceNames').aiFoundryAccountName]"
+              },
+              {
+                "name": "AI_FOUNDRY_PROJECT_NAME",
+                "value": "[variables('resourceNames').aiFoundryProjectName]"
+              },
+              {
+                "name": "AI_FOUNDRY_ACCOUNT_ENDPOINT",
+                "value": "[format('https://{0}.cognitiveservices.azure.com/', variables('resourceNames').aiFoundryAccountName)]"
+              },
+              {
+                "name": "AI_FOUNDRY_OPENAI_ENDPOINT",
+                "value": "[format('https://{0}.openai.azure.com/', variables('resourceNames').aiFoundryAccountName)]"
+              },
+              {
+                "name": "APP_INSIGHTS_NAME",
+                "value": "[variables('resourceNames').appInsightsName]"
+              },
+              {
+                "name": "CONTAINER_ENV_NAME",
+                "value": "[variables('resourceNames').containerEnvName]"
+              },
+              {
+                "name": "CONTAINER_REGISTRY_NAME",
+                "value": "[variables('resourceNames').containerRegistryName]"
+              },
+              {
+                "name": "CONTAINER_REGISTRY_LOGIN_SERVER",
+                "value": "[format('{0}.azurecr.io', variables('resourceNames').containerRegistryName)]"
+              },
+              {
+                "name": "DATABASE_ACCOUNT_NAME",
+                "value": "[if(parameters('deployCosmosDb'), variables('resourceNames').dbAccountName, '')]"
+              },
+              {
+                "name": "DATABASE_NAME",
+                "value": "[if(parameters('deployCosmosDb'), variables('resourceNames').dbDatabaseName, '')]"
+              },
+              {
+                "name": "SEARCH_SERVICE_NAME",
+                "value": "[variables('resourceNames').searchServiceName]"
+              },
+              {
+                "name": "STORAGE_ACCOUNT_NAME",
+                "value": "[variables('resourceNames').storageAccountName]"
+              },
+              {
+                "name": "KEY_VAULT_NAME",
+                "value": "[variables('resourceNames').keyVaultName]"
+              },
+              {
+                "name": "APP_CONFIG_NAME",
+                "value": "[variables('resourceNames').appConfigName]"
+              },
+              {
+                "name": "APP_RUNTIME_CONFIGURATION_MODE",
+                "value": "[parameters('appRuntimeConfigurationMode')]"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

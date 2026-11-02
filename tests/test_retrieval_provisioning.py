@@ -4,6 +4,7 @@ import json
 import traceback
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 from config.deployment import appconfig
@@ -59,11 +60,12 @@ class RetrievalPublicationTests(unittest.TestCase):
     def test_container_apps_has_no_hosted_invocation_route(self):
         settings = self.build(
             ORCHESTRATION_HOST="container_apps", RETRIEVAL_AUTH_MODE="native_search",
-            HOSTED_AGENT_AUTH_MODE="service_identity",
         )
         self.assertEqual("", settings["RETRIEVAL_AUTH_MODE"])
         self.assertNotIn("HOSTED_AGENT_AUTH_MODE", settings)
         self.assertNotIn("CHAT_BACKEND", settings)
+        with self.assertRaisesRegex(ValueError, "requires ORCHESTRATION_HOST=hosted"):
+            self.build(ORCHESTRATION_HOST="container_apps", HOSTED_AGENT_AUTH_MODE="service_identity")
 
     def test_retired_preservation_controls_fail_before_discovery(self):
         for key in ("PRESERVE_CLASSIC_RUNTIME", "HOSTED_CUTOVER_COMPLETE"):
@@ -85,17 +87,48 @@ class RetrievalPublicationTests(unittest.TestCase):
                         })
                     read.assert_not_called()
 
-    def test_native_route_never_selects_workload_or_new_invocation_auth(self):
-        for auth in ("service_identity", "bff_obo", "unknown"):
+    def test_native_route_rejects_unknown_invocation_auth(self):
+        for auth in ("bff_obo", "unknown"):
             with self.subTest(auth=auth), self.assertRaisesRegex(
-                ValueError, "HOSTED_AGENT_AUTH_MODE=user_delegated"
+                ValueError, "HOSTED_AGENT_AUTH_MODE"
             ):
                 self.build(HOSTED_AGENT_AUTH_MODE=auth)
+
+    def test_explicit_common_blob_service_profile_uses_same_native_route(self):
+        settings = self.build(
+            HOSTED_AGENT_AUTH_MODE="service_identity",
+            FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS="[]",
+        )
+        self.assertEqual("service_identity", settings["HOSTED_AGENT_AUTH_MODE"])
+        self.assertEqual("native_search", settings["RETRIEVAL_AUTH_MODE"])
+        self.assertNotIn("FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS", settings)
+
+    def test_service_profile_does_not_restrict_source_types_or_capabilities(self):
+        for override in (
+            {"FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": None},
+            {"FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": '["rbacScope"]'},
+            {"FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "null"},
+            {"FOUNDRY_IQ_IS_ADLS_GEN2": "true"}, {"FOUNDRY_IQ_PATTERN": "searchIndex"},
+            {"RETRIEVAL_BACKEND": "ai_search"}, {"WORK_IQ_ENABLED": "true"},
+            {"SHAREPOINT_INDEXED_ENABLED": "true"}, {"FABRIC_IQ_ENABLED": "true"},
+            {"FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED": "true"},
+            {"FOUNDRY_IQ_MCP_ENABLED": "true"}, {"MCP_ENABLED": "true"},
+            {"MULTIMODAL_ENABLED": "true"}, {"SEARCH_RETRIEVAL_ENABLED": "true"},
+        ):
+            with self.subTest(override=override):
+                settings = self.build(**{
+                    "HOSTED_AGENT_AUTH_MODE": "service_identity",
+                    "DEPLOY_INGESTION_CONTAINER_APP": "true", **override,
+                })
+                self.assertEqual("service_identity", settings["HOSTED_AGENT_AUTH_MODE"])
+                self.assertEqual("native_search", settings["RETRIEVAL_AUTH_MODE"])
+                self.assertTrue(override.keys().isdisjoint(settings))
 
     def test_native_route_rejects_anonymous_and_disabled_source_authorization(self):
         for override in (
             {"ALLOW_ANONYMOUS": "true"},
             {"FOUNDRY_IQ_FORWARD_SOURCE_AUTH": "false"},
+            {"HOSTED_AGENT_AUTH_MODE": "service_identity", "ALLOW_ANONYMOUS": "true"},
         ):
             with self.subTest(override=override), self.assertRaises(ValueError):
                 self.build(**override)
@@ -209,14 +242,48 @@ SEARCH_ENDPOINT = "https://test-search.search.windows.net"
 
 
 class NativeSearchTransportTests(unittest.TestCase):
+    def test_service_bootstrap_keeps_scoped_identity_independent_of_source_policy(self):
+        for key, value in {
+            "RETRIEVAL_BACKEND": "foundry_iq",
+            "HOSTED_AGENT_AUTH_MODE": "service_identity",
+            "FOUNDRY_IQ_PATTERN": "azureBlob", "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "azureBlob",
+            "FOUNDRY_IQ_IS_ADLS_GEN2": "false", "FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]",
+        }.items():
+            self.azure.settings[key] = {"key": key, "label": "agent-lz", "value": value}
+        plan = self.discover(HOSTED_AGENT_AUTH_MODE="service_identity")
+        self.assertEqual([], [
+            grant for grant in plan.grants if grant.role is access.Role.SEARCH
+        ])
+        self.assertEqual([access.Grant(access.Role.TOOLBOX, PROJECT)], [
+            grant for grant in plan.grants if grant.role is access.Role.TOOLBOX
+        ])
+        self.assertTrue(plan.toolbox)
+        self.assertEqual(4, len(plan.grants))
+        for key, value in (
+            ("FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS", '["rbacScope"]'),
+            ("WORK_IQ_ENABLED", "true"),
+        ):
+            original = self.azure.settings.get(key)
+            self.azure.settings[key] = {"key": key, "label": "agent-lz", "value": value}
+            self.assertEqual(plan, self.discover(HOSTED_AGENT_AUTH_MODE="service_identity"))
+            if original is None:
+                del self.azure.settings[key]
+            else:
+                self.azure.settings[key] = original
+        self.assertEqual([], self.azure.writes)
+
     def setUp(self):
         self.azure = AzureFixture()
         for key, value in {
-            "RETRIEVAL_BACKEND": "foundry_iq",
+            "RETRIEVAL_BACKEND": "ai_search",
             "RETRIEVAL_AUTH_MODE": "native_search",
             "SEARCH_SERVICE_RESOURCE_ID": SEARCH,
             "SEARCH_SERVICE_NAME": "test-search",
             "SEARCH_SERVICE_QUERY_ENDPOINT": SEARCH_ENDPOINT,
+            "AI_FOUNDRY_PROJECT_RESOURCE_ID": PROJECT,
+            "AI_FOUNDRY_PROJECT_ENDPOINT": ACCESS_ENV["AZURE_AI_PROJECT_ENDPOINT"],
+            "KNOWLEDGE_BASE_NAME": "test-kb",
+            "TOOLBOX_ENDPOINT": ACCESS_ENV["AZURE_AI_PROJECT_ENDPOINT"] + "/toolboxes/test-kb/mcp?api-version=v1",
         }.items():
             self.azure.settings[key] = {"key": key, "label": "agent-lz", "value": value}
         self.azure.resources[SEARCH] = {
@@ -248,11 +315,32 @@ class NativeSearchTransportTests(unittest.TestCase):
         self.assertFalse(self.discover().search_transport)
         self.assertNotIn(["resource", "show", "--ids", SEARCH], self.azure.calls)
 
-    def test_native_default_and_both_existing_search_backends_get_transport(self):
+    def test_native_backends_receive_only_their_own_transport_scope(self):
         del self.azure.settings["RETRIEVAL_AUTH_MODE"]
         for backend in ("foundry_iq", "ai_search"):
             self.azure.settings["RETRIEVAL_BACKEND"]["value"] = backend
-            self.assertTrue(self.discover(RETRIEVAL_BACKEND=backend).search_transport)
+            plan = self.discover(RETRIEVAL_BACKEND=backend)
+            self.assertEqual(backend == "ai_search", plan.search_transport)
+            self.assertEqual(backend == "foundry_iq", plan.toolbox)
+
+    def test_managed_toolbox_binding_and_closed_project_role_fail_before_writes(self):
+        self.azure.settings["RETRIEVAL_BACKEND"]["value"] = "foundry_iq"
+        plan = self.discover()
+        roles = json.loads((Path(__file__).resolve().parents[1] / "infra/shared/roles.json").read_text())
+        self.assertEqual(roles["AzureAIUser"]["guid"], access.Role.TOOLBOX.value)
+        for key in ("TOOLBOX_ENDPOINT", "AI_FOUNDRY_PROJECT_ENDPOINT", "AI_FOUNDRY_PROJECT_RESOURCE_ID"):
+            original = self.azure.settings[key]["value"]
+            self.azure.settings[key]["value"] = original + "-unreviewed"
+            with self.subTest(key=key), self.assertRaises(access.AccessError):
+                self.discover()
+            self.azure.settings[key]["value"] = original
+        for invalid in (
+            replace(plan, toolbox=False), replace(plan, toolbox="true"),
+            replace(plan, grants=tuple(g for g in plan.grants if g.role is not access.Role.TOOLBOX)),
+        ):
+            with self.assertRaises(access.AccessError):
+                invalid.validate()
+        self.assertEqual([], self.azure.writes)
 
     def test_split_resource_groups_keep_search_in_foundry_not_application(self):
         foundry_group = "foundry-group"
@@ -332,7 +420,7 @@ class NativeSearchTransportTests(unittest.TestCase):
 
     def test_environment_and_persisted_binding_conflicts_fail_closed(self):
         for overrides in (
-            {"RETRIEVAL_BACKEND": "ai_search"}, {"SEARCH_SERVICE_RESOURCE_ID": MODEL},
+            {"RETRIEVAL_BACKEND": "foundry_iq"}, {"SEARCH_SERVICE_RESOURCE_ID": MODEL},
             {"SEARCH_SERVICE_ENDPOINT": "https://other.search.windows.net"},
             {"RETRIEVAL_AUTH_MODE": "foundry_toolbox"},
         ):

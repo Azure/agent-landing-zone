@@ -34,6 +34,43 @@ def normalized_settings(overrides=None):
 
 
 class IngestionPermissionTests(unittest.TestCase):
+    def service_definitions(self):
+        context = {
+            **BASE_CONTEXT, **normalized_settings({PERMISSION_KEY: []}),
+            "HOSTED_AGENT_AUTH_MODE": "service_identity",
+        }
+        definitions = render_json_template("search.j2", {
+            **context, "EMBEDDING_MODEL_INFO": {}, "GPT_MODEL_INFO": {},
+        })
+        return definitions, context
+
+    def test_service_profile_preserves_explicit_shared_source_and_ingestion_identity(self):
+        definitions, context = self.service_definitions()
+        original = copy.deepcopy(definitions)
+        setup.validate_foundry_iq_settings(context)
+        self.assertEqual(definitions, original)
+        self.assertEqual(definitions["knowledgeSources"][0]["azureBlobParameters"][
+            "ingestionParameters"]["ingestionPermissionOptions"], [])
+
+    def test_auth_mode_does_not_change_source_definitions_or_permission_metadata(self):
+        for source in ({}, {PERMISSION_KEY: []}, {"FOUNDRY_IQ_IS_ADLS_GEN2": True},
+                       {"FOUNDRY_IQ_PATTERN": "searchIndex", "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "searchIndex"}):
+            context = {
+                **BASE_CONTEXT, **normalized_settings(source),
+                "EMBEDDING_MODEL_INFO": {}, "GPT_MODEL_INFO": {},
+            }
+            delegated = render_json_template("search.j2", {**context, "HOSTED_AGENT_AUTH_MODE": "user_delegated"})
+            service = render_json_template("search.j2", {**context, "HOSTED_AGENT_AUTH_MODE": "service_identity"})
+            self.assertEqual(delegated, service)
+
+    def test_missing_and_null_service_permission_policy_remain_protected(self):
+        for permissions in (None, ["rbacScope"]):
+            _, context = self.service_definitions()
+            context[PERMISSION_KEY] = permissions
+            setup.normalize_foundry_iq_settings(context)
+            self.assertEqual(context[PERMISSION_KEY], ["rbacScope"])
+            setup.validate_foundry_iq_settings(context)
+
     def test_omitted_and_null_retain_protected_default(self):
         for overrides in ({}, {PERMISSION_KEY: None}):
             with self.subTest(overrides=overrides):

@@ -130,9 +130,18 @@ function Get-NativePlatformProjection {
     return $fixture.projection
 }
 
+function Get-KnowledgeToolboxProjection {
+    $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\knowledge-toolbox-normalization.json') -Raw |
+        ConvertFrom-Json -AsHashtable -Depth 100
+    return $fixture.projection
+}
+
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
     $copy = ConvertTo-Json -InputObject $Template -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
+    # Validate the exact managed Toolbox connection, binding and scoped grants
+    # before the existing adapters. Historical fingerprints remain unchanged.
+    $copy = Invoke-ScopedProjection $copy (Get-KnowledgeToolboxProjection)
     # ADR-0036: validate the exact optional vector/source-reference delta before
     # projecting it away. The original fingerprints still reject other changes.
     $mcp = Get-Content (Join-Path $PSScriptRoot 'fixtures\mcp-component-normalization.json') -Raw |

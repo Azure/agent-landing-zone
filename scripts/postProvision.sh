@@ -171,7 +171,8 @@ echo
 echo "🔍 AI Search setup…"
 {
   echo "🚀 Running config.search.setup…"
-  python -m config.search.setup
+  python -m config.search.setup || exit $?
+  python -m config.aifoundry.toolbox || exit $?
   echo "✅ Search setup script finished."
 } || {
   echo "❗️ Error during Search setup." >&2

@@ -1,10 +1,10 @@
 """Plan (default) or apply the hosted instance's minimum runtime RBAC.
 
 Only configuration metadata, Foundry agent metadata and ARM are read. No secret
-values, inference requests or continuity activation are used. Configured Search
-retrieval adds an exact-service Search Index Data Reader data-plane query grant
-for transport. It is not a Blob grant or permission to omit delegated source
-authorization; no end-user Search RBAC or impersonation grant is added here.
+values, inference requests or continuity activation are used. Managed KB access
+adds Foundry User at the exact project; standalone Search uses an exact-service
+Search Index Data Reader grant. Neither grants Blob access or permission to
+omit delegated source authorization.
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 from config.deployment.hosted import FOUNDRY_TOKEN_AUDIENCE
 from config.deployment.composition import HOSTED_AGENT_NAME_DEFAULT, resolve_mode
 from config.deployment.resource_groups import resource_group_for
-from config.retrieval.settings import SEARCH_BACKENDS, validate_auth_mode
+from config.retrieval.settings import (
+    SEARCH_BACKENDS, hosted_auth_mode, validate_auth_mode,
+)
 from util.azure_cli import resolve_az_command
 
 
@@ -74,6 +76,7 @@ class Role(str, Enum):
     SECRET = "4633458b-17de-408a-b874-0445c86b69e6"
     MODEL = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
     SEARCH = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
+    TOOLBOX = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 
 
 GUID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
@@ -84,6 +87,7 @@ RESOURCE_PATHS = {
     Role.MODEL: rf"Microsoft\.CognitiveServices/accounts/{NAME}",
     Role.SECRET: r"Microsoft\.KeyVault/vaults/[A-Za-z0-9-]+/secrets/[A-Za-z0-9-]{1,127}",
     Role.SEARCH: rf"Microsoft\.Search/searchServices/{NAME}",
+    Role.TOOLBOX: rf"Microsoft\.CognitiveServices/accounts/{NAME}/projects/{NAME}",
 }
 PROJECT_PATH = rf"Microsoft\.CognitiveServices/accounts/({NAME})/projects/({NAME})"
 KV_REFERENCE = "application/vnd.microsoft.appconfig.keyvaultref+json"
@@ -194,10 +198,11 @@ class AccessPlan:
     skipped: bool = False
     foundry_resource_group: str = ""
     search_transport: bool = False
+    toolbox: bool = False
 
     def validate(self) -> None:
         if self.skipped:
-            if self.grants or self.principal_id or self.search_transport:
+            if self.grants or self.principal_id or self.search_transport or self.toolbox:
                 raise AccessError("Inapplicable Hosted bootstrap cannot contain grants.")
             return
         _guid(self.subscription)
@@ -208,6 +213,10 @@ class AccessPlan:
             raise AccessError("Invalid Search transport configuration status.")
         if self.search_transport:
             expected.add(Role.SEARCH)
+        if type(self.toolbox) is not bool:
+            raise AccessError("Invalid managed Toolbox configuration status.")
+        if self.toolbox:
+            expected.add(Role.TOOLBOX)
         if self.audit == "configured":
             expected.add(Role.SECRET)
         elif self.audit != "not-configured":
@@ -217,7 +226,7 @@ class AccessPlan:
         for grant in self.grants:
             group = (
                 self.foundry_resource_group or self.resource_group
-                if grant.role in {Role.MODEL, Role.SEARCH} else self.resource_group
+                if grant.role in {Role.MODEL, Role.SEARCH, Role.TOOLBOX} else self.resource_group
             )
             _bound_scope(grant.scope, RESOURCE_PATHS[grant.role], self.subscription, group)
 
@@ -452,7 +461,8 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         sub, group, principal, name, version, tuple(grants),
         "configured" if audit else "not-configured",
         foundry_resource_group=foundry_group,
-        search_transport=search is not None,
+        search_transport=search is not None and search.role is Role.SEARCH,
+        toolbox=search is not None and search.role is Role.TOOLBOX,
     )
     plan.validate()
     return plan
@@ -476,6 +486,17 @@ def _search_transport_grant(
     backend = _consistent(environment, ("RETRIEVAL_BACKEND",), backend_row.get("value"))
     if backend not in SEARCH_BACKENDS:
         raise AccessError("Configured retrieval backend has no supported Search transport contract.")
+    auth_row = _setting(run, config_endpoint, "HOSTED_AGENT_AUTH_MODE")
+    if auth_row is None and environment.get("HOSTED_AGENT_AUTH_MODE") == "service_identity":
+        raise AccessError("Publish HOSTED_AGENT_AUTH_MODE (agent-lz) before planning service_identity access.")
+    configured_auth = _consistent(
+        environment, ("HOSTED_AGENT_AUTH_MODE",),
+        auth_row.get("value") if auth_row else "user_delegated",
+    )
+    try:
+        hosted_auth_mode({"HOSTED_AGENT_AUTH_MODE": configured_auth})
+    except ValueError as error:
+        raise AccessError(str(error)) from None
     mode_row = _setting(run, config_endpoint, "RETRIEVAL_AUTH_MODE")
     if mode_row is not None:
         try:
@@ -502,7 +523,40 @@ def _search_transport_grant(
         or not _same(resource.get("type"), "Microsoft.Search/searchServices")
     ):
         raise AccessError("Search ARM resource identity/type mismatch.")
+    if backend == "foundry_iq":
+        return _toolbox_grant(
+            environment, run=run, config_endpoint=config_endpoint,
+            subscription=subscription, foundry_group=foundry_group,
+        )
     return Grant(Role.SEARCH, scope)
+
+
+def _toolbox_grant(
+    environment: Mapping[str, str], *, run: RunAzure, config_endpoint: str,
+    subscription: str, foundry_group: str,
+) -> Grant:
+    scope = _consistent(
+        environment, ("AZURE_AI_PROJECT_RESOURCE_ID",),
+        _config_value(run, config_endpoint, "AI_FOUNDRY_PROJECT_RESOURCE_ID"),
+    )
+    _bound_scope(scope, RESOURCE_PATHS[Role.TOOLBOX], subscription, foundry_group)
+    match = _scope_match(scope, PROJECT_PATH)
+    endpoint = _consistent(
+        environment, ("AZURE_AI_PROJECT_ENDPOINT",),
+        _config_value(run, config_endpoint, "AI_FOUNDRY_PROJECT_ENDPOINT"),
+    ).rstrip("/")
+    if endpoint != f"https://{match[3].lower()}.services.ai.azure.com/api/projects/{match[4]}":
+        raise AccessError("Managed Toolbox project endpoint/resource scope mismatch.")
+    name = _config_value(run, config_endpoint, "KNOWLEDGE_BASE_NAME")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise AccessError("Managed Toolbox requires a valid knowledge base name.")
+    toolbox = _consistent(
+        environment, ("TOOLBOX_ENDPOINT",), _config_value(run, config_endpoint, "TOOLBOX_ENDPOINT"),
+    )
+    if toolbox != f"{endpoint}/toolboxes/{name}/mcp?api-version=v1":
+        raise AccessError("Managed Toolbox endpoint must match the configured project and knowledge base.")
+    # The hosted instance calls Toolbox; its RemoteTool project MI calls Search.
+    return Grant(Role.TOOLBOX, scope)
 
 
 def _has_exact(run: RunAzure, plan: AccessPlan, grant: Grant) -> bool:

@@ -312,11 +312,11 @@ locals {
       substr(local.services_project_internal_id, 20, 12)
     ) : ""
     search_connection_id         = var.deployAiFoundry && var.deploySearchService ? "${local.services_project_arm_path}/connections/${local.services_connection_names.search}" : ""
-    knowledge_base_connection_id = var.deployAiFoundry && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? "${local.services_project_arm_path}/connections/${var.knowledgeBaseConnectionName}" : ""
+    knowledge_base_connection_id = local.services_project && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? "${local.services_project_arm_path}/connections/${var.knowledgeBaseConnectionName}" : ""
     bing_connection_id           = var.deployAiFoundry && var.deployGroundingWithBing ? "${local.services_project_arm_path}/connections/${local.services_connection_names.bing}" : ""
   }
-  # This is intentionally a project-scoped runtime path, even though connections
-  # are ARM account children; source consumers rely on project visibility.
+  # Shared account connections use project-scoped runtime paths; the knowledge
+  # base RemoteTool below is a real project child, not an inherited Search binding.
   services_project_arm_path = "${var.deployAiFoundry ? azapi_resource.foundry_account[0].id : ""}/projects/${local.resource_names.aiFoundryProjectName}"
 }
 
@@ -451,18 +451,6 @@ locals {
           metadata      = { ApiType = "Azure", ResourceId = local.data_context.search.id, location = local.effective_locations.search }
         }
       }
-    } : {},
-    var.deployAiFoundry && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? {
-      knowledge = {
-        name = var.knowledgeBaseConnectionName
-        properties = {
-          category      = "CognitiveSearch"
-          target        = local.data_context.search.endpoint
-          authType      = "AAD"
-          isSharedToAll = true
-          metadata      = { ApiType = "Azure", ResourceId = local.data_context.search.id, location = local.effective_locations.search }
-        }
-      }
     } : {}
   )
 }
@@ -473,6 +461,27 @@ resource "azapi_resource" "account_connection" {
   parent_id  = local.foundry_context.account_id
   name       = each.value.name
   body       = { properties = each.value.properties }
+  depends_on = [terraform_data.foundry_connection_contract]
+}
+
+resource "azapi_resource" "knowledge_base_connection" {
+  count     = local.services_project && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? 1 : 0
+  type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview"
+  parent_id = local.foundry_context.project_id
+  name      = var.knowledgeBaseConnectionName
+  # Foundry supports this auth type through raw ARM, ahead of the typed schema:
+  # Azure/azure-dev cli/azd/extensions/azure.ai.connections/internal/cmd/raw_connection.go.
+  schema_validation_enabled = false
+  body = {
+    properties = {
+      category      = "RemoteTool"
+      authType      = "ProjectManagedIdentity"
+      target        = "${local.data_context.search.endpoint}/knowledgebases/${var.knowledgeBaseName}/mcp?api-version=${var.foundryIqApiVersion}"
+      audience      = "https://search.azure.com/"
+      isSharedToAll = true
+      metadata      = { ApiType = "Azure" }
+    }
+  }
   depends_on = [terraform_data.foundry_connection_contract]
 }
 

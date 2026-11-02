@@ -521,6 +521,7 @@ locals {
       AZURE_SPEECH_ENDPOINT                       = local.data_context.speech.endpoint
       SEARCH_CONNECTION_ID                        = local.foundry_context.search_connection_id
       KNOWLEDGE_BASE_NAME                         = var.retrievalBackend == "foundry_iq" ? var.knowledgeBaseName : ""
+      TOOLBOX_ENDPOINT                            = var.retrievalBackend == "foundry_iq" && var.deployAiFoundry && var.deployAfProject && var.deploySearchService ? "${local.foundry_context.project_endpoint}/toolboxes/${var.knowledgeBaseName}/mcp?api-version=v1" : ""
       BING_CONNECTION_ID                          = local.foundry_context.bing_connection_id
       CONTAINER_ENV_PRINCIPAL_ID                  = local.compute_context.environment_principal_id
       SEARCH_SERVICE_PRINCIPAL_ID                 = local.data_context.search.principal_id
