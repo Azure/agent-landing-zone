@@ -311,11 +311,13 @@ def grant_catalog(environment: Mapping[str, str], principal: str) -> None:
 
 def reference_application(environment: Mapping[str, str]) -> bool:
     bundled = load_selected_definition(environment).bundled
-    if not bundled and (mcp_config.selected(environment) or mcp_config.toolsets(environment)):
+    if not bundled and mcp_config.selected(environment):
         raise ValueError(
             "Reference MCP selection requires the bundled application. "
             "Custom definitions own their MCP service, toolsets and dependencies."
         )
+    if bundled:
+        mcp_config.validate_selection(environment)
     return bundled
 
 
@@ -625,7 +627,9 @@ def activate(root: Path, environment: Mapping[str, str]) -> None:
 def capture(root: Path, environment: Mapping[str, str]) -> dict[str, str]:
     if not reference_application(environment):
         values = {
-            "COSMOS_ACCOUNT_CAPABILITIES": json.dumps(capture_capabilities(environment))
+            "COSMOS_ACCOUNT_CAPABILITIES": json.dumps(
+                capture_capabilities({**environment, "MCP_TOOLSETS": "[]"})
+            )
         }
         persist(root, environment, values)
         return values

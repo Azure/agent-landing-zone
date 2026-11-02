@@ -649,10 +649,11 @@ def test_custom_vector_application_never_inherits_reference_mcp_catalog():
     assert values["deployCosmosDb"] is True
     assert values["enableCosmosVectorSearch"] is True
     assert values["databaseContainersList"] == []
-    assert not any(
-        item["name"].startswith("MCP_")
+    assert {
+        item["name"]: item["value"]
         for item in values["additionalAppConfigurationSettings"]
-    )
+        if item["name"].startswith("MCP_")
+    } == {"MCP_TOOLSETS": "[]"}
     with (
         patch.object(mcp, "command") as command,
         patch.object(mcp, "stored", return_value="") as stored,
@@ -680,3 +681,35 @@ def test_custom_definition_rejects_reference_controls_before_azure_calls():
                 action(ROOT, env)
     command.assert_not_called()
     stored.assert_not_called()
+
+
+def test_custom_application_owns_toolsets_without_selecting_reference_resources():
+    env = environment(
+        AGENTLZ_APP_DEFINITION="samples/custom-app/containerapp",
+        DEPLOY_AGENT_APP_MCP="false",
+    )
+    values = composition(env)
+    assert values["deployCosmosDb"] is False
+    assert values["enableCosmosVectorSearch"] is False
+    assert values["databaseContainersList"] == []
+    assert [app["service_name"] for app in values["containerAppsList"]] == ["web"]
+    published = {item["name"]: item["value"] for item in values["additionalAppConfigurationSettings"]}
+    assert json.loads(published["MCP_TOOLSETS"]) == ["nl2sql"]
+    with (
+        patch.object(mcp, "command") as command,
+        patch.object(mcp, "stored") as stored,
+        patch.object(mcp, "persist"),
+    ):
+        assert mcp.prepare(ROOT, env) == {}
+        mcp.deploy(ROOT, env)
+        mcp.activate(ROOT, env)
+        mcp.capture(ROOT, env)
+    command.assert_not_called()
+    stored.assert_not_called()
+    with patch.object(
+        appconfig, "_container_app",
+        return_value={"fqdn": "web.example", "principalId": PRINCIPAL},
+    ) as discover:
+        runtime = appconfig.build_settings(env)
+    assert json.loads(runtime["MCP_TOOLSETS"]) == ["nl2sql"]
+    assert [call.args[1] for call in discover.call_args_list] == ["ca-test-web"]

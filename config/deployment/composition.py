@@ -222,9 +222,11 @@ def requires_custom_cosmos(environment: Mapping[str, str]) -> bool:
 def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
     """Select actual native metadata/catalog/custom consumers, never checkpoints."""
     nl2sql_selected(environment)
+    bundled = is_bundled_application(environment)
     required = (
-        (resolve_application(environment).metadata and is_bundled_application(environment))
-        or requires_custom_cosmos(environment) or mcp_config.vector_required(environment)
+        (resolve_application(environment).metadata and bundled)
+        or requires_custom_cosmos(environment)
+        or (mcp_config.vector_required(environment) if bundled else mcp_config.retained_catalog(environment))
     )
     raw = environment.get(DEPLOY_COSMOS_DB)
     if raw is None:
@@ -312,12 +314,14 @@ def _resolve_application_overrides(
     hosted = app.host is OrchestrationHost.HOSTED
     bundled = is_bundled_application(environment)
     deploy_mcp = mcp_config.selected(environment)
-    mcp_config.toolsets(environment)
     if deploy_mcp and not bundled:
         raise DeploymentTopologyError(
             "DEPLOY_AGENT_APP_MCP selects the bundled MCP component. "
             "Custom definitions must explicitly declare their own MCP service and dependencies."
         )
+    if bundled:
+        mcp_config.validate_selection(environment)
+    foundation_environment = environment if bundled else {**environment, "MCP_TOOLSETS": "[]"}
     nl2sql_selected(environment)  # Reject a selected retired direct SQL capability.
     prepare_hosted = requires_hosted_foundation(environment, hosted_orchestration=hosted and bundled)
     parameters: dict[str, object] = {
@@ -325,8 +329,8 @@ def _resolve_application_overrides(
         "deployDurableTaskScheduler": bundled and app.host is OrchestrationHost.CONTAINER_APPS,
         "deployHostedAgent": False,
         "deployCosmosDb": resolve_cosmos_selection(environment),
-        "enableCosmosVectorSearch": mcp_config.vector_required(environment),
-        "cosmosAccountCapabilities": mcp_config.account_capabilities(environment),
+        "enableCosmosVectorSearch": mcp_config.vector_required(foundation_environment),
+        "cosmosAccountCapabilities": mcp_config.account_capabilities(foundation_environment),
         "useCAppAPIKey": False,
     }
     if prepare_hosted and not (hosted and bundled):
@@ -395,6 +399,8 @@ def _resolve_application_overrides(
     }
     if bundled and (deploy_mcp or mcp_config.retained_catalog(environment)):
         settings.update(mcp_config.settings(environment))
+    elif not bundled and "MCP_TOOLSETS" in environment:
+        settings["MCP_TOOLSETS"] = json.dumps(mcp_config.toolsets(environment))
     if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip():
         settings["SEARCH_RAG_INDEX_NAME"] = environment["SEARCH_RAG_INDEX_NAME"].strip()
     parameters["additionalAppConfigurationSettings"] = merge_app_configuration_settings(

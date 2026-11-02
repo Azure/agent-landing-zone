@@ -26,9 +26,12 @@ def toolsets(environment: Mapping[str, str]) -> list[str]:
         or len(value) != len(set(value))
     ):
         raise ValueError("MCP_TOOLSETS must be a JSON array of unique supported toolsets: nl2sql.")
-    if value and not selected(environment):
-        raise ValueError("MCP_TOOLSETS requires DEPLOY_AGENT_APP_MCP=true.")
     return value
+
+
+def validate_selection(environment: Mapping[str, str]) -> None:
+    if toolsets(environment) and not selected(environment):
+        raise ValueError("MCP_TOOLSETS requires DEPLOY_AGENT_APP_MCP=true in the reference application.")
 
 
 def nl2sql_enabled(environment: Mapping[str, str]) -> bool:
