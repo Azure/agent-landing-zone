@@ -377,6 +377,7 @@
             "enabled": true
           },
           "roles": [
+            "FoundryAgentConsumer",
             "AppConfigurationDataReader",
             "AcrPull",
             "SearchIndexDataReader",

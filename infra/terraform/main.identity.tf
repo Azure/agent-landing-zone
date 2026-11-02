@@ -35,15 +35,16 @@ locals {
     { ContainerRegistryRepositoryReader = { guid = "b93aa761-3e63-49ed-ac28-beffa264f7ac", key = "ContainerRegistryRepositoryReader" } }
   )
   identity_scope_definitions = {
-    registry   = { enabled = var.deployContainerRegistry, id = local.registry_context.id }
-    key_vault  = { enabled = var.deployKeyVault, id = local.data_context.key_vault.id }
-    search     = { enabled = var.deploySearchService, id = local.data_context.search.id }
-    storage    = { enabled = var.deployStorageAccount, id = local.data_context.storage.id }
-    foundry    = { enabled = var.deployAiFoundry, id = local.foundry_context.account_id }
-    speech     = { enabled = var.deploySpeechService, id = local.data_context.speech.id }
-    app_config = { enabled = var.deployAppConfig, id = local.data_context.app_config.id }
-    project    = { enabled = var.deployAiFoundry && var.deployAfProject && local.effective_flags.hosted_prerequisites && var.grantHostedAgentProjectManager, id = local.foundry_context.project_id }
-    root       = { enabled = true, id = "/subscriptions/${local.deployment_context.subscription_id}/resourceGroups/${local.deployment_context.foundry_rg}" }
+    registry      = { enabled = var.deployContainerRegistry, id = local.registry_context.id }
+    key_vault     = { enabled = var.deployKeyVault, id = local.data_context.key_vault.id }
+    search        = { enabled = var.deploySearchService, id = local.data_context.search.id }
+    storage       = { enabled = var.deployStorageAccount, id = local.data_context.storage.id }
+    foundry       = { enabled = var.deployAiFoundry, id = local.foundry_context.account_id }
+    speech        = { enabled = var.deploySpeechService, id = local.data_context.speech.id }
+    app_config    = { enabled = var.deployAppConfig, id = local.data_context.app_config.id }
+    project       = { enabled = var.deployAiFoundry && var.deployAfProject && local.effective_flags.hosted_prerequisites && var.grantHostedAgentProjectManager, id = local.foundry_context.project_id }
+    agent_project = { enabled = var.deployAiFoundry && var.deployAfProject, id = local.foundry_context.project_id }
+    root          = { enabled = true, id = "/subscriptions/${local.deployment_context.subscription_id}/resourceGroups/${local.deployment_context.foundry_rg}" }
   }
   executor_role_specs = {
     registry   = ["AcrPush", "AcrPull"]
@@ -82,6 +83,7 @@ locals {
     StorageBlobDataContributor  = ["storage"]
     StorageBlobDataReader       = ["storage"]
     StorageBlobDelegator        = ["storage"]
+    FoundryAgentConsumer        = ["agent_project"]
   }
   executor_grants = flatten([
     for scope_key, roles in local.executor_role_specs : [

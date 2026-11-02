@@ -245,7 +245,9 @@ class CapabilityProfileTests(unittest.TestCase):
                 continue
             canonical = TRIO_CANONICAL[component["name"]]
             with self.subTest(component=component["name"], app=canonical):
-                expected = current[canonical] - {"KeyVaultSecretsUser"}
+                # Secret access and project-scoped Hosted caller access have
+                # dedicated provisioning owners, not generic capability profiles.
+                expected = current[canonical] - {"KeyVaultSecretsUser", "FoundryAgentConsumer"}
                 if component["name"] == "orchestrator":
                     # Native execution state is not the legacy checkpoint store.
                     expected -= {"CosmosDBBuiltInDataContributor"}

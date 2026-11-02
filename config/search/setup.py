@@ -1061,7 +1061,8 @@ def execute_setup(defs: Optional[dict], context: dict):
     )
 
     # Step 1: Clean up knowledge base resources in correct order (KB -> KS)
-    cleanup_knowledge_resources(defs, context, cred, search_endpoint)
+    if context.get("HOSTED_AGENT_AUTH_MODE", "user_delegated") != "service_identity":
+        cleanup_knowledge_resources(defs, context, cred, search_endpoint)
     
     # Step 2: Reconcile the remaining standard Search resources.
     provision_datasources(defs, context, cred, ds_to_indexers, search_endpoint, api_version)

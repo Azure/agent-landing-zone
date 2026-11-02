@@ -163,6 +163,10 @@
     "guid": "53ca6127-db72-4b80-b1b0-d745d6d5456d",
     "key": "AzureAIUser"
   },
+  "FoundryAgentConsumer": {
+    "guid": "eed3b665-ab3a-47b6-8f48-c9382fb1dad6",
+    "key": "FoundryAgentConsumer"
+  },
   "AzureApiCenterComplianceManager": {
     "guid": "ede9aaa3-4627-494e-be13-4aa7c256148d",
     "key": "AzureApiCenterComplianceManager"

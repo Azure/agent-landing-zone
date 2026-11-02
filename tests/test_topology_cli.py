@@ -81,3 +81,22 @@ def test_resolver_never_reads_existing_deployment_state():
     assert app.host == "hosted" and not app.metadata
     assert not hasattr(topology, "read_persisted_settings")
     assert not hasattr(topology, "resource_group_has_resources")
+
+
+def test_service_profile_keeps_structural_guards_without_a_source_allowlist():
+    selection = {"HOSTED_AGENT_AUTH_MODE": "service_identity"}
+    with patch("subprocess.run", side_effect=AssertionError("Azure reads are forbidden")):
+        assert topology.resolve_environment_plan(selection).host == "hosted"
+        for source in (
+            {"WORK_IQ_ENABLED": "true"},
+            {"FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "null"},
+            {"FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS": "[]"},
+        ):
+            assert topology.resolve_environment_plan({**selection, **source}).host == "hosted"
+        with pytest.raises(ValueError, match="ORCHESTRATION_HOST=hosted"):
+            topology.resolve_environment_plan({**selection, "ORCHESTRATION_HOST": "container_apps"})
+        with pytest.raises(ValueError, match="ALLOW_ANONYMOUS=false"):
+            topology.resolve_environment_plan({**selection, "ALLOW_ANONYMOUS": "true"})
+    for hook in ("preProvision.ps1", "preProvision.sh"):
+        source = (ROOT / "scripts" / hook).read_text()
+        assert source.index("config.deployment.topology") < source.index("config.deployment.provider")

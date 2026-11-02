@@ -925,6 +925,8 @@ if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
     Invoke-PythonModule -ModuleName 'config.search.setup'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "✅ Search setup script finished."
+    Invoke-PythonModule -ModuleName 'config.aifoundry.toolbox'
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     Write-Host "⏭️  Skipping Search setup (missing APP_CONFIG_ENDPOINT)."
 }

@@ -176,7 +176,8 @@ try {
     }
     $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
         @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection)) +
-        @(Get-SubnetDeltaPaths $native)
+        @(Get-SubnetDeltaPaths $native) +
+        @(Get-SubnetDeltaPaths (Get-KnowledgeToolboxProjection))
     if ($subnetPaths.Count -eq 0) { throw 'Subnet normalization has no exact deploying delta assertions.' }
     foreach ($path in $subnetPaths) {
         $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100
