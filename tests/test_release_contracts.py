@@ -30,7 +30,7 @@ class IntegrationPinTests(unittest.TestCase):
         }, set(components))
         for name, ref_key, ref, commit in (
             ("agent-app-mcp", "branch", "feature/nl2sql-mcp-cosmos",
-             "320f9712247225dc9800264fcffa6a9e4725832a"),
+             "a824bae8631e49066741ceedfd72e243c9e217d0"),
             ("agent-app-orchestrator", "branch", "feature/nl2sql-mcp-cosmos",
              "53b63422d1c2628ad02a0253651e8cf7068ed1e9"),
             ("agent-app-ingestion", "tag", "v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
