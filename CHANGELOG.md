@@ -27,7 +27,7 @@
   Change authentication modes through coordinated redeployment and new
   sessions. Roll back the complete prior combination and deployment settings.
 
-### Component versions
+### Validation
 
 | Component | Version |
 | --- | --- |
@@ -36,8 +36,6 @@
 | agent-app-orchestrator | v7.1.0 |
 | agent-app-ingestion | v3.1.3 |
 | infra / AI Landing Zone | v2.7.3 |
-
-### Validation
 
 - Feature CI passed the complete deployment and hook contracts, Bicep
   build/lint/offline contracts and Terraform contracts on Ubuntu and Windows.
