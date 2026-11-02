@@ -17,7 +17,8 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' exis
   name: aiProjectName
 }
 
-resource connection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-10-01-preview' = {
+// Match azd's raw ARM connection API, which supports the newer Foundry auth types.
+resource connection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview' = {
   parent: project
   name: knowledgeBaseConnectionName
   properties: {

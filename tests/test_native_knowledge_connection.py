@@ -37,12 +37,16 @@ class NativeKnowledgeConnectionTests(unittest.TestCase):
         bicep = (ROOT / "infra/bicep/modules/ai-foundry/connection-knowledge-base.bicep").read_text()
         terraform = (ROOT / "infra/terraform/main.foundry.tf").read_text()
         for source in (bicep, terraform):
-            self.assertIn("Microsoft.CognitiveServices/accounts/projects/connections@2025-10-01-preview", source)
+            self.assertIn("Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview", source)
             self.assertIn("RemoteTool", source)
             self.assertIn("ProjectManagedIdentity", source)
             self.assertIn("https://search.azure.com/", source)
             self.assertIn("/knowledgebases/", source)
             self.assertIn("/mcp?api-version=", source)
+        connection = terraform.split('resource "azapi_resource" "knowledge_base_connection" {', 1)[1]
+        connection = connection.split('\nresource "', 1)[0]
+        self.assertIn("schema_validation_enabled = false", connection)
+        self.assertNotIn("credentials", connection)
         main = (ROOT / "infra/bicep/main.bicep").read_text()
         self.assertIn("'modules/ai-foundry/connection-knowledge-base.bicep'", main)
         self.assertIn("aiFoundryKnowledgeBaseSearchConnection.outputs.connectionId", main)

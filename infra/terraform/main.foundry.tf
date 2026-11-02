@@ -466,9 +466,12 @@ resource "azapi_resource" "account_connection" {
 
 resource "azapi_resource" "knowledge_base_connection" {
   count     = local.services_project && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? 1 : 0
-  type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-10-01-preview"
+  type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview"
   parent_id = local.foundry_context.project_id
   name      = var.knowledgeBaseConnectionName
+  # Foundry supports this auth type through raw ARM, ahead of the typed schema:
+  # Azure/azure-dev cli/azd/extensions/azure.ai.connections/internal/cmd/raw_connection.go.
+  schema_validation_enabled = false
   body = {
     properties = {
       category      = "RemoteTool"
