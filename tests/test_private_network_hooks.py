@@ -170,6 +170,9 @@ case "$*" in
     [ "$DEPLOY_AGENT_APP_MCP" = false ] && [ "${@: -1}" = --deploy ] || exit 96
     touch "$FAKE_ROOT/mcp-prepared"
     exit 0 ;;
+  *'import json, shlex, sys'*)
+    [ -f "$FAKE_ROOT/mcp-prepared" ] && [ -f "$FAKE_ROOT/env-refreshed" ] || exit 96
+    exec "$REAL_PYTHON" "$@" ;;
   *config.deployment.private_network*)
     echo probe >> "$FAKE_TRACE"
     if [ "$FAKE_REAL_PROBE" = 1 ]; then
