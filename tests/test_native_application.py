@@ -168,6 +168,7 @@ def test_direct_nl2sql_is_retired_and_mcp_owns_its_catalog():
     result = compose_parameters(source, {
         **environment(), DEFINITION_ENV: str(ROOT / "app-definition.json"),
         "DEPLOY_AGENT_APP_MCP": "true",
+        "MCP_TOOLSETS": '["nl2sql"]',
     })["parameters"]
     assert result["deployCosmosDb"]["value"]
     assert [c["name"] for c in result["databaseContainersList"]["value"]] == [

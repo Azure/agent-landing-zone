@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Separate MCP Server deployment from toolset activation with `MCP_TOOLSETS`,
+  defaulting to an empty authenticated server. Explicitly select `["nl2sql"]`
+  for its SQL tools, application Cosmos catalog and scoped dependency grants.
+  Keep reference-application composition above the shared foundation and
+  preserve custom applications' declared services and data requirements.
 - Move NL2SQL to the optional `agent-app-mcp` Container App using the official
   Python MCP SDK, dedicated Entra authorization and application Cosmos vector
   metadata. The native orchestrator consumes its two tools without SQL drivers

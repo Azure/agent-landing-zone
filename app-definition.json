@@ -9,7 +9,7 @@
       "kind": "containerapp",
       "path": "mcp",
       "source": { "commit": "a824bae8631e49066741ceedfd72e243c9e217d0" },
-      "profiles": ["model-user"],
+      "profiles": [],
       "egress": [
         {
           "fqdn": "login.microsoftonline.com",

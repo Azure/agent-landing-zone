@@ -157,6 +157,7 @@ def materialized_settings(environment: Mapping[str, str]) -> dict[str, str]:
     return {
         **app.settings(), DEPLOY_INGESTION_CONTAINER_APP: str(ingestion).lower(),
         mcp_config.DEPLOY_AGENT_APP_MCP: str(mcp_config.selected(environment)).lower(),
+        "MCP_TOOLSETS": json.dumps(mcp_config.toolsets(environment)),
     }
 
 
@@ -311,6 +312,7 @@ def _resolve_application_overrides(
     hosted = app.host is OrchestrationHost.HOSTED
     bundled = is_bundled_application(environment)
     deploy_mcp = mcp_config.selected(environment)
+    mcp_config.toolsets(environment)
     if deploy_mcp and not bundled:
         raise DeploymentTopologyError(
             "DEPLOY_AGENT_APP_MCP selects the bundled MCP component. "
@@ -375,7 +377,7 @@ def _resolve_application_overrides(
            "canonical_name": "NATIVE_UI_METADATA_CONTAINER", "partitionKey": "/principal_id"}]
          if app.metadata and bundled else [])
         + (existing if requires_custom_cosmos(environment) else [])
-        + mcp_config.cosmos_containers(environment)
+        + (mcp_config.cosmos_containers(environment) if bundled else [])
     )
     unique = {}
     for item in containers:
@@ -391,7 +393,7 @@ def _resolve_application_overrides(
         "HOSTED_AGENT_IMAGE_VERSION": environment.get("HOSTED_AGENT_IMAGE_VERSION", ""),
         "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS": environment.get("HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "60"),
     }
-    if deploy_mcp or mcp_config.retained_catalog(environment):
+    if bundled and (deploy_mcp or mcp_config.retained_catalog(environment)):
         settings.update(mcp_config.settings(environment))
     if (environment.get("SEARCH_RAG_INDEX_NAME") or "").strip():
         settings["SEARCH_RAG_INDEX_NAME"] = environment["SEARCH_RAG_INDEX_NAME"].strip()

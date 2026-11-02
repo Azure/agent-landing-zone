@@ -10,6 +10,8 @@ import pytest
 
 from config.deployment import appconfig, mcp, mcp_config
 from config.deployment.composition import compose_parameters
+from config.deployment.app_settings import substitute_values
+from config.deployment.resolution import resolve_parameters
 
 ROOT = Path(__file__).resolve().parents[1]
 SUB = "11111111-1111-4111-8111-111111111111"
@@ -33,6 +35,7 @@ def environment(**values):
         "HOSTED_AGENT_RESOURCE_SCOPE": "https://ai.azure.com/.default",
         "AGENTLZ_APP_DEFINITION": str(ROOT / "app-definition.json"),
         "DEPLOY_AGENT_APP_MCP": "true",
+        "MCP_TOOLSETS": '["nl2sql"]',
         **values,
     }
 
@@ -58,7 +61,7 @@ def test_mcp_is_optional_and_requires_only_application_cosmos(host):
         "Search" not in role and "Cosmos" not in role for role in server["roles"]
     )
     disabled = composition(
-        environment(ORCHESTRATION_HOST=host, DEPLOY_AGENT_APP_MCP="false")
+        environment(ORCHESTRATION_HOST=host, DEPLOY_AGENT_APP_MCP="false", MCP_TOOLSETS="[]")
     )
     assert disabled["deployCosmosDb"] is False
     assert disabled["enableCosmosVectorSearch"] is False
@@ -75,7 +78,7 @@ def test_explicit_cosmos_opt_out_conflicts_with_selected_mcp():
 
 def test_deselection_retains_vector_catalog_without_server():
     values = composition(
-        environment(DEPLOY_AGENT_APP_MCP="false", COSMOS_VECTOR_SEARCH_ENABLED="true")
+        environment(DEPLOY_AGENT_APP_MCP="false", MCP_TOOLSETS="[]", COSMOS_VECTOR_SEARCH_ENABLED="true")
     )
     assert values["deployCosmosDb"] and values["enableCosmosVectorSearch"]
     assert [item["name"] for item in values["databaseContainersList"]] == [
@@ -115,6 +118,12 @@ def test_vector_policy_and_filter_partition_have_identical_provider_inputs():
     "setting,value",
     [
         ("DEPLOY_AGENT_APP_MCP", "maybe"),
+        ("MCP_TOOLSETS", "{}"),
+        ("MCP_TOOLSETS", '"nl2sql"'),
+        ("MCP_TOOLSETS", '["unknown"]'),
+        ("MCP_TOOLSETS", '["nl2sql", "nl2sql"]'),
+        ("MCP_TOOLSETS", "[{}]"),
+        ("MCP_QUERY_TIMEOUT_SECONDS", "76"),
         ("MCP_METADATA_CONTAINER", "mcp-sources"),
         ("MCP_EMBEDDING_DIMENSIONS", "4097"),
         ("MCP_METADATA_TOP_K", "0"),
@@ -403,7 +412,7 @@ def test_ready_server_denies_anonymous_tool_discovery():
 
 
 def test_disabled_component_does_not_make_azure_calls():
-    env = environment(DEPLOY_AGENT_APP_MCP="false")
+    env = environment(DEPLOY_AGENT_APP_MCP="false", MCP_TOOLSETS="[]")
     with patch.object(mcp, "command") as command, patch.object(mcp, "stored") as stored:
         assert mcp.prepare(ROOT, env) == {}
         mcp.deploy(ROOT, env)
@@ -415,7 +424,7 @@ def test_disabled_component_does_not_make_azure_calls():
 
 @pytest.mark.parametrize("applications", [[], ["ca-test-mcp"]])
 def test_deselection_revokes_callers_and_refreshes_only_remaining_compute(applications):
-    env = environment(DEPLOY_AGENT_APP_MCP="false", MCP_AUTH_APP_OBJECT_ID=OBJECT)
+    env = environment(DEPLOY_AGENT_APP_MCP="false", MCP_TOOLSETS="[]", MCP_AUTH_APP_OBJECT_ID=OBJECT)
     with (
         patch.object(mcp, "command", return_value=applications),
         patch.object(mcp, "publish_settings") as publish,
@@ -423,6 +432,7 @@ def test_deselection_revokes_callers_and_refreshes_only_remaining_compute(applic
     ):
         mcp.activate(ROOT, env)
     assert publish.call_args.args[1]["MCP_ALLOWED_CLIENT_IDS"] == "[]"
+    assert publish.call_args.args[1]["MCP_TOOLSETS"] == "[]"
     if applications:
         restart.assert_called_once_with(env, {"MCP_APP_NAME": "ca-test-mcp"})
     else:
@@ -542,3 +552,131 @@ def test_activation_cli_reads_fresh_selected_publication_bindings(monkeypatch):
         assert mcp.main() == 0
     selected.assert_called_once_with(ROOT, "test")
     activate.assert_called_once_with(ROOT, env)
+
+
+@pytest.mark.parametrize("host", ["container_apps", "hosted"])
+@pytest.mark.parametrize("selection", ["[]", '["nl2sql"]'])
+def test_toolset_requirements_match_both_provider_projections(host, selection):
+    env = environment(ORCHESTRATION_HOST=host, MCP_TOOLSETS=selection)
+    source = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
+    plain = substitute_values(
+        {key: value["value"] for key, value in source["parameters"].items()}, env
+    )
+    terraform = resolve_parameters(plain, env)
+    bicep = composition(env)
+    for key in (
+        "containerAppsList", "databaseContainersList", "deployCosmosDb",
+        "enableCosmosVectorSearch", "cosmosAccountCapabilities",
+        "additionalAppConfigurationSettings",
+    ):
+        assert terraform[key] == bicep[key]
+    enabled = selection != "[]"
+    assert bicep["deployCosmosDb"] is enabled
+    assert bicep["enableCosmosVectorSearch"] is enabled
+    assert bool(bicep["databaseContainersList"]) is enabled
+    published = {item["name"]: item for item in bicep["additionalAppConfigurationSettings"]}
+    assert json.loads(published["MCP_TOOLSETS"]["value"]) == json.loads(selection)
+    assert published["MCP_TOOLSETS"]["label"] == "agent-lz"
+
+
+def test_empty_server_ignores_sql_settings_and_has_no_static_model_grant():
+    env = environment(
+        MCP_TOOLSETS="[]", MCP_SQL_SECRET_NAMES="invalid", MCP_QUERY_TIMEOUT_SECONDS="invalid"
+    )
+    assert mcp_config.settings(env) == {
+        "DEPLOY_AGENT_APP_MCP": "true", "MCP_TOOLSETS": "[]"
+    }
+    definition = json.loads((ROOT / "app-definition.json").read_text(encoding="utf-8"))
+    server = next(item for item in definition["components"] if item["name"] == "mcp")
+    assert server["profiles"] == []
+    assert composition(env)["deployCosmosDb"] is False
+
+
+def test_toolsets_cannot_be_selected_without_the_server():
+    with pytest.raises(ValueError, match="requires DEPLOY_AGENT_APP_MCP"):
+        composition(environment(DEPLOY_AGENT_APP_MCP="false"))
+
+
+def test_empty_server_preparation_never_discovers_or_grants_sql_dependencies():
+    env = environment(
+        MCP_TOOLSETS="[]",
+        AZURE_CONTAINER_REGISTRY_RESOURCE_ID=(
+            f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/"
+            "Microsoft.ContainerRegistry/registries/test"
+        ),
+    )
+    binding = {
+        "MCP_APP_ENDPOINT": "https://mcp.example",
+        "MCP_APP_PRINCIPAL_ID": PRINCIPAL,
+    }
+    with (
+        patch.object(mcp, "server_binding", return_value=binding),
+        patch.object(mcp, "stored", return_value=""),
+        patch.object(mcp, "registry_resource_group"),
+        patch.object(mcp, "ensure_api", return_value={}),
+        patch.object(mcp, "_config_value") as discover,
+        patch.object(mcp, "grant_catalog") as grant,
+        patch.object(mcp, "publish_settings"),
+        patch.object(mcp, "persist"),
+    ):
+        values = mcp.prepare(ROOT, env)
+    assert values["MCP_TOOLSETS"] == "[]"
+    assert "MCP_COSMOS_ENDPOINT" not in values
+    assert "MCP_COSMOS_DATABASE" not in values
+    assert "MCP_SQL_SECRET_NAMES" not in values
+    discover.assert_not_called()
+    grant.assert_not_called()
+
+
+def test_custom_vector_application_never_inherits_reference_mcp_catalog():
+    env = environment(
+        AGENTLZ_APP_DEFINITION="samples/custom-app/containerapp",
+        DEPLOY_AGENT_APP_MCP="false", MCP_TOOLSETS="[]",
+        COSMOS_VECTOR_SEARCH_ENABLED="true",
+    )
+    values = composition(env)
+    source = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
+    plain = substitute_values(
+        {key: value["value"] for key, value in source["parameters"].items()}, env
+    )
+    terraform = resolve_parameters(plain, env)
+    for key in (
+        "containerAppsList", "databaseContainersList", "deployCosmosDb",
+        "enableCosmosVectorSearch", "cosmosAccountCapabilities",
+    ):
+        assert terraform[key] == values[key]
+    assert [app["service_name"] for app in values["containerAppsList"]] == ["web"]
+    assert values["deployCosmosDb"] is True
+    assert values["enableCosmosVectorSearch"] is True
+    assert values["databaseContainersList"] == []
+    assert not any(
+        item["name"].startswith("MCP_")
+        for item in values["additionalAppConfigurationSettings"]
+    )
+    with (
+        patch.object(mcp, "command") as command,
+        patch.object(mcp, "stored", return_value="") as stored,
+        patch.object(mcp, "persist") as persist,
+    ):
+        assert mcp.prepare(ROOT, env) == {}
+        mcp.deploy(ROOT, env)
+        mcp.activate(ROOT, env)
+        captured = mcp.capture(ROOT, env)
+    assert set(captured) == {"COSMOS_ACCOUNT_CAPABILITIES"}
+    assert "EnableNoSQLVectorSearch" in json.loads(captured["COSMOS_ACCOUNT_CAPABILITIES"])
+    command.assert_not_called()
+    stored.assert_called_once_with(env, "COSMOS_DB_ACCOUNT_RESOURCE_ID")
+    persist.assert_called_once()
+
+
+def test_custom_definition_rejects_reference_controls_before_azure_calls():
+    env = environment(AGENTLZ_APP_DEFINITION="samples/custom-app/containerapp")
+    with (
+        patch.object(mcp, "command") as command,
+        patch.object(mcp, "stored") as stored,
+    ):
+        for action in (mcp.prepare, mcp.deploy, mcp.activate, mcp.capture):
+            with pytest.raises(ValueError, match="Custom definitions own"):
+                action(ROOT, env)
+    command.assert_not_called()
+    stored.assert_not_called()

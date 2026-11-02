@@ -16,6 +16,7 @@ import requests
 
 from config import find_repo_root
 from config.appdefinition.roles import _ensure_rbac
+from config.appdefinition.loader import load_selected_definition
 from config.deployment import mcp_config
 from config.deployment.appconfig import _container_app, _run_az, publish_settings
 from config.deployment.context import bound_resource_id, registry_resource_group
@@ -308,7 +309,20 @@ def grant_catalog(environment: Mapping[str, str], principal: str) -> None:
     )
 
 
+def reference_application(environment: Mapping[str, str]) -> bool:
+    bundled = load_selected_definition(environment).bundled
+    if not bundled and (mcp_config.selected(environment) or mcp_config.toolsets(environment)):
+        raise ValueError(
+            "Reference MCP selection requires the bundled application. "
+            "Custom definitions own their MCP service, toolsets and dependencies."
+        )
+    return bundled
+
+
 def prepare(root: Path, environment: Mapping[str, str]) -> dict[str, str]:
+    if not reference_application(environment):
+        return {}
+    settings = mcp_config.settings(environment)
     if not mcp_config.selected(environment):
         return {}
     binding = server_binding(environment)
@@ -324,30 +338,36 @@ def prepare(root: Path, environment: Mapping[str, str]) -> dict[str, str]:
     registry_resource_group(environment)
     auth = ensure_api(environment)
     values = {
-        **mcp_config.settings(environment),
+        **settings,
         **binding,
         **auth,
         "CONTAINER_REGISTRY_RESOURCE_ID": registry_id,
         "MCP_SERVER_URL": binding["MCP_APP_ENDPOINT"].rstrip("/") + "/mcp",
         "MCP_ALLOWED_CLIENT_IDS": stored(environment, "MCP_ALLOWED_CLIENT_IDS") or "[]",
-        "MCP_COSMOS_ENDPOINT": _config_value(
-            run_az, environment["APP_CONFIG_ENDPOINT"], "COSMOS_DB_ENDPOINT"
-        ),
-        "MCP_COSMOS_DATABASE": _config_value(
-            run_az, environment["APP_CONFIG_ENDPOINT"], "DATABASE_NAME"
-        ),
         "MCP_ENABLED": "false",
     }
-    vault = environment.get("KEY_VAULT_URI", "")
-    if vault:
-        values["KEY_VAULT_ENDPOINT"] = vault
-    grant_catalog(environment, binding["MCP_APP_PRINCIPAL_ID"])
+    if mcp_config.nl2sql_enabled(environment):
+        values.update({
+            "MCP_COSMOS_ENDPOINT": _config_value(
+                run_az, environment["APP_CONFIG_ENDPOINT"], "COSMOS_DB_ENDPOINT"
+            ),
+            "MCP_COSMOS_DATABASE": _config_value(
+                run_az, environment["APP_CONFIG_ENDPOINT"], "DATABASE_NAME"
+            ),
+        })
+        vault = environment.get("KEY_VAULT_URI", "")
+        if vault:
+            values["KEY_VAULT_ENDPOINT"] = vault
+        grant_catalog(environment, binding["MCP_APP_PRINCIPAL_ID"])
     publish_settings(environment["APP_CONFIG_ENDPOINT"], values)
     persist(root, environment, values)
     return values
 
 
 def deploy(root: Path, environment: Mapping[str, str]) -> None:
+    if not reference_application(environment):
+        return
+    mcp_config.toolsets(environment)
     if not mcp_config.selected(environment):
         return
     values = prepare(root, environment)
@@ -546,6 +566,9 @@ def authorize(
 
 
 def activate(root: Path, environment: Mapping[str, str]) -> None:
+    if not reference_application(environment):
+        return
+    toolsets = mcp_config.toolsets(environment)
     if not mcp_config.selected(environment):
         if environment.get("MCP_AUTH_APP_OBJECT_ID"):
             publish_settings(
@@ -553,6 +576,7 @@ def activate(root: Path, environment: Mapping[str, str]) -> None:
                 {
                     "MCP_ENABLED": "false",
                     "DEPLOY_AGENT_APP_MCP": "false",
+                    "MCP_TOOLSETS": "[]",
                     "MCP_ALLOWED_CLIENT_IDS": "[]",
                 },
             )
@@ -584,6 +608,7 @@ def activate(root: Path, environment: Mapping[str, str]) -> None:
         environment["APP_CONFIG_ENDPOINT"],
         {
             **auth,
+            "MCP_TOOLSETS": json.dumps(toolsets),
             "MCP_ALLOWED_CLIENT_IDS": json.dumps(clients),
             "MCP_ENABLED": "false",
         },
@@ -598,6 +623,13 @@ def activate(root: Path, environment: Mapping[str, str]) -> None:
 
 
 def capture(root: Path, environment: Mapping[str, str]) -> dict[str, str]:
+    if not reference_application(environment):
+        values = {
+            "COSMOS_ACCOUNT_CAPABILITIES": json.dumps(capture_capabilities(environment))
+        }
+        persist(root, environment, values)
+        return values
+    mcp_config.settings(environment)
     previous_endpoint = environment.get("MCP_APP_ENDPOINT", "")
     previous_name = environment.get("MCP_APP_NAME", "")
     if mcp_config.selected(environment) and environment.get("APP_CONFIG_ENDPOINT"):
