@@ -2985,7 +2985,7 @@ var _containerRuntimeEnv = [
   { name: 'ENABLE_AGENTIC_RETRIEVAL',  value: toLower(string(enableAgenticRetrieval)) }
   { name: 'RETRIEVAL_BACKEND',         value: retrievalBackend }
   { name: 'KNOWLEDGE_BASE_NAME',       value: retrievalBackend == 'foundry_iq' ? knowledgeBaseName : '' }
-  { name: 'TOOLBOX_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? '${aiFoundryProjectEndpoint}/toolboxes/${knowledgeBaseName}/mcp?api-version=v1' : '' }
+  { name: 'TOOLBOX_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? 'https://${resourceNames.aiFoundryAccountName}.services.ai.azure.com/api/projects/${resourceNames.aiFoundryProjectName}/toolboxes/${knowledgeBaseName}/mcp?api-version=v1' : '' }
   { name: 'KNOWLEDGE_BASE_ENDPOINT',   value: retrievalBackend == 'foundry_iq' ? 'https://${resourceNames.searchServiceName}.search.windows.net' : '' }
   { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' && deployAiFoundry && deployAfProject && deploySearchService ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_foundryResourceGroupName}/providers/Microsoft.CognitiveServices/accounts/${resourceNames.aiFoundryAccountName}/projects/${resourceNames.aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
   { name: 'FOUNDRY_IQ_API_VERSION',    value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '' }
