@@ -623,6 +623,18 @@ variable "deployCosmosDb" {
   nullable    = false
   description = "Deploy application Cosmos DB for selected consumers; does not control Foundry Agent Service backing storage."
 }
+variable "enableCosmosVectorSearch" {
+  type        = bool
+  default     = false
+  nullable    = false
+  description = "Enable native vector search on application Cosmos, independent of Foundry backing storage."
+}
+variable "cosmosAccountCapabilities" {
+  type        = list(string)
+  default     = ["EnableServerless"]
+  nullable    = false
+  description = "Application Cosmos capabilities, including existing capabilities retained by hooks."
+}
 variable "deployContainerApps" {
   type     = bool
   default  = true
@@ -1331,6 +1343,14 @@ variable "databaseContainersList" {
     canonical_name = string
     partitionKey   = string
     throughput     = optional(number)
+    vectorEmbeddingPolicy = optional(object({
+      vectorEmbeddings = list(object({
+        path             = string
+        dataType         = string
+        dimensions       = number
+        distanceFunction = string
+      }))
+    }))
     # Explicit nested types preserve heterogeneous per-container policies
     # without list(any)'s common-type conversion or an untyped root object.
     indexingPolicy = optional(object({

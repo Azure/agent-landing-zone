@@ -1,5 +1,62 @@
 # Changelog
 
+## [v7.0.0] - 2026-11-02
+
+### Changed
+
+- Separate MCP Server deployment from toolset activation with `MCP_TOOLSETS`,
+  defaulting to an empty authenticated server. Explicitly select `["nl2sql"]`
+  for its SQL tools, application Cosmos catalog and scoped dependency grants.
+  Keep reference-application composition above the shared foundation and
+  preserve custom applications' declared services and data requirements.
+- Move NL2SQL to the optional `agent-app-mcp` Container App using the official
+  Python MCP SDK, dedicated Entra authorization and application Cosmos vector
+  metadata. The native orchestrator consumes its tools through MCP.
+- Compose the server and selected toolset dependencies through both Bicep and Terraform,
+  deploy it before consumers, authorize their actual identities, restart active
+  MCP revisions and only then activate tools. Deselecting MCP retains its catalog.
+  Bind the coordinated component commits in the manifest, bundled application
+  definition and reviewed pin fixture, retaining ingestion at `v3.1.3`.
+- Add approved-source metadata onboarding and coordinated central application
+  documentation. SQL approval, read-only database permissions and private SQL
+  connectivity remain operator responsibilities.
+
+- Update configuration dependencies to Azure App Configuration 1.10.0,
+  Identity 1.27.0, Key Vault Secrets 4.11.3 and jsonschema 4.26.0.
+  Preserve the existing credential, secret and deployment-contract APIs,
+  supported Python versions, Terraform version and published component pins.
+- Refresh immutable Azure login, Terraform setup and artifact-upload action
+  pins for Node 24 runners. Keep Terraform 1.13.0, readonly initialization,
+  both operating-system contract gates and optional OIDC behavior unchanged.
+
+### Migration
+
+- Upgrade the complete component/configuration combination. The native
+  orchestrator consumes SQL tools from Agent App MCP Server rather than the
+  former direct SQL/Fabric/DAX settings.
+- Select reference server compute with `DEPLOY_AGENT_APP_MCP=true` and its SQL
+  tools with `MCP_TOOLSETS=["nl2sql"]`, then redeploy. Keep catalog data,
+  identity bindings and approved read-only SQL permissions.
+- Rollback restores the prior complete combination and deployment state,
+  retaining catalog data. Review retained grants deliberately on deselection.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.5.0 |
+| agent-app-orchestrator | v7.0.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Focused application-composition and exact-pin contracts passed against the
+  real bundled application definition. Full provider/lifecycle CI covers
+  Bicep build/lint/offline contracts and Terraform on Ubuntu and Windows.
+- Infrastructure provider lock, module pins and provenance are unchanged.
+- Validation is local and CI-based. No Azure deployment, live model or SQL
+  calls, private-network validation or deployed provider parity is claimed.
+
 ## [v6.0.0] - 2026-11-01
 
 ### Changed

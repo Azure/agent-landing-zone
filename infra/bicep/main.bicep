@@ -387,6 +387,12 @@ param storageAccountAllowSharedKeyAccess bool = true
 @description('Deploy the optional application Cosmos DB account. Enable for application consumers such as classic conversation storage or panel metadata. Does not control Foundry Agent Service backing storage.')
 param deployCosmosDb bool = false
 
+@description('Enable vector search on the application Cosmos account for selected capabilities.')
+param enableCosmosVectorSearch bool = false
+
+@description('Application Cosmos account capabilities, including existing capabilities retained by lifecycle hooks.')
+param cosmosAccountCapabilities array = ['EnableServerless']
+
 @description('Deploy Azure Container Apps for running your microservices in a serverless Kubernetes environment.')
 param deployContainerApps bool = true
 
@@ -1140,7 +1146,7 @@ var _networkResourceGroupName = empty(networkResourceGroupName) ? resourceGroup(
 // issue #22.
 var _manifestComponents = _manifest.?components ?? []
 var _extraRepoUrls  = [for c in _manifestComponents: c.repo]
-var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? 'main']
+var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? c.?branch ?? 'main']
 var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(split(c.repo, '/')), '.git', '')]
 
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
@@ -3174,7 +3180,7 @@ module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCo
     userAssignedResourceIds: _useUAI ? [cosmosUAI.outputs.resourceId] : []
     isZoneRedundant: useZoneRedundancy
     defaultConsistencyLevel: 'Session'
-    capabilities: ['EnableServerless']
+    capabilities: union(cosmosAccountCapabilities, ['EnableServerless'], enableCosmosVectorSearch ? ['EnableNoSQLVectorSearch'] : [])
     enableAnalyticalStorage: enableCosmosAnalyticalStorage
     enableFreeTier: false
     publicNetworkAccess: _publicNetworkAccess
@@ -3207,6 +3213,7 @@ module cosmosSqlDatabase 'modules/cosmos-db/sql-database.bicep' = if (deployCosm
         defaultTtl: -1
         throughput: container.?throughput
         indexingPolicy: container.?indexingPolicy
+        vectorEmbeddingPolicy: container.?vectorEmbeddingPolicy
       }
     ]
   }

@@ -233,6 +233,16 @@ if (-not (Docker-Ready)) {
 $hadErrors = $false
 
 $nativeMode = [bool]$topologyInfo.bundled_application
+# BEGIN optional MCP lifecycle
+if ($nativeMode) {
+  Invoke-PythonModule -ModuleName 'config.deployment.mcp' -Arguments @('--deploy')
+  if ($LASTEXITCODE -ne 0) { Write-Error "MCP preparation/deployment failed; consumers have not been deployed."; exit 1 }
+  $globalEnv = Get-AzdEnv -projectPath $repoRoot
+  foreach ($prop in $globalEnv.PSObject.Properties) {
+    Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
+  }
+}
+# END optional MCP lifecycle
 # BEGIN native application lifecycle
 if ($nativeMode) {
   Invoke-PythonModule -ModuleName 'config.deployment.native_deploy' -Arguments @('--deploy')
@@ -249,6 +259,7 @@ if ($nativeMode) {
 
 foreach ($c in $manifest.components) {
   $name = $c.name
+  if ($nativeMode -and $name -eq 'agent-app-mcp') { continue }
   if ($name -notin $selectedComponents) {
     Write-Host "$name is not deployed in $deploymentMode mode." -ForegroundColor Yellow
     continue
@@ -438,5 +449,10 @@ foreach ($dc in $definitionComponents) {
 }
 
 if ($hadErrors) { Write-Error "One or more components failed. See logs above."; exit 1 }
+
+if ($nativeMode) {
+  Invoke-PythonModule -ModuleName 'config.deployment.mcp' -Arguments @('--activate')
+  if ($LASTEXITCODE -ne 0) { Write-Error "MCP caller authorization/activation failed."; exit 1 }
+}
 
 Write-Host "All components processed." -ForegroundColor Green

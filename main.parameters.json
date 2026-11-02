@@ -132,6 +132,8 @@
     "appRuntimeConfigurationMode":          { "value": "${APP_RUNTIME_CONFIGURATION_MODE=appConfig}" },
     "deployAppInsights":                    { "value": "true" },
     "deployCosmosDb":                       { "value": "${DEPLOY_COSMOS_DB=false}" },
+    "enableCosmosVectorSearch":             { "value": false },
+    "cosmosAccountCapabilities":            { "value": ["EnableServerless"] },
     "enableCosmosAnalyticalStorage":        { "value": "${ENABLE_COSMOS_ANALYTICAL_STORAGE=false}" },
     "deployContainerApps":                  { "value": "true" },
     "deployContainerRegistry":              { "value": "true" },

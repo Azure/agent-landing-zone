@@ -51,6 +51,7 @@ def declaration_plan(
         for component in effective_components(
             definition, hosted_orchestration=hosted,
             deploy_ingestion=resolve_ingestion_selection(environment),
+            deploy_mcp=environment.get("DEPLOY_AGENT_APP_MCP", "false") == "true",
         ):
             kinds = []
             if component["kind"] == "azure.ai.agent":

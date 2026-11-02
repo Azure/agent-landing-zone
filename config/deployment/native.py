@@ -90,10 +90,9 @@ def resolve_application(environment: Mapping[str, str]) -> NativeApplication:
 
 
 def nl2sql_selected(environment: Mapping[str, str]) -> bool:
-    enabled = boolean(environment, "NL2SQL_ENABLED")
-    if enabled and environment.get("NL2SQL_SOURCE_REGISTRY", "").strip() != "cosmos":
-        raise ValueError("NL2SQL_ENABLED requires the explicit existing NL2SQL_SOURCE_REGISTRY=cosmos catalog.")
-    return enabled
+    if boolean(environment, "NL2SQL_ENABLED"):
+        raise ValueError('Direct NL2SQL is retired. Select DEPLOY_AGENT_APP_MCP=true and MCP_TOOLSETS=["nl2sql"] instead of NL2SQL_ENABLED.')
+    return False
 
 
 def scheduler_settings(environment: Mapping[str, str]) -> dict[str, str]:

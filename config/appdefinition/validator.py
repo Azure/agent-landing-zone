@@ -34,6 +34,7 @@ BUNDLED_MANIFEST_SUFFIX = {
     "ui": "-ui",
     "orchestrator": "-orchestrator",
     "ingestion": "-ingestion",
+    "mcp": "-mcp",
 }
 
 _HOST_FOR_KIND = {
@@ -215,7 +216,7 @@ def _bundled_pin_issues(components: list[dict[str, Any]], repo_root: Path | None
     for index, component in enumerate(components):
         suffix = BUNDLED_MANIFEST_SUFFIX.get(component.get("name", ""))
         if suffix is None:
-            issues.append(ValidationIssue(pointer("components", index, "name"), "the bundled definition only declares ui, orchestrator, and ingestion."))
+            issues.append(ValidationIssue(pointer("components", index, "name"), "the bundled definition only declares ui, orchestrator, ingestion, and optional mcp."))
             continue
         matches = [commit for name, commit in pins.items() if name.endswith(suffix)]
         source = component.get("source") or {}

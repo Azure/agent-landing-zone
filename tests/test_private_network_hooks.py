@@ -20,6 +20,7 @@ JQ = shutil.which("jq")
 VALUES = """NETWORK_ISOLATION="true"
 ACR_TASK_AGENT_POOL="test-pool"
 ORCHESTRATION_HOST="container_apps"
+DEPLOY_AGENT_APP_MCP="false"
 APP_CONFIG_ENDPOINT="https://config.azconfig.io"
 AZURE_RESOURCE_GROUP="test-group"
 AZURE_SUBSCRIPTION_ID="test-subscription"
@@ -64,9 +65,14 @@ $ErrorView = 'NormalView'
 function azd {
     if ($env:FAKE_AZD_FAIL -eq '1') { $global:LASTEXITCODE = 1; return }
     if (Test-Path (Join-Path $env:FAKE_ROOT 'env-read')) {
-        throw 'Unexpected repeated environment read before deployment'
+        if (-not (Test-Path (Join-Path $env:FAKE_ROOT 'mcp-prepared')) -or
+            (Test-Path (Join-Path $env:FAKE_ROOT 'env-refreshed'))) {
+            throw 'Unexpected environment read outside the MCP bootstrap refresh'
+        }
+        New-Item -ItemType File -Path (Join-Path $env:FAKE_ROOT 'env-refreshed') | Out-Null
+    } else {
+        New-Item -ItemType File -Path (Join-Path $env:FAKE_ROOT 'env-read') | Out-Null
     }
-    New-Item -ItemType File -Path (Join-Path $env:FAKE_ROOT 'env-read') | Out-Null
     $valuesFile = if (($args -join ' ') -match '--output json') { 'values.json' } else { 'values.txt' }
     Get-Content -LiteralPath (Join-Path $env:FAKE_ROOT $valuesFile)
     $global:LASTEXITCODE = [int]$env:FAKE_AZD_EXIT
@@ -87,6 +93,14 @@ function python {
     if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.outputs') {
         $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
+        return
+    }
+    if ($call -match 'config\.deployment\.mcp' -and $args[-1] -eq '--deploy') {
+        if ($env:DEPLOY_AGENT_APP_MCP -ne 'false') {
+            throw 'This network hook fixture does not deploy MCP'
+        }
+        New-Item -ItemType File -Path (Join-Path $env:FAKE_ROOT 'mcp-prepared') | Out-Null
+        $global:LASTEXITCODE = 0
         return
     }
     if ($call -match 'config.deployment.native_deploy') {
@@ -132,8 +146,14 @@ exit $LASTEXITCODE
 SH_CLIS = {
     "azd": """#!/usr/bin/env bash
 [ "${FAKE_AZD_FAIL:-0}" = 1 ] && exit 1
-[ -f "$FAKE_ROOT/env-read" ] && { echo unexpected-env-read >> "$FAKE_TRACE"; exit 95; }
-touch "$FAKE_ROOT/env-read"
+if [ -f "$FAKE_ROOT/env-read" ]; then
+  [ -f "$FAKE_ROOT/mcp-prepared" ] && [ ! -f "$FAKE_ROOT/env-refreshed" ] || {
+    echo unexpected-env-read >> "$FAKE_TRACE"; exit 95;
+  }
+  touch "$FAKE_ROOT/env-refreshed"
+else
+  touch "$FAKE_ROOT/env-read"
+fi
 if [[ "$*" == *"--output json"* ]]; then
   cat "$FAKE_ROOT/values.json"
 else
@@ -146,6 +166,13 @@ case "$*" in
   *config.deployment.egress*) exit 0 ;;
   *config.deployment.resource_groups*) exit 0 ;;
   *config.deployment.outputs*) [ "${FAKE_RG_MISSING:-0}" != 1 ]; exit $? ;;
+  *config.deployment.mcp*)
+    [ "$DEPLOY_AGENT_APP_MCP" = false ] && [ "${@: -1}" = --deploy ] || exit 96
+    touch "$FAKE_ROOT/mcp-prepared"
+    exit 0 ;;
+  *'import json, shlex, sys'*)
+    [ -f "$FAKE_ROOT/mcp-prepared" ] && [ -f "$FAKE_ROOT/env-refreshed" ] || exit 96
+    exec "$REAL_PYTHON" "$@" ;;
   *config.deployment.private_network*)
     echo probe >> "$FAKE_TRACE"
     if [ "$FAKE_REAL_PROBE" = 1 ]; then

@@ -25,12 +25,19 @@ class IntegrationPinTests(unittest.TestCase):
             "repo": "https://github.com/Azure/bicep-ptn-aiml-landing-zone.git",
             "tag": "v2.7.3", "commit": "97e2375b89dcda4900d75aac9e7ffb7b20cce165",
         }, manifest["infra"]["source"])
-        for name, tag, commit in (
-            ("agent-app-orchestrator", "v6.0.0", "8cff5be48d166e3270f874374bd343e7899073ec"),
-            ("agent-app-ingestion", "v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
-            ("agent-app-ui", "v3.5.0", "3961224368685cd0e96966c18496adb8b6626987"),
+        self.assertEqual({
+            "agent-app-mcp", "agent-app-orchestrator", "agent-app-ingestion", "agent-app-ui",
+        }, set(components))
+        for name, ref_key, ref, commit in (
+            ("agent-app-mcp", "tag", "v2.0.0",
+             "e462d929ce02a74813feff9288d155098295691c"),
+            ("agent-app-orchestrator", "tag", "v7.0.0",
+             "b89684b67f991b337e3519620210a6469622fc29"),
+            ("agent-app-ingestion", "tag", "v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
+            ("agent-app-ui", "tag", "v3.5.0", "3961224368685cd0e96966c18496adb8b6626987"),
         ):
-            self.assertEqual((tag, commit), (components[name]["tag"], components[name]["commit"]))
+            self.assertNotIn("tag" if ref_key == "branch" else "branch", components[name])
+            self.assertEqual((ref, commit), (components[name][ref_key], components[name]["commit"]))
         fixture = json.loads((ROOT / "infra/tests/contracts/fixtures/incorporated-foundation-normalization.json").read_text())
         self.assertEqual(manifest["components"], fixture["projection"]["changes"]["variables"]["changes"]["$fxv#0"]["changes"]["components"]["after"])
 

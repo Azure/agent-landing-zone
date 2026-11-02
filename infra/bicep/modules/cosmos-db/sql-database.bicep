@@ -40,6 +40,7 @@ resource sqlContainers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
         defaultTtl: container.?defaultTtl ?? -1
         id: container.name
         indexingPolicy: empty(container.?indexingPolicy ?? {}) ? null : container.indexingPolicy
+        vectorEmbeddingPolicy: container.?vectorEmbeddingPolicy
         partitionKey: {
           paths: [
             for path in container.paths: startsWith(path, '/') ? path : '/${path}'

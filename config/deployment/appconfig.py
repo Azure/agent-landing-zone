@@ -27,6 +27,7 @@ from config.deployment.composition import (
 from config.deployment.native import OrchestrationHost, resolve_application, scheduler_settings
 from util.azure_cli import resolve_az_command
 from config.deployment.context import context_settings
+from config.deployment import mcp_config
 from config.deployment.resource_groups import resource_group_for
 from config.retrieval.settings import (
     public_settings as retrieval_public_settings,
@@ -62,6 +63,8 @@ def _container_app(
     *,
     required: bool,
     subscription: str = "",
+    require_identity_selection: bool = False,
+    identity_client_id: str = "",
 ) -> dict[str, str]:
     query = (
         "{fqdn:properties.configuration.ingress.fqdn,"
@@ -92,6 +95,20 @@ def _container_app(
         "principalId": value.get("principalId") or "",
     }
     user_assigned = value.get("userAssigned") or {}
+    if require_identity_selection:
+        if not isinstance(user_assigned, dict):
+            raise ValueError("MCP assigned identity response must be an object.")
+        identities = [identity for identity in user_assigned.values()
+                      if isinstance(identity, dict) and identity.get("clientId")]
+        if identity_client_id:
+            identities = [identity for identity in identities
+                          if identity["clientId"].lower() == identity_client_id.lower()]
+            if len(identities) != 1:
+                raise ValueError("MCP_APP_CLIENT_ID must select an identity assigned to the MCP app.")
+        elif len(identities) > 1:
+            raise ValueError("MCP app has multiple assigned identities. Select MCP_APP_CLIENT_ID explicitly.")
+        if identities:
+            user_assigned = {"selected": identities[0]}
     if isinstance(user_assigned, dict):
         for identity in user_assigned.values():
             if isinstance(identity, dict) and identity.get("clientId"):
@@ -169,6 +186,8 @@ def build_settings(
                 "principalId": discovered["principalId"], "fqdn": discovered["fqdn"],
             })
         settings["CONTAINER_APPS"] = json.dumps(containers, separators=(",", ":"))
+        if "MCP_TOOLSETS" in environment:
+            settings["MCP_TOOLSETS"] = json.dumps(mcp_config.toolsets(environment))
         settings.update(source_public_settings(environment))
         return settings
     deploy_ingestion = resolve_ingestion_selection(environment)
@@ -254,14 +273,31 @@ def build_settings(
             },
         )
 
+    mcp_settings = {mcp_config.DEPLOY_AGENT_APP_MCP: str(mcp_config.selected(environment)).lower()}
+    if mcp_config.selected(environment):
+        name = f"ca-{resource_token}-mcp"
+        server = _container_app(resource_group, name, required=True, subscription=subscription)
+        if not server["fqdn"]:
+            raise ValueError("Provisioned MCP Container App has no HTTPS ingress endpoint.")
+        mcp_config.consumer_settings(environment, f"https://{server['fqdn']}", "")
+        mcp_settings = {
+            **mcp_config.settings(environment),
+            **{key: environment[key] for key in (
+                "MCP_COSMOS_ENDPOINT", "MCP_COSMOS_DATABASE", "KEY_VAULT_ENDPOINT",
+            ) if environment.get(key)},
+            "MCP_APP_NAME": name, "MCP_APP_ENDPOINT": f"https://{server['fqdn']}",
+        }
+        container_apps.append({
+            "name": name, "serviceName": "mcp", "canonical_name": "MCP_APP",
+            "principalId": server["principalId"], "fqdn": server["fqdn"],
+        })
+
     return {
+        **mcp_settings,
         **native.settings(),
         **({
             "HOSTED_WORKFLOW_BASE_URL": environment.get("HOSTED_WORKFLOW_BASE_URL", "").strip(),
             "NATIVE_UI_METADATA_CONTAINER": environment.get("NATIVE_UI_METADATA_CONTAINER", "native-ui-metadata"),
-            "DATASOURCES_CONTAINER": "datasources" if environment.get("NL2SQL_ENABLED", "").lower() == "true" else "",
-            "NL2SQL_ENABLED": environment.get("NL2SQL_ENABLED", "false"),
-            "NL2SQL_SOURCE_REGISTRY": environment.get("NL2SQL_SOURCE_REGISTRY", ""),
             "NATIVE_TOOL_SECRET_NAMES": environment.get("NATIVE_TOOL_SECRET_NAMES", "[]"),
         }),
         **(
