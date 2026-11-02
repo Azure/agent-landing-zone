@@ -239,6 +239,10 @@ class CapabilityProfileTests(unittest.TestCase):
         trio = load_definition(ROOT / "app-definition.json", repo_root=ROOT)
         self.assertTrue(trio.bundled)
         for component in trio.document["components"]:
+            if component["name"] == "mcp":
+                self.assertEqual(["model-user"], component["profiles"])
+                self.assertNotIn("SearchIndexDataReader", role_names(component["profiles"]))
+                continue
             canonical = TRIO_CANONICAL[component["name"]]
             with self.subTest(component=component["name"], app=canonical):
                 expected = current[canonical] - {"KeyVaultSecretsUser"}

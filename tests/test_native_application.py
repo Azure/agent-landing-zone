@@ -159,37 +159,35 @@ def test_loaded_root_definition_native_defaults_have_no_application_cosmos_or_in
     assert all("CosmosDBBuiltInDataContributor" not in app["roles"] for app in result["containerAppsList"]["value"])
 
 
-def test_nl2sql_is_an_explicit_catalog_not_a_global_checkpoint_database():
+def test_direct_nl2sql_is_retired_and_mcp_owns_its_catalog():
     source = json.loads((ROOT / "main.parameters.json").read_text())
     env = {**environment(), DEFINITION_ENV: str(ROOT / "app-definition.json"), "NL2SQL_ENABLED": "true"}
     validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
-    with pytest.raises(ValueError, match="NL2SQL_SOURCE_REGISTRY"):
+    with pytest.raises(ValueError, match="DEPLOY_AGENT_APP_MCP"):
         compose_parameters(source, env)
     result = compose_parameters(source, {
-        **env, "NL2SQL_SOURCE_REGISTRY": "cosmos",
+        **environment(), DEFINITION_ENV: str(ROOT / "app-definition.json"),
+        "DEPLOY_AGENT_APP_MCP": "true",
     })["parameters"]
     assert result["deployCosmosDb"]["value"]
-    assert [c["name"] for c in result["databaseContainersList"]["value"]] == ["datasources"]
+    assert [c["name"] for c in result["databaseContainersList"]["value"]] == [
+        "mcp-sources", "mcp-nl2sql-metadata",
+    ]
     with pytest.raises(ValueError):
         resolve_application({**environment(mode="workflow"), "ENABLE_PRIVATE_ATTACHMENTS": "true"})
 
 
-def test_enabled_nl2sql_runtime_grant_is_catalog_reader_not_conversation_writer():
+def test_native_consumer_has_no_direct_sql_catalog_grant():
     env = {
         **environment("container_apps"), DEFINITION_ENV: str(ROOT / "app-definition.json"),
-        "NL2SQL_ENABLED": "true", "NL2SQL_SOURCE_REGISTRY": "cosmos",
+        "DEPLOY_AGENT_APP_MCP": "true",
     }
     validate_definition(load_selected_definition(env, repo_root=ROOT), repo_root=ROOT)
     principal = "22222222-2222-4222-8222-222222222222"
     with patch.object(native_access, "secret_names", return_value=()), \
-         patch.object(native_access, "_config_value", side_effect=["catalog-account", "catalog-db"]), \
-         patch.object(native_access, "ensure_cosmos_sql_role_assignment") as grant:
+         patch.object(native_access, "grant_secrets") as grant:
         native_access.grant_runtime_features(env, principal)
-    grant.assert_called_once_with(
-        "catalog-account", "rg-test", SUB, principal, "00000000-0000-0000-0000-000000000001",
-        f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.DocumentDB/databaseAccounts/"
-        "catalog-account/dbs/catalog-db/colls/datasources",
-    )
+    grant.assert_called_once_with(env, principal, ())
 
 
 def test_native_metadata_is_ui_owned_and_optional_for_conversation():

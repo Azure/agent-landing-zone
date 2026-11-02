@@ -246,6 +246,17 @@ if [ "$TOPOLOGY_PERSIST_FAILED" = "true" ]; then
     exit 1
 fi
 
+MCP_CAPTURE_OUTPUT="$(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.mcp --capture-capabilities)" || {
+    echo "MCP catalog capability/ownership capture failed; provisioning has not started." >&2
+    exit 1
+}
+MCP_CAPTURE_EXPORTS="$(printf '%s' "$MCP_CAPTURE_OUTPUT" | "$PYTHON_CMD" -c '
+import json, shlex, sys
+for key, value in json.load(sys.stdin).items():
+    print("export " + key + "=" + shlex.quote(value))
+')" || exit 1
+eval "$MCP_CAPTURE_EXPORTS"
+
 echo "${CYAN}Composing Agent Landing Zone deployment mode...${NC}"
 HOSTED_SOURCE_COMMIT="$("$PYTHON_CMD" -c 'import json,sys; print(next(c["commit"] for c in json.load(open(sys.argv[1], encoding="utf-8"))["components"] if c["name"].endswith("-orchestrator")))' "$PROJECT_ROOT/manifest.json")"
 if [ "$INFRA_PROVIDER" = "terraform" ]; then

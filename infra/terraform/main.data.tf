@@ -25,7 +25,8 @@ locals {
       kind    = "Hash"
       version = 1
     }
-    indexing_policy = length(keys(local.services_indexing_policies[container.name])) == 0 ? null : local.services_indexing_policies[container.name]
+    indexing_policy         = length(keys(local.services_indexing_policies[container.name])) == 0 ? null : local.services_indexing_policies[container.name]
+    vector_embedding_policy = container.vectorEmbeddingPolicy
   } }
 }
 
@@ -155,7 +156,7 @@ resource "azapi_resource" "application_cosmos" {
     properties = {
       databaseAccountOfferType           = "Standard"
       backupPolicy                       = { type = "Continuous", continuousModeProperties = { tier = "Continuous30Days" } }
-      capabilities                       = [{ name = "EnableServerless" }]
+      capabilities                       = [for name in distinct(concat(var.cosmosAccountCapabilities, ["EnableServerless"], var.enableCosmosVectorSearch ? ["EnableNoSQLVectorSearch"] : [])) : { name = name }]
       minimalTlsVersion                  = "Tls12"
       capacity                           = { totalThroughputLimit = -1 }
       publicNetworkAccess                = local.public_access.public_network_access
@@ -196,7 +197,8 @@ resource "azapi_resource" "application_container" {
         defaultTtl               = -1
         partitionKey             = each.value.partition_key
         conflictResolutionPolicy = {}
-      }, each.value.indexing_policy == null ? {} : { indexingPolicy = each.value.indexing_policy })
+        }, each.value.indexing_policy == null ? {} : { indexingPolicy = each.value.indexing_policy },
+      each.value.vector_embedding_policy == null ? {} : { vectorEmbeddingPolicy = each.value.vector_embedding_policy })
     }
   }
   depends_on = [terraform_data.services_contract]

@@ -62,6 +62,10 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'MCP vector capability default enabled'; Change = { param($t) $t.parameters.enableCosmosVectorSearch.defaultValue = $true } },
+        @{ Name = 'MCP existing capabilities discarded'; Change = { param($t) $t.resources.cosmosDBAccount.properties.parameters.capabilities.value = @('EnableServerless', 'EnableNoSQLVectorSearch') } },
+        @{ Name = 'MCP vector policy dropped'; Change = { param($t) $null = $t.resources.cosmosSqlDatabase.properties.template.resources.sqlContainers.properties.resource.Remove('vectorEmbeddingPolicy') } },
+        @{ Name = 'MCP vectors stored on an undeclared path'; Change = { param($t) $t.resources.cosmosSqlDatabase.properties.template.resources.sqlContainers.properties.resource.vectorEmbeddingPolicy = '/different' } },
         @{ Name = 'native scheduler enabled by default'; Change = { param($t) $t.parameters.deployDurableTaskScheduler.defaultValue = $true } },
         @{ Name = 'native scheduler moved to Foundry'; Change = { param($t) $t.resources.durableTask.resourceGroup = "[variables('_foundryResourceGroupName')]" } },
         @{ Name = 'native scheduler isolation gate lost'; Change = { param($t) $t.resources.durableTask.properties.parameters.networkIsolation.value = $false } },
@@ -127,10 +131,10 @@ try {
         @{ Name = 'unrelated resource injection'; Change = { param($t) $t.resources.unexpected = @{ type = 'Microsoft.Storage/storageAccounts'; name = 'drift' } } },
         @{ Name = 'unrelated output injection'; Change = { param($t) $t.outputs.unexpected = @{ type = 'string'; value = 'drift' } } },
         @{ Name = 'compiled manifest spoofing'; Change = { param($t) $t.variables['$fxv#0'].repo = 'https://example.invalid/drift.git' } },
-        @{ Name = 'compiled UI source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[0].commit = '0000000000000000000000000000000000000000' } },
-        @{ Name = 'compiled orchestrator source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[1].commit = '0000000000000000000000000000000000000000' } },
-        @{ Name = 'compiled component tag spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[2].tag = 'v99.0.0' } },
-        @{ Name = 'compiled component commit spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[2].commit = '0000000000000000000000000000000000000000' } }
+        @{ Name = 'compiled UI source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[1].commit = '0000000000000000000000000000000000000000' } },
+        @{ Name = 'compiled orchestrator source commit drift'; Change = { param($t) $t.variables['$fxv#0'].components[2].commit = '0000000000000000000000000000000000000000' } },
+        @{ Name = 'compiled component tag spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[3].tag = 'v99.0.0' } },
+        @{ Name = 'compiled MCP commit spoofing'; Change = { param($t) $t.variables['$fxv#0'].components[0].commit = '0000000000000000000000000000000000000000' } }
     )
     foreach ($case in $mutations) {
         $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100

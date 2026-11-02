@@ -2,8 +2,24 @@
   "$schema": "./contracts/app-definition-v1.schema.json",
   "schemaVersion": 1,
   "id": "agent-lz-default",
-  "displayName": "Agent Landing Zone default application (UI, orchestrator, ingestion)",
+  "displayName": "Agent Landing Zone default application with optional ingestion and MCP",
   "components": [
+    {
+      "name": "mcp",
+      "kind": "containerapp",
+      "path": "mcp",
+      "source": { "commit": "a824bae8631e49066741ceedfd72e243c9e217d0" },
+      "profiles": ["model-user"],
+      "egress": [
+        {
+          "fqdn": "login.microsoftonline.com",
+          "protocol": "https",
+          "port": 443,
+          "purpose": "Validate Entra access tokens using tenant signing keys."
+        }
+      ],
+      "ingress": "external"
+    },
     {
       "name": "ui",
       "kind": "containerapp",
@@ -17,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "8cff5be48d166e3270f874374bd343e7899073ec" },
+      "source": { "commit": "53b63422d1c2628ad02a0253651e8cf7068ed1e9" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {

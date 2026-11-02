@@ -14,14 +14,10 @@ from config.appdefinition.roles import _ensure_rbac
 from config.deployment.appconfig import _run_az
 from config.deployment.context import bound_resource_id
 from config.deployment.hosted_access import (
-    KV_REFERENCE, Role, _config_value, _endpoint, _setting, run_az,
+    KV_REFERENCE, Role, _endpoint, _setting, run_az,
 )
-from config.deployment.native import nl2sql_selected
 from config.deployment.resource_groups import resource_group_for
-from config.panel.setup import (
-    COSMOS_DATA_READER_ROLE_GUID, container_scope_path,
-    ensure_cosmos_sql_role_assignment, resolve_container_app_principal_id,
-)
+from config.panel.setup import resolve_container_app_principal_id
 
 
 def secret_names(environment: Mapping[str, str], keys: tuple[str, ...], *, run=run_az) -> tuple[str, ...]:
@@ -78,16 +74,6 @@ def tool_secret_names(environment: Mapping[str, str]) -> tuple[str, ...]:
 def grant_runtime_features(environment: Mapping[str, str], principal: str) -> None:
     keys = ("AUDIT_HMAC_KEY",) + (("MCP_API_KEY",) if environment.get("MCP_ENABLED") == "true" else ())
     grant_secrets(environment, principal, (*secret_names(environment, keys), *tool_secret_names(environment)))
-    if nl2sql_selected(environment):
-        endpoint = environment["APP_CONFIG_ENDPOINT"]
-        account = _config_value(run_az, endpoint, "DATABASE_ACCOUNT_NAME")
-        database = _config_value(run_az, endpoint, "DATABASE_NAME")
-        group = resource_group_for(environment, "application")
-        sub = environment["AZURE_SUBSCRIPTION_ID"]
-        ensure_cosmos_sql_role_assignment(
-            account, group, sub, principal, COSMOS_DATA_READER_ROLE_GUID,
-            container_scope_path(sub, group, account, database, "datasources"),
-        )
 
 
 def grant_container_features(environment: Mapping[str, str]) -> None:

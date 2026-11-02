@@ -40,6 +40,7 @@ BUNDLED_SERVICE_NAMES = {
     "ui": "frontend",
     "orchestrator": "orchestrator",
     "ingestion": "dataingest",
+    "mcp": "mcp",
 }
 
 
@@ -148,6 +149,7 @@ def component_service_name(definition: AppDefinition, component: Mapping[str, An
 def effective_components(
     definition: AppDefinition, *, hosted_orchestration: bool,
     deploy_ingestion: bool = True,
+    deploy_mcp: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Return the components to deploy for the selected deployment mode.
 
@@ -159,6 +161,12 @@ def effective_components(
     only fields (``ingress``, ``resources``) are dropped.
     """
     components = copy.deepcopy(list(definition.document.get("components") or []))
+    if definition.bundled:
+        if deploy_mcp is None:
+            from config.deployment.mcp_config import selected
+            deploy_mcp = selected(os.environ)
+        if not deploy_mcp:
+            components = [component for component in components if component.get("name") != "mcp"]
     if definition.bundled and not deploy_ingestion:
         components = [component for component in components if component.get("name") != "ingestion"]
     if not (definition.bundled and hosted_orchestration):
