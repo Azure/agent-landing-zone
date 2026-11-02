@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v7.1.0] - 2026-11-02
+
 ### Added
 
 - **Optional user delegation.** Reuse `HOSTED_AGENT_AUTH_MODE`, defaulting to
@@ -26,6 +28,26 @@
   Keep the default OBO profile unless service identity is explicitly required.
   Change authentication modes through coordinated redeployment and new
   sessions. Roll back the complete prior combination and deployment settings.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.6.0 |
+| agent-app-orchestrator | v7.1.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI passed the complete deployment and hook contracts, Bicep
+  build/lint/offline contracts and Terraform contracts on Ubuntu and Windows.
+  Release validation covers the exact published component commits through the
+  real bundled application definition and reviewed component-pin fixture.
+- Bicep and Terraform both provision the managed knowledge connection,
+  Toolbox endpoint and scoped identity grants. Infrastructure provenance and
+  provider dependency pins are unchanged.
+- Validation is local and CI-based. No Azure deployment, image publication,
+  live delegation or deployed provider parity is claimed.
 
 ## [v7.0.0] - 2026-11-02
 
