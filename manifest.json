@@ -13,7 +13,7 @@
       "name": "agent-app-mcp",
       "repo": "https://github.com/Azure/agent-app-mcp.git",
       "branch": "feature/nl2sql-mcp-cosmos",
-      "commit": "db9cc51fba28a520c678d56bd83344a4e4da71ed"
+      "commit": "320f9712247225dc9800264fcffa6a9e4725832a"
     },
     {
       "name": "agent-app-ui",

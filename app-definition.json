@@ -8,7 +8,7 @@
       "name": "mcp",
       "kind": "containerapp",
       "path": "mcp",
-      "source": { "commit": "db9cc51fba28a520c678d56bd83344a4e4da71ed" },
+      "source": { "commit": "320f9712247225dc9800264fcffa6a9e4725832a" },
       "profiles": ["model-user"],
       "egress": [
         {
