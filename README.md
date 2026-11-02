@@ -50,6 +50,12 @@ Component versions for this release are pinned in [manifest.json](manifest.json)
 | UI | [Azure/agent-app-ui](https://github.com/Azure/agent-app-ui) |
 | Orchestrator | [Azure/agent-app-orchestrator](https://github.com/Azure/agent-app-orchestrator) |
 | Ingestion (optional) | [Azure/agent-app-ingestion](https://github.com/Azure/agent-app-ingestion) |
+| MCP / NL2SQL (optional) | [Azure/agent-app-mcp](https://github.com/Azure/agent-app-mcp) |
+
+Start with the [Agent Application guide](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/application/)
+for component selection and first use. The
+[MCP guide](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/agent-app-mcp/)
+covers its compatible platform source, deployment and SQL onboarding.
 
 ## Documentation
 
