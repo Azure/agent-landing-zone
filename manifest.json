@@ -1,5 +1,5 @@
 {
-  "tag": "v7.0.0",
+  "tag": "v7.1.0",
   "repo": "https://github.com/Azure/agent-landing-zone.git",
   "infra": {
     "source": {
@@ -18,14 +18,14 @@
     {
       "name": "agent-app-ui",
       "repo": "https://github.com/Azure/agent-app-ui.git",
-      "tag": "v3.5.0",
-      "commit": "3961224368685cd0e96966c18496adb8b6626987"
+      "tag": "v3.6.0",
+      "commit": "8a45595aa321d8841e7a4555d542b890beebf1b0"
     },
     {
       "name": "agent-app-orchestrator",
       "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-      "tag": "v7.0.0",
-      "commit": "b89684b67f991b337e3519620210a6469622fc29"
+      "tag": "v7.1.0",
+      "commit": "666d39862590cfb165097ee55737a1ef66fd2afc"
     },
     {
       "name": "agent-app-ingestion",
