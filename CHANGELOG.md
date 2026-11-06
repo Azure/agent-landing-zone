@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+## [v7.2.0] - 2026-11-06
+
+### Added
+
+- **Optional application PostgreSQL.** Provision a default-off, Entra-only
+  PostgreSQL Flexible Server and application database through the existing
+  Bicep or Terraform lifecycle. Basic uses fresh workload-profiles Container
+  Apps with dedicated NAT/static IPv4 and restricted public database access.
+  Isolation uses Private Link and private DNS with public access disabled.
+- **Explicit data ownership and protection.** Bind creation intent, verify
+  resources before publishing discovery, and apply an independent server
+  CanNotDelete lock outside both IaC graphs and Terraform state. Guard unsafe
+  retrofit, disable, replacement and teardown operations.
+- **Manual least-privilege SQL bootstrap.** Map the custom application's managed
+  identity by object ID and grant schema CRUD plus actual-DDL-owner future
+  defaults, without application ownership or administrative privileges.
+
+### Changed
+
+- Preserve all 64 existing Bicep outputs and the closed platform outputs v1
+  contract. Shared post-provision resource verification persists additive
+  PostgreSQL azd metadata for both providers; Terraform's native outputs are
+  checked against the same binding.
+- Add central PostgreSQL configuration, networking, costs and recovery guidance,
+  an accessible connectivity diagram, and the Deploy / Companion guides menu.
+  Bundled runtime consumers, Cosmos and existing component pins are unchanged.
+
+### Migration
+
+- PostgreSQL is supported only when selected before first provision in a fresh
+  environment. Existing-environment retrofit and Cosmos migration are not
+  included. SQL bootstrap is manual; application owners provide the consumer
+  code, managed identity, TLS trust and Entra token handling.
+- Preserve the immutable binding and independent lock during recovery.
+  Same-binding roll-forward is supported. Removal requires separate backup/PITR,
+  exact resource/state and data-owner review; code rollback is not data removal.
+  Privileged lock removal and the creation-to-lock interval remain limitations.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.6.0 |
+| agent-app-orchestrator | v7.1.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI passed Bicep build/lint, complete deployment/hook tests and
+  Terraform contracts on Ubuntu and Windows. Local offline Bicep contracts
+  passed all 19 suites; Terraform mocks passed all 142 tests. Final focused
+  PostgreSQL and paired-provider interfaces passed 283 tests.
+- Release checks validated the unchanged exact runtime commits against the real
+  bundled application definition and reviewed component-pin fixture: 17 tests
+  and 6 subtests passed. Infrastructure provenance, provider lock and existing
+  provider/module pins are unchanged.
+- Central documentation passed the strict MkDocs build, focused Agent guide
+  navigation checks and 23 diagram-control pages at desktop/mobile sizes,
+  including keyboard/focus, zoom/pan, error and no-JavaScript behavior.
+- Validation is local and CI-based. Azure deployment and live/destructive
+  PostgreSQL acceptance were explicitly excluded. No live SQL, NAT/DNS,
+  deletion-lock enforcement or deployed provider parity is claimed.
+
 ## [v7.1.0] - 2026-11-02
 
 ### Added
