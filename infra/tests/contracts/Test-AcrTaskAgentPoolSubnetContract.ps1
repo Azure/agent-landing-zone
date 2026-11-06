@@ -265,7 +265,7 @@ try {
         vnetName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetName')), createObject('value', variables('resourceNames').vnetName))]"
         subscriptionId = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetSubscriptionId')), createObject('value', subscription().subscriptionId))]"
         resourceGroupName = "[if(parameters('useExistingVNet'), createObject('value', variables('varExistingVnetResourceGroupName')), createObject('value', variables('_networkResourceGroupName')))]"
-        virtualNetworkResourceId = "[if(variables('_networkIsolation'), if(parameters('useExistingVNet'), createObject('value', parameters('existingVnetResourceId')), createObject('value', reference('virtualNetwork').outputs.resourceId.value)), createObject('value', ''))]"
+        virtualNetworkResourceId = "[if(variables('_acaVnetIntegration'), if(parameters('useExistingVNet'), createObject('value', parameters('existingVnetResourceId')), createObject('value', reference('virtualNetwork').outputs.resourceId.value)), createObject('value', ''))]"
     }
     foreach ($entry in $scopeBindings.GetEnumerator()) {
         Test-Equal "A9 $($entry.Key) forwarding" $subnets.properties.parameters.($entry.Key) $entry.Value

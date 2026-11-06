@@ -324,14 +324,14 @@ resource "azapi_resource" "container_environment" {
       } : null
       zoneRedundant    = var.useZoneRedundancy
       workloadProfiles = var.workloadProfiles
-      vnetConfiguration = var.networkIsolation ? {
+      vnetConfiguration = local.aca_vnet_integration ? {
         infrastructureSubnetId = local.subnet_ids.acaEnvironment
-        internal               = true
+        internal               = var.networkIsolation
       } : null
     }
   }
   response_export_values = ["identity", "properties.defaultDomain", "properties.staticIp"]
-  depends_on             = [terraform_data.compute_contract]
+  depends_on             = [terraform_data.compute_contract, module.container_apps_postgresql_nat]
 }
 
 # Direct AzureRM gives property-level lifecycle controls that an ACA AVM

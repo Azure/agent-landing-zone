@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
-import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -29,6 +29,9 @@ from config import find_repo_root
 from config.deployment.composition import APP_CONFIG_LABEL, is_truthy
 from config.deployment.context import bound_resource_id, context_settings
 from config.deployment.resource_groups import resource_group_for
+from config.deployment.postgresql import discovery_settings
+
+LOGGER = logging.getLogger(__name__)
 
 PLATFORM_OUTPUTS_KEY = "AGENTLZ_PLATFORM_OUTPUTS"
 SCHEMA_RELATIVE_PATH = Path("contracts") / "platform-outputs-v1.schema.json"
@@ -364,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Validate and print the settings without writing them.",
     )
     args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         require_foundation(os.environ)
         if args.check_foundation:
@@ -380,9 +384,12 @@ def main(argv: list[str] | None = None) -> int:
         document = build_platform_outputs(environment, identities)
         validate_platform_outputs(document)
         settings = platform_settings(document, environment)
+        # Read-only verification, including on --dry-run. No PostgreSQL key can
+        # be written until the complete resource and independent lock pass.
+        settings.update(discovery_settings(environment, find_repo_root() / ".azure"))
     except (FoundationMissingError, PlatformOutputsError, AppDefinitionError,
             RoleAssignmentError, DeploymentTopologyError, ValueError, RuntimeError) as error:
-        print(str(error), file=sys.stderr)
+        LOGGER.error("%s", error)
         return 1
     if args.dry_run:
         print(json.dumps(settings, indent=2))

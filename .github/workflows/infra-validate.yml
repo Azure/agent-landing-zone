@@ -80,18 +80,23 @@ jobs:
         run: terraform test
 
   deployment-contracts:
-    name: deployment and hook contracts
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: deployment and hook contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check pytest click tabulate -r config/requirements.txt
+        run: python -m pip install --disable-pip-version-check pytest click tabulate -r config/requirements.txt -r util/requirements.txt
 
       - name: Prepare Bicep contract dependencies
+        shell: bash
         run: |
           set -euo pipefail
           az config set bicep.use_binary_from_path=false

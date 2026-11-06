@@ -13,6 +13,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ScopedResourceGroupNormalization.ps1')
 $compiledFile = Join-Path ([IO.Path]::GetTempPath()) "subnet-layout-contract-$([guid]::NewGuid()).json"
 $script:checks = 0
 
@@ -147,6 +148,10 @@ try {
     & az bicep build --file $MainFile --outfile $compiledFile
     if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed: $LASTEXITCODE" }
     $t = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+    # Keep every original disabled/default subnet assertion. The exact bounded
+    # inverse rejects unreviewed changes; Test-PostgreSqlContract independently
+    # proves disabled AST equivalence in both modes and the enabled PG gates.
+    $t = ConvertTo-PrePostgreSqlGraph $t
     $rootParameters = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MainFile))) 'main.parameters.json'
     $bindings = (Get-Content -LiteralPath $rootParameters -Raw | ConvertFrom-Json -AsHashtable -Depth 100).parameters
     Assert-LayoutShape $t $bindings

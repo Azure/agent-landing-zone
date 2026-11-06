@@ -13,6 +13,7 @@ from typing import Mapping
 from config.deployment.composition import _resolve_application_overrides
 from config.deployment.existing_images import apply_existing_images
 from config.deployment.firewall import resolve_firewall_inputs
+from config.deployment.postgresql import resolve_inputs as resolve_postgresql_inputs
 
 
 def resolve_parameters(
@@ -33,6 +34,7 @@ def resolve_parameters(
         expected_hosted_source_commit=expected_hosted_source_commit,
     ))
     result.update(resolve_firewall_inputs(source, environment))
+    result.update(resolve_postgresql_inputs(source, environment))
     if existing_images:
         apply_existing_images(result["containerAppsList"], existing_images)
     return result

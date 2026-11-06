@@ -3,6 +3,23 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
 
+    "deployPostgreSql":                    { "value": "${DEPLOY_POSTGRESQL=false}" },
+    "postgreSqlServerName":                { "value": "${POSTGRESQL_SERVER_NAME=}" },
+    "postgreSqlDatabaseName":              { "value": "${POSTGRESQL_DATABASE_NAME=agentlz}" },
+    "postgreSqlVersion":                   { "value": "${POSTGRESQL_VERSION=16}" },
+    "postgreSqlTier":                      { "value": "${POSTGRESQL_TIER=Burstable}" },
+    "postgreSqlSkuName":                   { "value": "${POSTGRESQL_SKU_NAME=Standard_B1ms}" },
+    "postgreSqlStorageSizeGb":             { "value": "${POSTGRESQL_STORAGE_SIZE_GB=32}" },
+    "postgreSqlBackupRetentionDays":       { "value": "${POSTGRESQL_BACKUP_RETENTION_DAYS=7}" },
+    "postgreSqlHighAvailability":          { "value": "${POSTGRESQL_HIGH_AVAILABILITY=Disabled}" },
+    "postgreSqlGeoRedundantBackup":         { "value": "${POSTGRESQL_GEO_REDUNDANT_BACKUP=false}" },
+    "postgreSqlStorageAutoGrow":           { "value": "${POSTGRESQL_STORAGE_AUTO_GROW=false}" },
+    "postgreSqlAdministratorObjectId":     { "value": "${POSTGRESQL_ADMINISTRATOR_OBJECT_ID=}" },
+    "postgreSqlAdministratorPrincipalName": { "value": "${POSTGRESQL_ADMINISTRATOR_PRINCIPAL_NAME=}" },
+    "postgreSqlAdministratorPrincipalType": { "value": "${POSTGRESQL_ADMINISTRATOR_PRINCIPAL_TYPE=}" },
+    "postgreSqlAllowedIpRanges":           { "value": [] },
+    "existingPrivateDnsZonePostgreSqlResourceId": { "value": "" },
+
     "environmentName":                     { "value": "${AZURE_ENV_NAME}" },
     "location":                            { "value": "${AZURE_LOCATION}" },
     "applicationResourceGroupName":         { "value": "${AZURE_APP_RESOURCE_GROUP=}" },

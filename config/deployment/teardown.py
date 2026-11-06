@@ -14,6 +14,7 @@ from typing import Mapping, Sequence
 from config.appdefinition.binding import resolve_env_name
 from config.appdefinition.errors import EnvironmentNotFoundError
 from config.deployment.provider import resolve_provider
+from config.deployment import postgresql
 from config.deployment.resource_groups import (
     ResourceGroupError,
     check_binding,
@@ -85,7 +86,8 @@ def read_environment(environment_name: str | None = None) -> dict[str, str]:
     if not isinstance(values, dict):
         raise TeardownError("azd environment values must be an object.")
     environment: dict[str, str] = {}
-    for key in (*RESOURCE_GROUP_KEYS, *BACKEND_KEYS, "AZURE_ENV_NAME", "AZURE_SUBSCRIPTION_ID"):
+    for key in (*RESOURCE_GROUP_KEYS, *BACKEND_KEYS, "AZURE_ENV_NAME", "AZURE_SUBSCRIPTION_ID",
+                "DEPLOY_POSTGRESQL", "POSTGRESQL_SERVER_RESOURCE_ID", "POSTGRESQL_HOST", "POSTGRESQL_DATABASE_NAME"):
         value = values.get(key)
         if value is None:
             continue
@@ -106,6 +108,8 @@ def require_safe_teardown(
             raise TeardownError("The selected azd environment does not match its values.")
         context["AZURE_ENV_NAME"] = environment_name
     name = resolve_env_name(azure_dir, context)
+    # Must precede the Terraform ownership success return and all destructive paths.
+    postgresql.require_safe_teardown(context, azure_dir)
     try:
         bound = read_binding(azure_dir, name)
     except ResourceGroupError as exc:
