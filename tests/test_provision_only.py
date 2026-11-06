@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -80,13 +83,24 @@ def test_guard_fails_before_any_azure_call(environment):
     assert GUARD_MESSAGE in str(error.value).lower()
 
 
-def test_guard_cli_exits_nonzero_without_azure_calls(monkeypatch, capsys):
+def test_guard_cli_exits_nonzero_without_azure_calls(monkeypatch, caplog):
     for name in outputs.FOUNDATION_REQUIRED_ENV:
         monkeypatch.delenv(name, raising=False)
     with mock.patch("subprocess.run") as run:
         assert outputs.main(["--check-foundation"]) == 1
     run.assert_not_called()
-    assert GUARD_MESSAGE in capsys.readouterr().err.lower()
+    assert GUARD_MESSAGE in caplog.text.lower()
+
+
+def test_guard_command_reports_actionable_error_on_stderr():
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in outputs.FOUNDATION_REQUIRED_ENV}
+    result = subprocess.run(
+        [sys.executable, "-m", "config.deployment.outputs", "--check-foundation"],
+        cwd=REPO_ROOT, env=environment, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 1
+    assert GUARD_MESSAGE in result.stderr.lower()
 
 
 def test_guard_passes_when_foundation_exists():

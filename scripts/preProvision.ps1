@@ -284,6 +284,14 @@ try {
     Pop-Location
 }
 
+# BEGIN PostgreSQL creation intent
+Invoke-PythonModule -ModuleName 'config.deployment.postgresql' -Arguments @(
+    'preflight', '--input', $parameterDestination, '--provider', $infrastructureProvider,
+    '--azure-dir', (Join-Path $projectRoot '.azure')
+)
+if ($LASTEXITCODE -ne 0) { Write-Error "PostgreSQL creation-intent preflight failed; provisioning has not started."; exit $LASTEXITCODE }
+# END PostgreSQL creation intent
+
 # BEGIN component runtime egress
 Invoke-PythonModule -ModuleName 'config.deployment.egress' -Arguments @('--plan', '--save')
 if ($LASTEXITCODE -ne 0) { Write-Error "Component egress planning failed; provisioning has not started."; exit $LASTEXITCODE }

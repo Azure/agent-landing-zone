@@ -43,3 +43,6 @@ resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = {
 
 @description('Actual ARM ID of the NAT gateway.')
 output resourceId string = natGateway.id
+
+@description('Static public IPv4 used for exact source firewall rules, not ACA ingress.')
+output publicIpAddress string = publicIp.properties.ipAddress

@@ -17,6 +17,46 @@ END = "# END infrastructure provider validation"
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
+@pytest.mark.parametrize("failure", [False, True])
+def test_postgresql_protection_runs_before_private_deferral_and_publication(tmp_path, shell, failure):
+    extension = "ps1" if shell == "pwsh" else "sh"
+    source = (ROOT / "scripts" / f"postProvision.{extension}").read_text(encoding="utf-8-sig")
+    start = "# BEGIN PostgreSQL protection"
+    end = "# END PostgreSQL protection"
+    assert source.index(start) < source.index("config.deployment.private_network")
+    assert source.index(start) < source.index("config.deployment.outputs")
+    assert "postgresql_bootstrap" not in source
+    block = source.split(start, 1)[1].split(end, 1)[0]
+    path = tmp_path / ("protect." + extension)
+    if shell == "pwsh":
+        prefix = (
+            "$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
+            "$env:AGENTLZ_REPO_ROOT=$PSScriptRoot\n"
+            "function python {\n"
+            "if ($args[0] -ne '-c' -or $args[1] -notmatch \"'protect'\" -or "
+            "$args[1] -notmatch 'config.deployment.postgresql') { throw 'Wrong protection boundary' }\n"
+            "Write-Output 'PROTECT'\n$global:LASTEXITCODE=[int]$env:PROTECT_EXIT\n}\n"
+        )
+        suffix = "\nWrite-Output 'PUBLISH'\n"
+        command = [shutil.which(shell), "-NoProfile", "-File", str(path)]
+    else:
+        prefix = (
+            'PROJECT_ROOT="$PWD"\npython3() {\n'
+            '[ "$*" = "-m config.deployment.postgresql protect --azure-dir $PROJECT_ROOT/.azure" ] || return 9\n'
+            'echo PROTECT\nreturn "$PROTECT_EXIT"\n}\n'
+        )
+        suffix = "\necho PUBLISH\n"
+        command = [shutil.which(shell), str(path)]
+    assert command[0]
+    path.write_text(prefix + block + suffix, encoding="utf-8", newline="\n")
+    result = subprocess.run(command, cwd=tmp_path, env={**os.environ, "PROTECT_EXIT": "17" if failure else "0"},
+                            capture_output=True, text=True, timeout=30)
+    assert "PROTECT" in result.stdout, result.stdout + result.stderr
+    assert ("PUBLISH" in result.stdout) is not failure
+    assert (result.returncode == 0) is not failure
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "bash"])
 @pytest.mark.parametrize(
     ("configuration", "exit_code", "expected"),
     [
@@ -325,6 +365,14 @@ elif module == "config.deployment.composition":
         sys.exit(17)
     diagnostic.write_text(
         json.dumps({"parameters": {"location": {"value": "eastus2"}}}), encoding="utf-8")
+elif module == "config.deployment.postgresql":
+    record("postgresql")
+    assert args[0] == "preflight"
+    assert Path(argument("--input")) == diagnostic and diagnostic.is_file()
+    assert argument("--provider") == provider
+    assert Path(argument("--azure-dir")) == root / ".azure"
+    if failure == "postgresql":
+        sys.exit(23)
 elif module == "config.deployment.egress":
     record("egress")
     assert args == ["--plan", "--save"]
@@ -345,11 +393,11 @@ else:
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
 @pytest.mark.parametrize(("provider", "provider_path", "provider_module", "failure"), [
     ("terraform", "infra/foundation", "foundation", failure)
-    for failure in ("none", "firewall", "inputs", "reload", "egress")
+    for failure in ("none", "firewall", "inputs", "reload", "postgresql", "egress")
 ] + [
     ("bicep", path, module, failure)
     for path, module in (("infra/bicep", "main"), ("custom foundation", "platform"))
-    for failure in ("none", "firewall", "inputs", "egress")
+    for failure in ("none", "firewall", "inputs", "postgresql", "egress")
 ])
 def test_complete_hook_prepares_selected_inputs_and_short_circuits(
     tmp_path, shell, provider, provider_path, provider_module, failure,
@@ -447,7 +495,9 @@ def test_complete_hook_prepares_selected_inputs_and_short_circuits(
         if provider == "terraform":
             expected.append("environment-reload")
         if failure != "reload":
-            expected.append("egress")
+            expected.append("postgresql")
+            if failure != "postgresql":
+                expected.append("egress")
             if failure == "none":
                 expected += ["regional-preflight", "foundation-preflight"]
     assert (tmp_path / "trace").read_text(encoding="utf-8-sig").splitlines() == expected, output

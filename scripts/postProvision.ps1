@@ -46,6 +46,11 @@ function Test-Truthy {
 $env:AGENTLZ_REPO_ROOT = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 & python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.resource_groups', '--azure-dir', os.path.join(os.environ['AGENTLZ_REPO_ROOT'], '.azure'), '--bind-only']; runpy.run_module('config.deployment.resource_groups', run_name='__main__')" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error "Resource-group destination binding failed; configuration has not started."; exit $LASTEXITCODE }
+# BEGIN PostgreSQL protection
+& python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.postgresql', 'protect', '--azure-dir', os.path.join(os.environ['AGENTLZ_REPO_ROOT'], '.azure')]; runpy.run_module('config.deployment.postgresql', run_name='__main__')"
+if ($LASTEXITCODE -ne 0) { Write-Error "PostgreSQL protection failed; discovery will not be published."; exit $LASTEXITCODE }
+# END PostgreSQL protection
+
 & python -c "import os, runpy, sys; sys.path.insert(0, os.environ['AGENTLZ_REPO_ROOT']); sys.argv = ['config.deployment.private_network', '--stage', 'post-provision']; runpy.run_module('config.deployment.private_network', run_name='__main__')"
 $networkExitCode = $LASTEXITCODE
 if ($networkExitCode -eq 20) {

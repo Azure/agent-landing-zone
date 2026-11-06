@@ -1,0 +1,27 @@
+# Remote execution uploads must contain source and the committed provider lock,
+# never local dependencies, state, rendered inputs, credentials or plan artifacts.
+**/.terraform/**
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.plan
+**/*.tfplan.json
+**/*.plan.json
+**/tfplan
+**/plan.out
+**/*.tfvars
+**/*.tfvars.json
+**/.env
+**/.env.*
+**/.azure/**
+**/.azd/**
+**/private/**
+**/*.pem
+**/*.pfx
+**/*.key
+**/.terraformrc
+**/credentials.tfrc.json
+**/crash.log
+**/crash.*.log
+# Preserve dependency integrity and all required .tf/.tftest.hcl/shared source.
+!.terraform.lock.hcl

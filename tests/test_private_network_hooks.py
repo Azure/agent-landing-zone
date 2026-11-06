@@ -91,6 +91,11 @@ function python {
     $call = $args -join ' '
     if ($call -match 'config.deployment.egress') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
+    if ($call -match 'config.deployment.postgresql' -and $call -match 'protect') {
+        # PostgreSQL is disabled in this network fixture. Its independent gate
+        # is executed/failed separately in test_infra_provider_hooks.
+        $global:LASTEXITCODE = 0; return
+    }
     if ($call -match 'config.deployment.outputs') {
         $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
         return
@@ -165,6 +170,7 @@ exit "$FAKE_AZD_EXIT"
 case "$*" in
   *config.deployment.egress*) exit 0 ;;
   *config.deployment.resource_groups*) exit 0 ;;
+  *config.deployment.postgresql*protect*) exit 0 ;;
   *config.deployment.outputs*) [ "${FAKE_RG_MISSING:-0}" != 1 ]; exit $? ;;
   *config.deployment.mcp*)
     [ "$DEPLOY_AGENT_APP_MCP" = false ] && [ "${@: -1}" = --deploy ] || exit 96

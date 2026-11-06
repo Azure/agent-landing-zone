@@ -114,7 +114,7 @@ def test_cli_discovers_and_publishes_container_identity_when_map_is_absent(monke
     assert settings["AGENTLZ_IDENTITY_WEB_CLIENT_ID"] == UI_CLIENT_ID
 
 
-def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, capsys):
+def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, caplog):
     from config.appdefinition.roles import RoleAssignmentError
 
     for key, value in ENVIRONMENT.items():
@@ -126,7 +126,7 @@ def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, 
             mock.patch.object(outputs, "publish") as publish:
         assert outputs.main([]) == 1
     publish.assert_not_called()
-    assert "Expected exactly one identity" in capsys.readouterr().err
+    assert "Expected exactly one identity" in caplog.text
 
 
 def test_repo_root_detected_by_markers_not_folder_name(tmp_path):
@@ -142,3 +142,59 @@ def test_repo_root_detected_by_markers_not_folder_name(tmp_path):
     assert find_repo_root(tmp_path, environment={"AGENTLZ_REPO_ROOT": str(root)}) == root.resolve()
     with pytest.raises(FileNotFoundError, match="AGENTLZ_REPO_ROOT"):
         find_repo_root(environment={"AGENTLZ_REPO_ROOT": str(tmp_path)})
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_pg_discovery_is_verified_before_any_publication(monkeypatch, dry_run):
+    for key, value in ENVIRONMENT.items():
+        monkeypatch.setenv(key, value)
+    with mock.patch.object(outputs, "discovery_settings", side_effect=ValueError("PostgreSQL protection incomplete")) as discovery, \
+            mock.patch.object(outputs, "publish") as publish:
+        assert outputs.main(["--dry-run"] if dry_run else []) == 1
+    discovery.assert_called_once()
+    publish.assert_not_called()
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_pg_keys_are_additive_and_closed_v1_is_unchanged(monkeypatch, capsys, dry_run):
+    for key, value in ENVIRONMENT.items():
+        monkeypatch.setenv(key, value)
+    pg_settings = {
+        "AGENTLZ_POSTGRESQL_HOST": "fixture.postgres.database.azure.com",
+        "AGENTLZ_POSTGRESQL_PORT": "5432", "AGENTLZ_POSTGRESQL_DATABASE": "agentlz",
+        "AGENTLZ_POSTGRESQL_SSLMODE": "verify-full", "AGENTLZ_POSTGRESQL_AUTH_MODE": "entra",
+    }
+    with mock.patch.object(outputs, "discovery_settings", return_value=pg_settings), \
+            mock.patch.object(outputs, "publish") as publish:
+        assert outputs.main(["--dry-run"] if dry_run else []) == 0
+    if dry_run:
+        publish.assert_not_called()
+        settings = json.loads(capsys.readouterr().out)
+    else:
+        settings = publish.call_args.args[1]
+    assert pg_settings.items() <= settings.items()
+    document = json.loads(settings[outputs.PLATFORM_OUTPUTS_KEY])
+    assert document == outputs.build_platform_outputs(ENVIRONMENT)
+    outputs.validate_platform_outputs(document)
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_pg_publication_uses_real_cli_exit_status_not_stdout(monkeypatch, exit_code):
+    from types import SimpleNamespace
+    from config.deployment import appconfig
+
+    calls = []
+
+    def command(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=exit_code, stdout="", stderr="private diagnostic")
+
+    monkeypatch.setattr(appconfig, "_resolve_az_command", lambda: "az")
+    monkeypatch.setattr(appconfig.subprocess, "run", command)
+    if exit_code:
+        with pytest.raises(RuntimeError, match="Azure CLI App Configuration/runtime request failed") as error:
+            outputs.publish(ENVIRONMENT["APP_CONFIG_ENDPOINT"], {"AGENTLZ_POSTGRESQL_PORT": "5432"})
+        assert "private diagnostic" not in str(error.value)
+    else:
+        outputs.publish(ENVIRONMENT["APP_CONFIG_ENDPOINT"], {"AGENTLZ_POSTGRESQL_PORT": "5432"})
+    assert calls[0][-2:] == ["--output", "none"]

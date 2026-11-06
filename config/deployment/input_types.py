@@ -15,6 +15,7 @@ InputKind = Literal["string", "bool", "int", "array", "object"]
 _GROUPS: dict[InputKind, str] = {
     "bool": """
         networkIsolation policyManagedPrivateDns useExistingVNet
+        deployPostgreSql postgreSqlGeoRedundantBackup postgreSqlStorageAutoGrow
         deployAgentSubnet deployPeSubnet deployApplicationPeSubnet
         deployAzureBastionSubnet deployAzureFirewallSubnet deployGatewaySubnet
         deployAzureFirewallManagementSubnet
@@ -36,9 +37,9 @@ _GROUPS: dict[InputKind, str] = {
         useZoneRedundancy enableCosmosAnalyticalStorage enableCosmosVectorSearch
         deployJumpbox deployBastion deployNatGateway deployVM
     """,
-    "int": "acrTaskAgentPoolCount dbDatabaseThroughput durableTaskSchedulerCapacity",
+    "int": "acrTaskAgentPoolCount dbDatabaseThroughput durableTaskSchedulerCapacity postgreSqlStorageSizeGb postgreSqlBackupRetentionDays",
     "array": """
-        allowedIpRanges vnetAddressPrefixes additionalAcrTaskBuildFqdns
+        allowedIpRanges vnetAddressPrefixes additionalAcrTaskBuildFqdns postgreSqlAllowedIpRanges
         bastionAllowedSourceIPs foundryIqIngestionPermissionOptions
         foundryIqSourceDataFields foundryIqSearchFields modelDeploymentList
         containerAppsList workloadProfiles databaseContainersList storageAccountContainersList
@@ -47,6 +48,10 @@ _GROUPS: dict[InputKind, str] = {
     "object": "deploymentTags publicIngress hostedAgent",
     "string": """
         environmentName applicationResourceGroupName networkResourceGroupName
+        postgreSqlServerName postgreSqlDatabaseName postgreSqlVersion postgreSqlTier
+        postgreSqlSkuName postgreSqlHighAvailability postgreSqlAdministratorObjectId
+        postgreSqlAdministratorPrincipalName postgreSqlAdministratorPrincipalType
+        existingPrivateDnsZonePostgreSqlResourceId
         location cosmosLocation searchServiceLocation speechServiceLocation
         principalId principalType appConfigLabel deploymentMode privateEndpointLocation
         privateEndpointResourceGroupName existingVnetResourceId agentSubnetName peSubnetName
