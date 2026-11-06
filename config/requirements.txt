@@ -10,7 +10,7 @@ azure-mgmt-appcontainers==5.1.0
 # aifoundry
 
 azure-mgmt-cognitiveservices==13.6.0
-azure-ai-projects==2.7.0
+azure-ai-projects==2.10.0
 
 # search
 
