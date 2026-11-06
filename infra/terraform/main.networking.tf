@@ -6,7 +6,7 @@ locals {
   network_abbreviations    = jsondecode(file("${path.module}/../shared/abbreviations.json"))
   network_rg_id            = local.deployment_context.network_rg_id
   network_byo_parts        = split("/", var.existingVnetResourceId)
-  network_vnet_id          = var.networkIsolation ? (var.useExistingVNet ? var.existingVnetResourceId : module.network_vnet[0].resource_id) : ""
+  network_vnet_id          = local.aca_vnet_integration ? (var.useExistingVNet ? var.existingVnetResourceId : module.network_vnet[0].resource_id) : ""
   network_vnet_sub         = var.useExistingVNet ? try(local.network_byo_parts[2], "") : var.subscriptionId
   network_vnet_rg          = var.useExistingVNet ? try(local.network_byo_parts[4], "") : local.deployment_context.network_rg
   network_vnet_name        = var.useExistingVNet ? try(local.network_byo_parts[8], "") : local.resource_names.vnetName
@@ -80,7 +80,7 @@ locals {
     }
     applicationPe = {
       name       = var.applicationPeSubnetName, address_prefix = var.applicationPeSubnetPrefix, create = var.deployApplicationPeSubnet
-      required   = var.deployCosmosDb || var.deployKeyVault || var.deployAppConfig || var.deployContainerEnv || var.deployContainerRegistry || local.effective_observability.ampls
+      required   = var.deployPostgreSql || var.deployCosmosDb || var.deployKeyVault || var.deployAppConfig || var.deployContainerEnv || var.deployContainerRegistry || local.effective_observability.ampls
       delegation = "", service_endpoints = ["Microsoft.AzureCosmosDB"]
     }
     powerPlatform = {
@@ -95,16 +95,16 @@ locals {
   subnet_definitions = {
     for purpose, subnet in local.network_subnet_inputs : purpose => merge(subnet, {
       route_table_id            = contains(["agent", "pe", "jumpbox", "acaEnvironment", "devopsBuildAgents", "applicationPe"], purpose) ? trimspace(local.network_route_id) : ""
-      nat_gateway_id            = purpose == "jumpbox" ? local.network_nat_id : ""
+      nat_gateway_id            = purpose == "jumpbox" ? local.network_nat_id : (purpose == "acaEnvironment" && local.postgresql_basic ? module.container_apps_postgresql_nat[0].resource_id : "")
       network_security_group_id = contains(keys(azapi_resource.network_nsg), purpose) ? azapi_resource.network_nsg[purpose].id : ""
     })
   }
   managed_subnets = {
     for purpose, subnet in local.subnet_definitions : purpose => subnet
-    if var.networkIsolation && var.deploySubnets && subnet.create
+    if(var.networkIsolation || (local.postgresql_basic && purpose == "acaEnvironment")) && var.deploySubnets && subnet.create
   }
   subnet_ids = {
-    for purpose, subnet in local.subnet_definitions : purpose => !var.networkIsolation ? "" : (
+    for purpose, subnet in local.subnet_definitions : purpose => !(var.networkIsolation || (local.postgresql_basic && purpose == "acaEnvironment")) ? "" : (
       contains(keys(local.managed_subnets), purpose) ? module.network_subnet[purpose].resource_id : (
         contains(keys(data.azapi_resource.network_existing_subnet), purpose) ? terraform_data.network_existing_subnet_contract[purpose].output : "${local.network_vnet_id}/subnets/${subnet.name}"
       )
@@ -112,7 +112,7 @@ locals {
   }
   network_relevant_subnets = {
     for purpose, subnet in local.network_subnet_inputs : purpose => subnet
-    if var.networkIsolation && ((var.deploySubnets && subnet.create) || subnet.required)
+    if(var.networkIsolation || (local.postgresql_basic && purpose == "acaEnvironment")) && ((var.deploySubnets && subnet.create) || subnet.required)
   }
   # Numeric intervals allow containment/overlap checks without provider calls.
   # Invalid inputs remain invalid (-1), never become an accepted fallback CIDR.
@@ -169,7 +169,7 @@ resource "terraform_data" "network_contract" {
       error_message = "useExistingVNet requires a complete existingVnetResourceId; no replacement VNet is created."
     }
     precondition {
-      condition     = !var.networkIsolation || var.useExistingVNet || alltrue([for s in values(local.network_relevant_subnets) : !s.required || (var.deploySubnets && s.create)])
+      condition     = !local.aca_vnet_integration || var.useExistingVNet || alltrue([for s in values(local.network_relevant_subnets) : !s.required || (var.deploySubnets && s.create)])
       error_message = "Every required subnet in a new VNet must be managed; consumer flags do not create missing subnets."
     }
     precondition {
@@ -219,7 +219,7 @@ resource "terraform_data" "network_contract" {
       error_message = "Managed subnet IPv4 prefixes must not overlap."
     }
     precondition {
-      condition = !var.networkIsolation || var.useExistingVNet || (
+      condition = !local.aca_vnet_integration || var.useExistingVNet || (
         length(local.network_vnet_ranges) > 0 && alltrue([for r in local.network_vnet_ranges : r.valid]) &&
         alltrue([for purpose, r in local.network_cidr_ranges : anytrue([for v in local.network_vnet_ranges : r.start >= v.start && r.end <= v.end]) if var.deploySubnets && local.network_subnet_inputs[purpose].create])
       )
@@ -283,7 +283,7 @@ data "azapi_resource" "network_existing_management_vnet" {
 module "network_vnet" {
   source           = "Azure/avm-res-network-virtualnetwork/azurerm"
   version          = "0.22.3"
-  count            = var.networkIsolation && !var.useExistingVNet ? 1 : 0
+  count            = local.aca_vnet_integration && !var.useExistingVNet ? 1 : 0
   name             = local.resource_names.vnetName
   parent_id        = local.network_rg_id
   location         = local.effective_locations.main
@@ -292,7 +292,7 @@ module "network_vnet" {
   enable_telemetry = false
   # Separate child modules avoid a VNet -> subnet -> firewall -> VNet cycle.
   subnets    = {}
-  depends_on = [terraform_data.network_contract]
+  depends_on = [terraform_data.network_contract, terraform_data.postgresql_contract]
 }
 
 module "network_subnet" {
@@ -316,7 +316,7 @@ module "network_subnet" {
   # instead of explicitly enabling default Internet outbound access.
   default_outbound_access_enabled = null
   # Verified AVM implementation locks the parent VNet for every child write.
-  depends_on = [terraform_data.network_contract]
+  depends_on = [terraform_data.network_contract, terraform_data.postgresql_contract]
 }
 
 data "azapi_resource" "network_existing_subnet" {
@@ -446,6 +446,7 @@ module "network_nat" {
   public_ips = {
     jumpbox = { name = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.natGateway}${local.resource_token}" }
   }
+
   public_ip_configuration = {
     domain_name_label = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.natGateway}${local.resource_token}"
     zones             = []
@@ -453,6 +454,30 @@ module "network_nat" {
   tags             = local.deployment_context.tags
   enable_telemetry = false
   depends_on       = [terraform_data.network_contract]
+}
+
+# ACA PostgreSQL egress is deliberately independent of the jumpbox NAT.
+module "container_apps_postgresql_nat" {
+  source              = "Azure/avm-res-network-natgateway/azurerm"
+  version             = "0.2.1"
+  count               = local.postgresql_basic ? 1 : 0
+  name                = "${local.network_abbreviations.networking.natGateway}aca-postgresql-${local.resource_token}"
+  location            = local.effective_locations.main
+  resource_group_name = local.deployment_context.network_rg
+  sku_name            = "Standard"
+  public_ips = {
+    aca = { name = "${local.network_abbreviations.networking.publicIPAddress}aca-postgresql-${local.resource_token}" }
+  }
+  public_ip_configuration = {
+    allocation_method = "Static"
+    ip_version        = "IPv4"
+    sku               = "Standard"
+    domain_name_label = "${local.network_abbreviations.networking.publicIPAddress}aca-postgresql-${local.resource_token}"
+    zones             = []
+  }
+  tags             = local.deployment_context.tags
+  enable_telemetry = false
+  depends_on       = [terraform_data.network_contract, terraform_data.postgresql_contract]
 }
 
 module "network_public_ip" {
@@ -712,6 +737,7 @@ resource "azapi_resource" "network_firewall_rules" {
 locals {
   network_dns_suffix = "${var.useExistingVNet ? "-byon" : ""}${var.dnsZoneLinkSuffix == "" ? "" : "-${var.dnsZoneLinkSuffix}"}"
   network_dns_specs = {
+    PostgreSql      = { name = "privatelink.postgres.database.azure.com", link = "postgresql", byo = var.existingPrivateDnsZonePostgreSqlResourceId, enabled = var.deployPostgreSql }
     DurableTask     = { name = "privatelink.durabletask.io", link = "durabletask", byo = var.existingPrivateDnsZoneDurableTaskResourceId, enabled = var.deployDurableTaskScheduler }
     CogSvcs         = { name = "privatelink.cognitiveservices.azure.com", link = "cogsvcs", byo = var.existingPrivateDnsZoneCogSvcsResourceId, enabled = true }
     OpenAi          = { name = "privatelink.openai.azure.com", link = "openai", byo = var.existingPrivateDnsZoneOpenAiResourceId, enabled = true }
@@ -782,6 +808,11 @@ locals {
   # Filtering a mixed map later still leaves its resource node dependent on
   # compute_context; Foundry connections must not acquire that dependency.
   network_application_endpoint_specs = {
+    postgresql = {
+      enabled    = var.deployPostgreSql, target = var.deployPostgreSql ? module.postgresql[0].resource_id : ""
+      name       = "${local.network_abbreviations.networking.privateEndpoint}${local.resource_names.postgreSqlServerName}"
+      connection = "postgresqlConnection", subnet = "applicationPe", groups = ["postgresqlServer"], zones = ["PostgreSql"], zone_group = "postgresqlDnsZoneGroup"
+    }
     durableTask = {
       enabled    = var.deployDurableTaskScheduler, target = var.deployDurableTaskScheduler ? azapi_resource.durable_scheduler[0].id : ""
       name       = "pe-dts-${local.resource_token}"

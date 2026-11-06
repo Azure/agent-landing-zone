@@ -7,6 +7,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TERRAFORM_ROOT = REPO_ROOT / "infra" / "terraform"
+# Approved PostgreSQL provider difference: preserve all 64 native Bicep
+# outputs. The verified shared adapter materializes these azd keys for BOTH
+# providers from the immutable binding/live resources, outside outputs v1.
+POSTGRESQL_ADAPTER_OUTPUTS = {
+    "POSTGRESQL_SERVER_RESOURCE_ID", "POSTGRESQL_HOST", "POSTGRESQL_PORT",
+    "POSTGRESQL_DATABASE_NAME", "CONTAINER_APPS_POSTGRESQL_EGRESS_IP",
+}
 
 
 def _bicep_names(kind: str) -> set[str]:
@@ -41,9 +48,11 @@ def test_terraform_preserves_every_lifecycle_output_name():
     actual = _terraform_names("output")
     assert expected, "The Bicep entrypoint must expose its lifecycle outputs."
     assert len(actual) == len(set(actual)), "Terraform output declarations must be unique."
-    assert set(actual) == expected, (
+    assert len(expected) == 64, "Preserve the pre-PostgreSQL Bicep output budget."
+    assert not expected & POSTGRESQL_ADAPTER_OUTPUTS
+    assert set(actual) == expected | POSTGRESQL_ADAPTER_OUTPUTS, (
         f"Missing outputs: {sorted(expected - set(actual))}; "
-        f"unexpected outputs: {sorted(set(actual) - expected)}"
+        f"unexpected outputs: {sorted(set(actual) - expected - POSTGRESQL_ADAPTER_OUTPUTS)}"
     )
 
 

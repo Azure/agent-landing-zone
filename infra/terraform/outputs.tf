@@ -301,3 +301,18 @@ output "AZURE_CONTAINER_REGISTRY_ENDPOINT" {
 output "HOSTED_AGENT_DEPLOYMENT" {
   value = local.foundation_metadata.HOSTED_AGENT_DEPLOYMENT
 }
+output "POSTGRESQL_SERVER_RESOURCE_ID" {
+  value = var.deployPostgreSql ? module.postgresql[0].resource_id : ""
+}
+output "POSTGRESQL_HOST" {
+  value = var.deployPostgreSql ? module.postgresql[0].fqdn : ""
+}
+output "POSTGRESQL_PORT" {
+  value = var.deployPostgreSql ? "5432" : ""
+}
+output "POSTGRESQL_DATABASE_NAME" {
+  value = var.deployPostgreSql ? var.postgreSqlDatabaseName : ""
+}
+output "CONTAINER_APPS_POSTGRESQL_EGRESS_IP" {
+  value = local.postgresql_egress_ip
+}

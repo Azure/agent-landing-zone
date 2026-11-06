@@ -298,6 +298,15 @@ if [ $COMPOSE_EXIT -ne 0 ]; then
 fi
 if [ "$INFRA_PROVIDER" = "terraform" ]; then import_azd_environment; fi
 
+# BEGIN PostgreSQL creation intent
+(cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.postgresql preflight \
+    --input "$PARAMETER_DESTINATION" --provider "$INFRA_PROVIDER" \
+    --azure-dir "$PROJECT_ROOT/.azure") || {
+    echo "PostgreSQL creation-intent preflight failed; provisioning has not started." >&2
+    exit 1
+}
+# END PostgreSQL creation intent
+
 # BEGIN component runtime egress
 (cd "$PROJECT_ROOT" && "$PYTHON_CMD" -m config.deployment.egress --plan --save) || {
     echo "Component egress planning failed; provisioning has not started." >&2

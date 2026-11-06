@@ -85,6 +85,7 @@ locals {
     speechServiceName           = { prefix = local.abbreviations.ai.speechService, max = 64, compact = false }
     storageAccountName          = { prefix = local.abbreviations.storage.storageAccount, max = 24, compact = true }
     vnetName                    = { prefix = local.abbreviations.networking.virtualNetwork, max = 64, compact = false }
+    postgreSqlServerName        = { prefix = local.abbreviations.databases.postgreSQLDatabase, max = 63, compact = false }
   }
   name_overrides = {
     aiFoundryAccountName        = var.aiFoundryAccountName
@@ -105,6 +106,7 @@ locals {
     speechServiceName           = var.speechServiceName
     storageAccountName          = var.storageAccountName
     vnetName                    = var.vnetName
+    postgreSqlServerName        = var.postgreSqlServerName
   }
   # Normalize generated names only. Overrides are preserved, then validated;
   # never silently rewrite an operator's explicit name.

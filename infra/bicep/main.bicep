@@ -97,6 +97,37 @@ param additionalAppConfigurationSettings additionalAppConfigurationSettingType[]
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
+@description('Optional application PostgreSQL foundation. Fresh deployments only; lifecycle owns independent deletion protection and SQL bootstrap is manual.')
+param deployPostgreSql bool = false
+@description('Optional server name; empty derives from shared foundation naming.')
+param postgreSqlServerName string = ''
+param postgreSqlDatabaseName string = 'agentlz'
+@allowed(['13', '14', '15', '16', '17', '18'])
+param postgreSqlVersion string = '16'
+@allowed(['Burstable', 'GeneralPurpose', 'MemoryOptimized'])
+param postgreSqlTier string = 'Burstable'
+param postgreSqlSkuName string = 'Standard_B1ms'
+@minValue(32)
+@maxValue(65536)
+@allowed([32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536])
+param postgreSqlStorageSizeGb int = 32
+@minValue(7)
+@maxValue(35)
+param postgreSqlBackupRetentionDays int = 7
+@allowed(['Disabled', 'SameZone', 'ZoneRedundant'])
+param postgreSqlHighAvailability string = 'Disabled'
+param postgreSqlGeoRedundantBackup bool = false
+param postgreSqlStorageAutoGrow bool = false
+@description('Explicit administrator directory object UUID. Required when enabled, never defaults to deployment or application identity.')
+param postgreSqlAdministratorObjectId string = ''
+param postgreSqlAdministratorPrincipalName string = ''
+@description('User, Group or ServicePrincipal; required when enabled.')
+param postgreSqlAdministratorPrincipalType string = ''
+@description('Explicit operator IPv4/CIDRs. No all-address or Azure-services rule. Basic adds the exact dedicated ACA NAT IP separately.')
+param postgreSqlAllowedIpRanges string[] = []
+@description('Externally owned privatelink.postgres.database.azure.com zone. Empty creates a zone unless policy owns DNS.')
+param existingPrivateDnsZonePostgreSqlResourceId string = ''
+
 @description('Gap 8 — Deployment topology preset. Required to surface deployment intent explicitly. Allowed values: `standalone` (default — self-contained spoke, own firewall/bastion/NAT GW; suitable for sandbox or single-team subscriptions) or `ailz-integrated` (spoke designed to plug into an Azure Landing Zone-managed hub; consumer is expected to provide `hubIntegrationHubVnetResourceId`, `hubIntegrationEgressNextHopIp` and/or `hubIntegrationExistingRouteTableResourceId`, BYO Private DNS overrides, and optionally `existingLogAnalyticsWorkspaceResourceId` for centralized observability). The value is captured as a `deploymentMode` tag on the resource group so platform teams can audit deployment posture. The preset does NOT automatically override explicit operator flags; it primarily documents intent and powers the pre-flight script (`scripts/Invoke-PreflightChecks.ps1`, Gap 9).')
 @allowed([
   'standalone'
@@ -978,6 +1009,7 @@ var _legacyResourceNames = {
   speechServiceName: '${const.abbrs.ai.speechService}${resourceToken}'
   storageAccountName: '${const.abbrs.storage.storageAccount}${resourceToken}'
   vnetName: '${const.abbrs.networking.virtualNetwork}${resourceToken}'
+  postgreSqlServerName: '${const.abbrs.databases.postgreSQLDatabase}${resourceToken}'
 }
 
 var _cafResourceNames = {
@@ -999,6 +1031,7 @@ var _cafResourceNames = {
   speechServiceName: cafTrim('spch-${_cafNameStem}', 64)
   storageAccountName: cafTrim('st${_cafCompactStem}', 24)
   vnetName: cafTrim('vnet-${_cafNameStem}', 64)
+  postgreSqlServerName: cafTrim('${replace(const.abbrs.databases.postgreSQLDatabase, '-', '')}-${_cafNameStem}', 63)
 }
 
 var resourceNames = {
@@ -1020,6 +1053,7 @@ var resourceNames = {
   speechServiceName: !empty(speechServiceName) && !(resourceNamingMode == 'caf' && speechServiceName == _legacyResourceNames.speechServiceName) ? speechServiceName : (resourceNamingMode == 'caf' ? _cafResourceNames.speechServiceName : _legacyResourceNames.speechServiceName)
   storageAccountName: !empty(storageAccountName) && !(resourceNamingMode == 'caf' && storageAccountName == _legacyResourceNames.storageAccountName) ? storageAccountName : (resourceNamingMode == 'caf' ? _cafResourceNames.storageAccountName : _legacyResourceNames.storageAccountName)
   vnetName: !empty(vnetName) && !(resourceNamingMode == 'caf' && vnetName == _legacyResourceNames.vnetName) ? vnetName : (resourceNamingMode == 'caf' ? _cafResourceNames.vnetName : _legacyResourceNames.vnetName)
+  postgreSqlServerName: !empty(postgreSqlServerName) ? postgreSqlServerName : (resourceNamingMode == 'caf' ? _cafResourceNames.postgreSqlServerName : _legacyResourceNames.postgreSqlServerName)
 }
 
 // ----------------------------------------------------------------------
@@ -1347,12 +1381,14 @@ var varExistingVnetSubscriptionId = length(varVnetIdSegments) >= 3 ? varVnetIdSe
 var varExistingVnetResourceGroupName = length(varVnetIdSegments) >= 5 ? varVnetIdSegments[4] : resourceGroup().name
 var varExistingVnetName = length(varVnetIdSegments) >= 9 ? varVnetIdSegments[8] : ''
 
-var virtualNetworkResourceId = _networkIsolation ? (useExistingVNet ? existingVnetResourceId : virtualNetwork!.outputs.resourceId) : ''
+var _postgreSqlBasic = deployPostgreSql && !_networkIsolation
+var _acaVnetIntegration = _networkIsolation || _postgreSqlBasic
+var virtualNetworkResourceId = _acaVnetIntegration ? (useExistingVNet ? existingVnetResourceId : virtualNetwork!.outputs.resourceId) : ''
 
 #disable-next-line BCP318
 var _peSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${peSubnetName}' : ''
 #disable-next-line BCP318
-var _caEnvSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${acaEnvironmentSubnetName}' : ''
+var _caEnvSubnetId = _acaVnetIntegration ? '${virtualNetworkResourceId}/subnets/${acaEnvironmentSubnetName}' : ''
 #disable-next-line BCP318
 var _jumpbxSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${jumpboxSubnetName}' : ''
 #disable-next-line BCP318
@@ -1599,7 +1635,7 @@ var subnetDefinitions = [
       {
         purpose: 'applicationPe'
         create: deployApplicationPeSubnet
-        required: deployCosmosDb || deployKeyVault || deployAppConfig || deployContainerEnv || deployContainerRegistry || _deployAmpls
+        required: deployPostgreSql || deployCosmosDb || deployKeyVault || deployAppConfig || deployContainerEnv || deployContainerRegistry || _deployAmpls
         name: applicationPeSubnetName
         addressPrefix: applicationPeSubnetPrefix
         serviceEndpoints: ['Microsoft.AzureCosmosDB']
@@ -1634,7 +1670,7 @@ var subnetDefinitions = [
       }
 ]
 
-var selectedSubnetDefinitions = filter(subnetDefinitions, subnet => _networkIsolation && deploySubnets && subnet.create)
+var selectedSubnetDefinitions = filter(subnetDefinitions, subnet => (_networkIsolation || (_postgreSqlBasic && subnet.purpose == 'acaEnvironment')) && deploySubnets && subnet.create)
 // Only resource properties cross the AVM/child-deployment boundary.
 var subnets = map(selectedSubnetDefinitions, subnet => {
   name: subnet.name
@@ -1645,13 +1681,13 @@ var subnets = map(selectedSubnetDefinitions, subnet => {
   networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs ? bastionNsg!.outputs.id : (subnet.purpose == 'appGateway' && _publicIngressEnabled ? appGwNsg!.outputs.id : (subnet.purpose == 'aiGateway' && deployNsgs ? aiGatewayNsg!.outputs.id : ''))
   // GatewaySubnet and both new delegated reservations have no forced-tunnel UDR.
   routeTableResourceId: contains(['agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'], subnet.purpose) ? _effectiveRouteTableId : ''
-  natGatewayResourceId: subnet.purpose == 'jumpbox' ? _effectiveNatGatewayId : ''
+  natGatewayResourceId: subnet.purpose == 'jumpbox' ? _effectiveNatGatewayId : (subnet.purpose == 'acaEnvironment' && _postgreSqlBasic ? containerAppsPostgreSqlNat!.outputs.resourceId : '')
 })
 
-module networkLayoutValidation 'modules/validation/subnet-layout.bicep' = if (_networkIsolation) {
+module networkLayoutValidation 'modules/validation/subnet-layout.bicep' = if (_acaVnetIntegration) {
   name: 'subnetLayoutValidation'
   params: {
-    subnetDefinitions: map(subnetDefinitions, subnet => {
+    subnetDefinitions: map(filter(subnetDefinitions, subnet => _networkIsolation || subnet.purpose == 'acaEnvironment'), subnet => {
       purpose: subnet.purpose
       name: subnet.name
       addressPrefix: subnet.addressPrefix
@@ -1679,12 +1715,31 @@ module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIs
     useExistingVNet: useExistingVNet
     virtualNetworkResourceId: virtualNetworkResourceId
   }
-  dependsOn: [networkLayoutValidation, componentFlagValidation]
+  dependsOn: [networkLayoutValidation, componentFlagValidation, postgreSqlValidation]
+}
+
+// Basic BYO needs only the fresh ACA subnet. Reuse the child template without
+// the isolated aggregator's generic NSG creation, matching the new-VNet path
+// and Terraform. Preflight rejects removal of existing corporate associations.
+module containerAppsPostgreSqlSubnet 'modules/networking/subnet.bicep' = if (_postgreSqlBasic && useExistingVNet && deploySubnets && deployAcaEnvironmentSubnet) {
+  scope: resourceGroup(varExistingVnetSubscriptionId, varExistingVnetResourceGroupName)
+  name: 'containerAppsPostgreSqlSubnet'
+  params: {
+    name: '${varExistingVnetName}/${acaEnvironmentSubnetName}'
+    addressPrefix: acaEnvironmentSubnetPrefix
+    delegations: [{
+      name: 'Microsoft.App/environments'
+      properties: { serviceName: 'Microsoft.App/environments' }
+    }]
+    serviceEndpoints: [{ service: 'Microsoft.AzureCosmosDB' }]
+    natGatewayId: containerAppsPostgreSqlNat!.outputs.resourceId
+  }
+  dependsOn: [networkLayoutValidation, postgreSqlValidation]
 }
 
 // VNet
 // Note on IP address sizing: https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks#known-limitations
-module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_networkIsolation && !useExistingVNet) {
+module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_acaVnetIntegration && !useExistingVNet) {
   scope: resourceGroup(_networkResourceGroupName)
   name: 'virtualNetworkDeployment'
   params: {
@@ -1695,7 +1750,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
     tags: _tags
     subnets: subnets
   }
-  dependsOn: [networkLayoutValidation]
+  dependsOn: [networkLayoutValidation, postgreSqlValidation]
 }
 
 // Gap 7 — Spoke→hub VNet peering.
@@ -1872,6 +1927,19 @@ module natGateway 'modules/networking/nat-gateway.bicep' = if (_deployNatGateway
     location: location
     tags: _tags
   }
+}
+
+// Dedicated ACA SNAT; do not reuse the independent jumpbox gateway.
+module containerAppsPostgreSqlNat 'modules/networking/nat-gateway.bicep' = if (_postgreSqlBasic) {
+  scope: resourceGroup(_networkResourceGroupName)
+  name: 'containerAppsPostgreSqlNat'
+  params: {
+    name: '${const.abbrs.networking.natGateway}aca-postgresql-${resourceToken}'
+    publicIpName: '${const.abbrs.networking.publicIPAddress}aca-postgresql-${resourceToken}'
+    location: location
+    tags: _tags
+  }
+  dependsOn: [postgreSqlValidation]
 }
 
 // ---------------------------------------------------------------------------
@@ -2053,6 +2121,117 @@ module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if 
   }
 }
 
+// Optional PostgreSQL is independent of bundled apps, SQL bootstrap and locks.
+// AVM 0.16.1 is verified published; its server API is 2026-01-01-preview.
+module postgreSqlValidation 'modules/validation/postgresql.bicep' = if (deployPostgreSql) {
+  name: 'postgreSqlValidation'
+  params: {
+    serverName: resourceNames.postgreSqlServerName
+    databaseName: postgreSqlDatabaseName
+    tier: postgreSqlTier
+    skuName: postgreSqlSkuName
+    highAvailability: postgreSqlHighAvailability
+    storageSizeGb: postgreSqlStorageSizeGb
+    administratorObjectId: postgreSqlAdministratorObjectId
+    administratorPrincipalName: postgreSqlAdministratorPrincipalName
+    administratorPrincipalType: postgreSqlAdministratorPrincipalType
+    basic: _postgreSqlBasic
+    deployContainerEnv: deployContainerEnv
+    workloadProfiles: workloadProfiles
+    acaSubnetPrefix: acaEnvironmentSubnetPrefix
+    acaSubnetManaged: deploySubnets && deployAcaEnvironmentSubnet
+    useExistingVNet: useExistingVNet
+    deployNsgs: deployNsgs
+    externalNextHop: hubIntegrationEgressNextHopIp ?? ''
+    existingRouteTableId: hubIntegrationExistingRouteTableResourceId ?? ''
+    isolated: _networkIsolation
+    policyManagedPrivateDns: policyManagedPrivateDns
+    existingDnsZoneId: existingPrivateDnsZonePostgreSqlResourceId
+    allowedIpRanges: postgreSqlAllowedIpRanges
+  }
+}
+
+var _postgreSqlOperatorRules = [for (ip, index) in postgreSqlAllowedIpRanges: {
+  name: 'Operator-${index}'
+  startIpAddress: parseCidr(contains(ip, '/') ? ip : '${ip}/32').network
+  endIpAddress: parseCidr(contains(ip, '/') ? ip : '${ip}/32').broadcast
+}]
+var _postgreSqlFirewallRules = _postgreSqlBasic ? concat([
+  {
+    name: 'ContainerAppsNat'
+    startIpAddress: containerAppsPostgreSqlNat!.outputs.publicIpAddress
+    endIpAddress: containerAppsPostgreSqlNat!.outputs.publicIpAddress
+  }
+], _postgreSqlOperatorRules) : []
+
+module postgreSql 'br/public:avm/res/db-for-postgre-sql/flexible-server:0.16.1' = if (deployPostgreSql) {
+  scope: resourceGroup(_applicationResourceGroupName)
+  name: 'postgreSql'
+  params: {
+    name: resourceNames.postgreSqlServerName
+    location: location
+    tags: _tags
+    version: postgreSqlVersion
+    tier: postgreSqlTier
+    skuName: postgreSqlSkuName
+    availabilityZone: -1
+    highAvailability: postgreSqlHighAvailability
+    storageSizeGB: postgreSqlStorageSizeGb
+    backupRetentionDays: postgreSqlBackupRetentionDays
+    geoRedundantBackup: postgreSqlGeoRedundantBackup ? 'Enabled' : 'Disabled'
+    autoGrow: postgreSqlStorageAutoGrow ? 'Enabled' : 'Disabled'
+    authConfig: {
+      activeDirectoryAuth: 'Enabled'
+      passwordAuth: 'Disabled'
+      tenantId: subscription().tenantId
+    }
+    administrators: [{
+      objectId: postgreSqlAdministratorObjectId
+      principalName: postgreSqlAdministratorPrincipalName
+      principalType: postgreSqlAdministratorPrincipalType
+      tenantId: subscription().tenantId
+    }]
+    databases: [{ name: postgreSqlDatabaseName, charset: 'UTF8', collation: 'en_US.utf8' }]
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    firewallRules: _postgreSqlFirewallRules
+    // Explicit low-cost parity, no password or module-owned deletion lock.
+    enableAdvancedThreatProtection: false
+    enableTelemetry: false
+  }
+  dependsOn: [postgreSqlValidation]
+}
+
+var _dnsZonePostgreSqlId = !empty(existingPrivateDnsZonePostgreSqlResourceId)
+  ? existingPrivateDnsZonePostgreSqlResourceId
+  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.postgres.database.azure.com')
+
+module postgreSqlPrivateEndpoint 'modules/networking/private-endpoint.bicep' = if (deployPostgreSql && _networkIsolation) {
+  name: 'postgreSqlPrivateEndpoint'
+  params: {
+    name: '${const.abbrs.networking.privateEndpoint}${resourceNames.postgreSqlServerName}'
+    location: _peLocation
+    tags: _tags
+    resourceGroupName: _peResourceGroupName
+    subscriptionId: _peSubscriptionId
+    subnetResourceId: _applicationPeSubnetId
+    privateLinkServiceConnections: [{
+      name: 'postgresqlConnection'
+      properties: {
+        privateLinkServiceId: postgreSql!.outputs.resourceId
+        groupIds: ['postgresqlServer']
+      }
+    }]
+    privateDnsZoneGroup: policyManagedPrivateDns ? null : {
+      name: 'postgresqlDnsZoneGroup'
+      privateDnsZoneGroupConfigs: [
+        { name: 'postgresqlARecord', privateDnsZoneResourceId: _dnsZonePostgreSqlId }
+      ]
+    }
+  }
+  // Serialize shared-subnet PE writes without coupling SQL to app runtime.
+  dependsOn: [virtualNetwork, virtualNetworkSubnets, privateDnsZones, privateEndpoints]
+}
+
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> TestVm
 module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (_deployJumpbox && deployCosmosDb) {
   scope: resourceGroup(_applicationResourceGroupName)
@@ -2119,6 +2298,7 @@ var _byoZoneKeyVault       = !empty(existingPrivateDnsZoneKeyVaultResourceId ?? 
 var _byoZoneAppConfig      = !empty(existingPrivateDnsZoneAppConfigResourceId ?? '')
 var _byoZoneContainerApps  = !empty(existingPrivateDnsZoneContainerAppsResourceId ?? '')
 var _byoZoneAcr            = !empty(existingPrivateDnsZoneAcrResourceId ?? '')
+var _byoZonePostgreSql     = !empty(existingPrivateDnsZonePostgreSqlResourceId)
 var _byoZoneAppInsights    = !empty(existingPrivateDnsZoneAppInsightsResourceId ?? '')
 var _byoZoneAzureMonitor   = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')
 var _byoZoneOmsOpInsights  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')
@@ -2126,6 +2306,9 @@ var _byoZoneOdsOpInsights  = !empty(existingPrivateDnsZoneOdsOpsInsightsResource
 var _byoZoneAzureAutomation= !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '')
 
 var _dnsZonesList = _deployPrivateDnsZones ? concat(
+  (deployPostgreSql && !_byoZonePostgreSql) ? [
+    { dnsName: 'privatelink.postgres.database.azure.com', virtualNetworkLinkName: '${resourceNames.vnetName}-postgresql-link${_dnsZonesLinkSuffix}' }
+  ] : [],
   (deployDurableTaskScheduler && empty(existingPrivateDnsZoneDurableTaskResourceId)) ? [
     { dnsName: 'privatelink.durabletask.io', virtualNetworkLinkName: '${resourceNames.vnetName}-durabletask-link${_dnsZonesLinkSuffix}' }
   ] : [],
@@ -2837,13 +3020,14 @@ module containerEnv 'modules/application/container-environment.bicep' = if (depl
       } : null
       zoneRedundant: useZoneRedundancy
       workloadProfiles: workloadProfiles
-      vnetConfiguration: networkIsolation ? {
+      vnetConfiguration: _acaVnetIntegration ? {
         infrastructureSubnetId: _caEnvSubnetId
-        internal: true
+        internal: _networkIsolation
       } : null
     }
   }
   dependsOn: [
+    containerAppsPostgreSqlSubnet
     #disable-next-line BCP321
     !useExistingVNet ? virtualNetwork : null
     #disable-next-line BCP321
@@ -4237,6 +4421,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 //////////////////////////////////////////////////////////////////////////
 // OUTPUTS
 //////////////////////////////////////////////////////////////////////////
+// Keep all 64 legacy outputs. The common verified postProvision PostgreSQL
+// adapter materializes its five azd keys for BOTH providers (infra/README.md).
 
 // ──────────────────────────────────────────────────────────────────────
 // General / Deployment

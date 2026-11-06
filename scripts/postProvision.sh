@@ -47,6 +47,13 @@ is_truthy() {
   echo "Resource-group destination binding failed; configuration has not started." >&2
   exit 1
 }
+# BEGIN PostgreSQL protection
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.postgresql protect --azure-dir "$PROJECT_ROOT/.azure") || {
+  echo "PostgreSQL protection failed; discovery will not be published." >&2
+  exit 1
+}
+# END PostgreSQL protection
+
 network_exit=0
 (cd "$PROJECT_ROOT" && python3 -m config.deployment.private_network --stage post-provision) || network_exit=$?
 if [ "$network_exit" -eq 20 ]; then

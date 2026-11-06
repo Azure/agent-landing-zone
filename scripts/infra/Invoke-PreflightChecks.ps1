@@ -321,6 +321,9 @@ function Test-BooleanParameterValues {
     param([hashtable]$P)
 
     $booleanParameters = [ordered]@{
+        deployPostgreSql           = 'DEPLOY_POSTGRESQL'
+        postgreSqlGeoRedundantBackup = 'POSTGRESQL_GEO_REDUNDANT_BACKUP'
+        postgreSqlStorageAutoGrow  = 'POSTGRESQL_STORAGE_AUTO_GROW'
         deployCosmosDb             = 'DEPLOY_COSMOS_DB'
         deployContainerApps        = 'DEPLOY_CONTAINER_APPS'
         deployContainerRegistry    = 'DEPLOY_CONTAINER_REGISTRY'
@@ -766,7 +769,9 @@ function Get-SubnetSelection {
     param([hashtable]$P)
 
     $isolated = ConvertTo-Bool $P['networkIsolation']
-    $create = $isolated -and (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets')
+    $postgresql = Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false
+    $basicPostgresql = $postgresql -and -not $isolated
+    $create = ($isolated -or $basicPostgresql) -and (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets')
     $localFirewall = $isolated -and (Resolve-DeployFlag -P $P -Key 'deployAzureFirewall' -Default $true)
     $sku = if ($P.ContainsKey('azureFirewallSku')) { Get-StringValue $P['azureFirewallSku'] } else { 'Basic' }
     $standalone = -not $P.ContainsKey('deploymentMode') -or $P['deploymentMode'] -ceq 'standalone'
@@ -791,7 +796,7 @@ function Get-SubnetSelection {
         (Resolve-DeployFlag -P $P -Key 'deployStorageAccount' -Default $true) -or
         (Resolve-DeployFlag -P $P -Key 'deploySearchService' -Default $true) -or
         (Resolve-DeployFlag -P $P -Key 'deploySpeechService' -Default $false)
-    $applicationPe = $cosmos -or $envEnabled -or $registry -or $ampls -or
+    $applicationPe = $postgresql -or $cosmos -or $envEnabled -or $registry -or $ampls -or
         (Resolve-DeployFlag -P $P -Key 'deployKeyVault' -Default $true) -or
         (Resolve-DeployFlag -P $P -Key 'deployAppConfig' -Default $true)
     $ingress = $P['publicIngress']
@@ -839,13 +844,13 @@ function Get-SubnetSelection {
             Name = if ($P.ContainsKey($nameKey)) { Get-StringValue $P[$nameKey] } else { $d[2] }
             Cidr = if ($P.ContainsKey($prefixKey)) { Get-StringValue $P[$prefixKey] } else { $d[3] }
             Delegation = $d[4]; MaxPrefix = $d[5]
-            Managed = $create -and $(switch ($d[0]) {
+            Managed = $create -and ($isolated -or $d[0] -eq 'deployAcaEnvironmentSubnet') -and $(switch ($d[0]) {
                 'deployAzureFirewallSubnet' { Resolve-SubnetCreationFlag -P $P -Key $d[0] -Default $localFirewall }
                 'deployAzureFirewallManagementSubnet' { $basicManagement -and (Resolve-SubnetCreationFlag -P $P -Key $d[0]) }
                 'deployGatewaySubnet' { Resolve-SubnetCreationFlag -P $P -Key $d[0] -Default $false }
                 default { Resolve-SubnetCreationFlag -P $P -Key $d[0] }
             })
-            Required = $isolated -and $d[6]
+            Required = ($isolated -and $d[6]) -or ($basicPostgresql -and $d[0] -eq 'deployAcaEnvironmentSubnet')
         }
     }
 }
@@ -911,7 +916,7 @@ function Test-SubnetOverlaps {
 
 function Test-LocalCidrSanity {
     param([hashtable]$P)
-    if (-not (ConvertTo-Bool $P['networkIsolation'])) { return }
+    if (-not (ConvertTo-Bool $P['networkIsolation']) -and -not (Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false)) { return }
     $selection = @(Get-SubnetSelection -P $P)
     $active = @($selection | Where-Object { $_.Managed -or $_.Required })
     $byo = ConvertTo-Bool $P['useExistingVNet']
@@ -1489,6 +1494,9 @@ function Get-RequiredResourceProviders {
         if ($known.Count -gt 0) { [void]$canonical.Add($known[0]) } else { [void]$canonical.Add($ns) }
     }
     foreach ($ns in $implicitNamespaces) { [void]$canonical.Add($ns) }
+    if (Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false) {
+        [void]$canonical.Add('Microsoft.DBforPostgreSQL')
+    }
 
     # Fallback: if Bicep discovery returned nothing (e.g. script run from an
     # unusual location), fall back to the full known-namespace list so the
@@ -1534,6 +1542,7 @@ function Get-RequiredResourceProviders {
         'Microsoft.Search'               = $deploySearch
         'Microsoft.DocumentDB'           = ($deployCosmos -or $deployAiFoundry)
         'Microsoft.Bing'                 = $deployBing
+        'Microsoft.DBforPostgreSQL'       = (Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false)
     }
 
     $subnetProviders = @(Get-SubnetSelection -P $P | Where-Object { $_.Managed -and $_.Delegation } |
@@ -2243,6 +2252,197 @@ function Write-FindingsReport {
 # Main
 # --------------------------------------------------------------------------
 
+function ConvertTo-PostgreSqlIpRanges {
+    param([object]$Ranges)
+    if ($null -eq $Ranges) { return }
+    if ($Ranges -is [string] -or $Ranges -isnot [System.Collections.IEnumerable]) {
+        throw 'postgreSqlAllowedIpRanges must be a typed IPv4/CIDR array, not a string.'
+    }
+    foreach ($ip in $Ranges) {
+        if ($ip -isnot [string] -or $ip -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}(/(0|[1-9]|[12]\d|3[0-2]))?$') {
+            throw 'PostgreSQL operator ranges must be canonical IPv4 addresses or CIDRs.'
+        }
+        $range = Get-CidrRange -Cidr $ip
+        if ($range.Start -eq 0) { throw 'All-address ranges and Azure-services 0.0.0.0 firewall rules are prohibited.' }
+        $startBytes = [BitConverter]::GetBytes([uint32]$range.Start)
+        $endBytes = [BitConverter]::GetBytes([uint32]$range.End)
+        [Array]::Reverse($startBytes)
+        [Array]::Reverse($endBytes)
+        [pscustomobject]@{
+            startIpAddress = ([Net.IPAddress]::new($startBytes)).ToString()
+            endIpAddress = ([Net.IPAddress]::new($endBytes)).ToString()
+        }
+    }
+}
+
+function Test-PostgreSqlConfiguration {
+    param([hashtable]$P)
+    if (-not (Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false)) { return }
+    $isolated = ConvertTo-Bool $P['networkIsolation']
+    $oid = Get-StringValue $P['postgreSqlAdministratorObjectId']
+    $name = Get-StringValue $P['postgreSqlAdministratorPrincipalName']
+    $type = Get-StringValue $P['postgreSqlAdministratorPrincipalType']
+    if ($oid -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$' -or $oid -eq '00000000-0000-0000-0000-000000000000' -or
+        [string]::IsNullOrWhiteSpace($name) -or $type -cnotin @('User','Group','ServicePrincipal')) {
+        Add-Finding -Severity FAIL -Code 'POSTGRESQL_ADMIN_REQUIRED' -Message 'Enabled PostgreSQL requires explicit administrator object UUID, principal name and User/Group/ServicePrincipal type in the resolved deployment directory.'
+    }
+    $tier = if ($P.ContainsKey('postgreSqlTier')) { Get-StringValue $P['postgreSqlTier'] } else { 'Burstable' }
+    $sku = if ($P.ContainsKey('postgreSqlSkuName')) { Get-StringValue $P['postgreSqlSkuName'] } else { 'Standard_B1ms' }
+    $ha = if ($P.ContainsKey('postgreSqlHighAvailability')) { Get-StringValue $P['postgreSqlHighAvailability'] } else { 'Disabled' }
+    $prefixes = @{ Burstable = 'Standard_B'; GeneralPurpose = 'Standard_D'; MemoryOptimized = 'Standard_E' }
+    $skuPatterns = @{ Burstable = '^Standard_B(1ms|2s|2ms|4ms|8ms|12ms|16ms|20ms)$'; GeneralPurpose = '^Standard_D[0-9]+d?s_v[3456]$'; MemoryOptimized = '^Standard_E[0-9]+d?s_v[3456]$' }
+    if (-not $prefixes.ContainsKey($tier) -or $sku -cnotmatch $skuPatterns[$tier] -or
+        $ha -cnotin @('Disabled','SameZone','ZoneRedundant') -or ($tier -ceq 'Burstable' -and $ha -cne 'Disabled')) {
+        Add-Finding -Severity FAIL -Code 'POSTGRESQL_SKU_HA_INVALID' -Message 'PostgreSQL SKU must match Burstable/GeneralPurpose/MemoryOptimized tier; Burstable cannot use HA. No regional SKU/HA downgrade is performed.'
+    }
+    $version = if ($P.ContainsKey('postgreSqlVersion')) { Get-StringValue $P['postgreSqlVersion'] } else { '16' }
+    $storage = if ($P.ContainsKey('postgreSqlStorageSizeGb')) { Get-StringValue $P['postgreSqlStorageSizeGb'] } else { '32' }
+    $backup = if ($P.ContainsKey('postgreSqlBackupRetentionDays')) { Get-StringValue $P['postgreSqlBackupRetentionDays'] } else { '7' }
+    if ($version -cnotin @('13','14','15','16','17','18') -or
+        $storage -notmatch '^\d+$' -or [double]$storage -notin @(32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536) -or
+        $backup -notmatch '^\d+$' -or [double]$backup -lt 7 -or [double]$backup -gt 35) {
+        Add-Finding -Severity FAIL -Code 'POSTGRESQL_SIZING_INVALID' -Message 'PostgreSQL requires engine 13..18, power-of-two storage 32..65536 GiB and backup retention 7..35 days.'
+    }
+    $serverName = Get-StringValue $P['postgreSqlServerName']
+    $databaseName = if ($P.ContainsKey('postgreSqlDatabaseName')) { Get-StringValue $P['postgreSqlDatabaseName'] } else { 'agentlz' }
+    if (($serverName -and $serverName -cnotmatch '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$') -or
+        $databaseName -notmatch '^[A-Za-z_][A-Za-z0-9_-]{0,62}$' -or $databaseName -in @('postgres','azure_sys','azure_maintenance','template0','template1')) {
+        Add-Finding -Severity FAIL -Code 'POSTGRESQL_NAME_INVALID' -Message 'PostgreSQL requires a lowercase 3..63 character server name and non-system application database SQL identifier.'
+    }
+    try { ConvertTo-PostgreSqlIpRanges -Ranges $P['postgreSqlAllowedIpRanges'] | Out-Null }
+    catch { Add-Finding -Severity FAIL -Code 'POSTGRESQL_IP_RANGE_INVALID' -Message $_.Exception.Message }
+    $dnsId = Get-StringValue $P['existingPrivateDnsZonePostgreSqlResourceId']
+    if (($dnsId -and $dnsId -notmatch '^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\.Network/privateDnsZones/privatelink\.postgres\.database\.azure\.com$') -or
+        ($isolated -and (ConvertTo-Bool $P['policyManagedPrivateDns']) -and $dnsId)) {
+        Add-Finding -Severity FAIL -Code 'POSTGRESQL_DNS_OWNERSHIP' -Message 'Existing PostgreSQL DNS must identify privatelink.postgres.database.azure.com and cannot compete with policy-managed DNS.'
+    }
+    if (-not $isolated) {
+        $prefix = if ($P.ContainsKey('acaEnvironmentSubnetPrefix')) { Get-StringValue $P['acaEnvironmentSubnetPrefix'] } else { '192.168.1.0/24' }
+        $validPrefix = $false
+        try { $validPrefix = (Get-CidrRange -Cidr $prefix -RequireAligned).Prefix -le 27 } catch {}
+        $profiles = if ($P.ContainsKey('workloadProfiles')) { @(Get-ArrayValue $P['workloadProfiles']) } else { @(@{ name = 'Consumption'; workloadProfileType = 'Consumption' }) }
+        if (-not (Resolve-DeployFlag -P $P -Key 'deployContainerEnv' -Default $true) -or $profiles.Count -eq 0 -or
+            -not $validPrefix -or -not (Resolve-SubnetCreationFlag -P $P -Key 'deploySubnets') -or
+            -not (Resolve-SubnetCreationFlag -P $P -Key 'deployAcaEnvironmentSubnet') -or
+            ((ConvertTo-Bool $P['useExistingVNet']) -and -not (Resolve-SubnetCreationFlag -P $P -Key 'deployNsgs'))) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_PREREQUISITES' -Message 'Basic PostgreSQL requires fresh workload-profiles ACA and a managed Microsoft.App/environments subnet of /27 or larger; legacy Consumption-only environments are unsupported.'
+        }
+        if ((Get-StringValue $P['hubIntegrationEgressNextHopIp']) -or (Get-StringValue $P['hubIntegrationExistingRouteTableResourceId'])) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_FORCED_ROUTE' -Message 'Basic PostgreSQL cannot promise NAT SNAT with a hub/NVA next hop or corporate route-table binding. No corporate routes are overwritten.'
+        }
+    }
+    if ($SkipAzureLookups) {
+        Add-Finding -Severity INFO -Code 'POSTGRESQL_AZURE_SKIPPED' -Message 'PostgreSQL live administrator, routing, DNS and regional capacity checks skipped (-SkipAzureLookups). Fresh adoption and lock readiness remain lifecycle requirements.'
+        return
+    }
+    Test-PostgreSqlAzurePrerequisites -P $P
+}
+
+function Test-PostgreSqlAzurePrerequisites {
+    param([hashtable]$P)
+    $ctx = Test-AzureContext
+    if (-not $ctx) { return }
+    $oid = Get-StringValue $P['postgreSqlAdministratorObjectId']
+    $kind = switch (Get-StringValue $P['postgreSqlAdministratorPrincipalType']) {
+        'User' { 'user' }; 'Group' { 'group' }; 'ServicePrincipal' { 'sp' }
+    }
+    if ($kind -and $oid) {
+        $principal = Invoke-AzCli -Arguments @('ad', $kind, 'show', '--id', $oid, '-o', 'json')
+        if (-not $principal -or $principal.id -ine $oid) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_ADMIN_LOOKUP_FAILED' -Message 'Cannot verify the configured PostgreSQL administrator object/type in the active deployment directory.'
+        }
+        elseif ((Get-StringValue $P['postgreSqlAdministratorPrincipalName']) -cnotin @($principal.displayName, $principal.userPrincipalName)) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_ADMIN_NAME_MISMATCH' -Message 'PostgreSQL administrator principal name must match the verified directory object.'
+        }
+    }
+    if ((ConvertTo-Bool $P['networkIsolation'])) {
+        $dnsId = Get-StringValue $P['existingPrivateDnsZonePostgreSqlResourceId']
+        if ($dnsId) {
+            $zone = Invoke-AzCli -Arguments @('network', 'private-dns', 'zone', 'show', '--ids', $dnsId, '-o', 'json')
+            $links = Invoke-AzCli -Arguments @('rest', '--method', 'get', '--url', "https://management.azure.com${dnsId}/virtualNetworkLinks?api-version=2024-06-01", '-o', 'json')
+            $vnetId = Get-StringValue $P['existingVnetResourceId']
+            if (-not $zone -or ($vnetId -and -not @($links.value | Where-Object { (Get-AzureProperties $_).virtualNetwork.id -ieq $vnetId -and (Get-AzureProperties $_).provisioningState -eq 'Succeeded' }).Count)) {
+                Add-Finding -Severity FAIL -Code 'POSTGRESQL_DNS_BINDING_MISSING' -Message 'Existing PostgreSQL DNS must be readable and linked to the selected VNet. This deployment does not own existing zone links.'
+            }
+        }
+        elseif (ConvertTo-Bool $P['policyManagedPrivateDns']) {
+            Add-Finding -Severity INFO -Code 'POSTGRESQL_POLICY_DNS_EXTERNAL' -Message 'Policy owns PostgreSQL PE DNS groups/records and links; resolution convergence must be verified before consumer readiness.'
+        }
+    }
+    elseif (ConvertTo-Bool $P['useExistingVNet']) {
+        $vnet = Invoke-AzCli -Arguments @('network', 'vnet', 'show', '--ids', (Get-StringValue $P['existingVnetResourceId']), '-o', 'json')
+        if (-not $vnet) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_VNET_LOOKUP_FAILED' -Message 'Cannot verify Basic PostgreSQL ACA subnet ownership/routing in the selected VNet.'
+        }
+        else {
+            $subnetName = if ($P.ContainsKey('acaEnvironmentSubnetName')) { Get-StringValue $P['acaEnvironmentSubnetName'] } else { 'aca-environment-subnet' }
+            foreach ($subnet in @((Get-AzureProperties $vnet).subnets | Where-Object name -eq $subnetName)) {
+                $properties = Get-AzureProperties $subnet
+                # Managed writes would omit these properties. Do not remove
+                # even benign corporate associations as a way to obtain SNAT.
+                if ($properties.routeTable.id -or $properties.networkSecurityGroup.id) {
+                    Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_FORCED_ROUTE' -Message 'Basic PostgreSQL cannot overwrite an existing ACA subnet route table/NSG. Select a fresh dedicated subnet; forced NVA/firewall 0/0 routing invalidates NAT SNAT.'
+                }
+                if ($properties.natGateway.id) {
+                    $nat = Invoke-AzCli -Arguments @('network', 'nat', 'gateway', 'show', '--ids', $properties.natGateway.id, '-o', 'json')
+                    $environmentName = Get-StringValue $P['environmentName']
+                    $ownerEnvironment = $nat.tags.'azd-env-name'
+                    if ($nat -and -not $ownerEnvironment) {
+                        # The reused Bicep NAT wrapper tags its public IP, not
+                        # the gateway. Verify that owned IP instead of changing
+                        # the jumpbox wrapper's shipped graph for this feature.
+                        $ips = @((Get-AzureProperties $nat).publicIpAddresses)
+                        if ($ips.Count -eq 1 -and $ips[0].id) {
+                            $ip = Invoke-AzCli -Arguments @('network', 'public-ip', 'show', '--ids', $ips[0].id, '-o', 'json')
+                            $ownerEnvironment = $ip.tags.'azd-env-name'
+                        }
+                    }
+                    if (-not $nat -or $nat.name -notmatch '^ng-aca-postgresql-' -or
+                        -not $environmentName -or $ownerEnvironment -cne $environmentName) {
+                        Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_NAT_OWNERSHIP' -Message 'Existing ACA subnet NAT must be the independently verified same-binding PostgreSQL ACA NAT; jumpbox or corporate NAT is never reused or overwritten.'
+                    }
+                }
+            }
+            Test-PostgreSqlBasicVnet -P $P -Vnet $vnet
+        }
+    }
+    if (-not $SkipRegional) {
+        $location = Get-StringValue $P['location']
+        $sku = if ($P.ContainsKey('postgreSqlSkuName')) { Get-StringValue $P['postgreSqlSkuName'] } else { 'Standard_B1ms' }
+        if ($location) {
+            $capabilities = Invoke-AzCli -Arguments @('postgres', 'flexible-server', 'list-skus', '--location', $location, '-o', 'json')
+            if (-not $capabilities) {
+                Add-Finding -Severity FAIL -Code 'POSTGRESQL_CAPACITY_LOOKUP_FAILED' -Message 'Cannot verify PostgreSQL regional SKU capabilities. No silent capacity or HA fallback is permitted.'
+            }
+            elseif (($capabilities | ConvertTo-Json -Depth 100 -Compress) -notmatch ('"' + [regex]::Escape($sku) + '"')) {
+                Add-Finding -Severity FAIL -Code 'POSTGRESQL_SKU_UNAVAILABLE' -Message 'The explicitly selected PostgreSQL SKU is not advertised in the selected region. Select a reviewed supported SKU; no downgrade is performed.'
+            }
+        }
+    }
+}
+
+function Test-PostgreSqlBasicVnet {
+    param([hashtable]$P, $Vnet)
+    $prefix = if ($P.ContainsKey('acaEnvironmentSubnetPrefix')) { Get-StringValue $P['acaEnvironmentSubnetPrefix'] } else { '192.168.1.0/24' }
+    $subnetName = if ($P.ContainsKey('acaEnvironmentSubnetName')) { Get-StringValue $P['acaEnvironmentSubnetName'] } else { 'aca-environment-subnet' }
+    try {
+        $properties = Get-AzureProperties $Vnet
+        if (-not @($properties.addressSpace.addressPrefixes | Where-Object { Test-CidrContains -A $_ -B $prefix }).Count) {
+            Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_SUBNET_BINDING' -Message 'Basic PostgreSQL ACA subnet must fit the actual BYO VNet address space.'
+        }
+        foreach ($other in @($properties.subnets | Where-Object name -ne $subnetName)) {
+            $otherProperties = Get-AzureProperties $other
+            $prefixes = if ($otherProperties.addressPrefixes) { @($otherProperties.addressPrefixes) } else { @($otherProperties.addressPrefix) }
+            foreach ($otherPrefix in $prefixes) {
+                if (Test-CidrOverlap -A $prefix -B $otherPrefix) {
+                    Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_SUBNET_BINDING' -Message 'Basic PostgreSQL ACA subnet would overlap an existing BYO subnet; existing networks are never rewritten.'
+                }
+            }
+        }
+    }
+    catch { Add-Finding -Severity FAIL -Code 'POSTGRESQL_BASIC_SUBNET_BINDING' -Message 'Cannot validate Basic PostgreSQL subnet against actual BYO VNet prefixes.' }
+}
+
 if (-not $ParametersFile) {
     $ParametersFile = Join-Path $PSScriptRoot '../../infra/bicep/main.parameters.json'
 }
@@ -2260,6 +2460,7 @@ if ($effective.Count -eq 0) {
 }
 
 Test-BooleanParameterValues -P $effective
+Test-PostgreSqlConfiguration -P $effective
 Test-Topology -P $effective
 Test-HostedAgentConfiguration -P $effective
 Test-AllowedIpRanges -P $effective

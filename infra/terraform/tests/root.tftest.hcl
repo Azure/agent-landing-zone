@@ -77,7 +77,7 @@ run "product_defaults" {
   }
   assert {
     condition = (
-      length(local.resource_names) == 18 &&
+      length(local.resource_names) == 19 &&
       length(local.resource_token) == 13 &&
       local.resource_names.aiFoundryAccountName == "aif-${local.caf_stem}" &&
       length(local.resource_names.storageAccountName) <= 24 &&

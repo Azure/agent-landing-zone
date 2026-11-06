@@ -111,9 +111,9 @@ try {
             "parameters('deployAppConfig')",
             "variables('_runtimeConfigIsAppConfig')"
         )
-    Test-ExactExpression -Name 'Selected subnet set includes global and isolation precedence' `
+    Test-ExactExpression -Name 'Selected subnet set includes global, isolation and Basic PostgreSQL precedence' `
         -Actual ([string]$template.variables.selectedSubnetDefinitions) `
-        -Expected "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]"
+        -Expected "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(or(variables('_networkIsolation'), and(variables('_postgreSqlBasic'), equals(lambdaVariables('subnet').purpose, 'acaEnvironment'))), parameters('deploySubnets')), lambdaVariables('subnet').create)))]"
     Test-ExactExpression -Name 'Defensive existing-subnet update gate' `
         -Actual ([string]$template.resources.virtualNetworkSubnets.condition) `
         -Expected "[and(and(and(and(variables('_networkIsolation'), parameters('useExistingVNet')), parameters('deploySubnets')), parameters('deployNsgs')), not(empty(variables('selectedSubnetDefinitions'))))]"

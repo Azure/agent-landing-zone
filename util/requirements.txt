@@ -5,7 +5,10 @@ click==8.2.1               # Command‑line toolkit (latest as of May 20, 2025) 
 tabulate>=0.9.0            # Pretty Markdown tables
 
 # Azure SDKs
-azure-identity==1.23.0     # DefaultAzureCredential ([released May 14, 2025](https://pypi.org/project/azure-identity/1.23.0/)) :contentReference[oaicite:2]{index=2}
+azure-identity==1.27.0
 azure-mgmt-resource==24.0.0 # ResourceManagementClient (latest stable)
 azure-mgmt-cosmosdb==9.8.0  # CosmosDBManagementClient
 azure-mgmt-cognitiveservices==13.6.0 # CognitiveServicesManagementClient
+
+# Manual Entra-only PostgreSQL bootstrap (no runtime integration).
+psycopg[binary]==3.3.6

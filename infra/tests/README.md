@@ -10,6 +10,9 @@ pwsh -NoProfile -File infra/tests/Invoke-OfflineContracts.ps1
 pwsh -NoProfile -File infra/tests/contracts/Test-ScopedGraphNormalizationContract.ps1
 pwsh -NoProfile -File infra/tests/contracts/Test-SolutionStorageAccessContract.ps1
 pwsh -NoProfile -File infra/tests/scripts/Invoke-PreflightChecks.Tests.ps1
+pwsh -NoProfile -File infra/tests/contracts/Test-PostgreSqlContract.ps1
+pwsh -NoProfile -File infra/tests/scripts/Test-PostgreSqlPreflight.Tests.ps1
+python -m pytest infra/tests/test_postgresql_interface.py tests/test_terraform_interface.py -q
 ```
 
 The runner executes every `contracts/Test-*Contract.ps1` and
@@ -36,6 +39,16 @@ Terraform's native mocked contracts remain under
 contracts remain under root [`tests/`](../../tests/). These offline checks do
 not demonstrate deployed provider parity, live DNS, RBAC or resource persistence.
 
+PostgreSQL counterpart plans are in `infra/terraform/tests/postgresql.tftest.hcl`.
+Use `terraform -chdir=infra/terraform init -backend=false -lockfile=readonly`,
+then `validate` and `test`. On Windows the narrow native filter is
+`-filter=tests\postgresql.tftest.hcl`; on Unix use
+`-filter=tests/postgresql.tftest.hcl`. Always check the executed test count:
+a mismatched path can execute zero tests.
+The new cases distinguish a Consumption profile in a workload-profiles
+environment from legacy Consumption-only ACA, and check explicit server
+settings, dedicated NAT, exact firewall ranges and all three DNS owners.
+
 ## Historical graph fixtures
 
 `contracts/fixtures/` records reviewed exact before/after graph deltas.
@@ -44,6 +57,20 @@ the compiled graph to its historical representation; it never mutates the
 actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
+
+`PostgreSqlNormalization.ps1` is the bounded optional-PostgreSQL delta against
+the pre-feature graph, using Bicep 0.42.1. Both sides of changed fields are
+pinned; complete added AVM modules are protected by canonical digests instead
+of copied templates. Every accepted path has a rejection mutation. This runs
+before the original projections and leaves all historical fingerprints intact.
+`postgresql_disabled_ast.py` separately proves that the actual compiled graph
+with PostgreSQL disabled is equivalent to that exact pre-feature graph in
+**both** network modes: only Boolean gates/if, identity filters and empty-array
+concat are reduced; unknown ARM functions/references remain opaque. It also
+rejects independent semantic mutations, without relying on the digest guard.
+This is bounded static evidence, not an ARM evaluator. Enabled security,
+ownership, DNS, NAT and the deliberate Bicep/Terraform native output difference
+are tested separately in `Test-PostgreSqlContract.ps1` and Terraform mock plans.
 
 `embedding-default-normalization.json` permits only the intentional embedding
 fallback SKU change from `Standard` to `GlobalStandard`. It checks the complete

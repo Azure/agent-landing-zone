@@ -233,7 +233,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 225
+    assert len(declarations) == 241
     original = values()
     for name, kind in declarations:
         if name in original:
@@ -248,6 +248,25 @@ def test_all_declared_inputs_are_accepted_with_native_types():
             original[name] = "fixture"
     result = compose_inputs(original, ENVIRONMENT)
     assert {name for name, _ in declarations} <= result.keys()
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+def test_postgresql_enabled_inputs_match_both_provider_transports(isolated):
+    environment = {
+        **ENVIRONMENT, "DEPLOY_POSTGRESQL": "true", "NETWORK_ISOLATION": str(isolated).lower(),
+        "POSTGRESQL_ADMINISTRATOR_OBJECT_ID": ENVIRONMENT["AZURE_PRINCIPAL_ID"],
+        "POSTGRESQL_ADMINISTRATOR_PRINCIPAL_NAME": "fixture-admin",
+        "POSTGRESQL_ADMINISTRATOR_PRINCIPAL_TYPE": "Group",
+        "POSTGRESQL_STORAGE_SIZE_GB": "64",
+    }
+    bicep = compose_parameters(source(), environment)["parameters"]
+    terraform = compose_inputs(values(), environment)
+    from config.deployment.postgresql import DEFAULTS
+    for name in DEFAULTS:
+        assert bicep[name]["value"] == terraform[name]
+    assert terraform["deployPostgreSql"] is True
+    assert terraform["postgreSqlStorageSizeGb"] == 64
+    assert terraform["postgreSqlServerName"].startswith("psql-")
 
 
 @pytest.mark.parametrize("sku", ["Basic", "Standard"])

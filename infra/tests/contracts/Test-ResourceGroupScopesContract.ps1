@@ -134,7 +134,7 @@ try {
     Assert-Equal $t.parameters.applicationPeSubnetName.defaultValue 'application-pe-subnet' 'Application PEs have a dedicated default subnet.'
     Assert-Equal $t.parameters.applicationPeSubnetPrefix.defaultValue '192.168.3.128/26' 'Application PE allocation retains the approved default.'
     Assert-Equal $t.variables.ContainsKey('_separateApplicationPeSubnet') $false 'No legacy empty-name subnet selector remains.'
-    Assert-Equal $t.variables.selectedSubnetDefinitions "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(variables('_networkIsolation'), parameters('deploySubnets')), lambdaVariables('subnet').create)))]" 'Selection depends on ownership/isolation, never resource-group count.'
+    Assert-Equal $t.variables.selectedSubnetDefinitions "[filter(variables('subnetDefinitions'), lambda('subnet', and(and(or(variables('_networkIsolation'), and(variables('_postgreSqlBasic'), equals(lambdaVariables('subnet').purpose, 'acaEnvironment'))), parameters('deploySubnets')), lambdaVariables('subnet').create)))]" 'Selection depends on ownership/isolation/Basic PostgreSQL, never resource-group count.'
     $subnetInput = $t.resources.virtualNetwork.properties.parameters.subnets.value
     Assert-Equal $t.resources.virtualNetworkSubnets.properties.parameters.subnets.value $subnetInput 'New and BYO VNets receive the same selected subnet projection.'
     $applicationDefinition = @($t.variables.subnetDefinitions | Where-Object purpose -CEQ 'applicationPe')
@@ -150,7 +150,7 @@ try {
     $checks++
     Assert-Dependency $t.resources.virtualNetwork 'networkLayoutValidation' 'New VNet waits for subnet validation.'
     Assert-Dependency $t.resources.virtualNetworkSubnets 'networkLayoutValidation' 'BYO subnet writes wait for validation.'
-    Assert-Equal $t.resources.networkLayoutValidation.condition "[variables('_networkIsolation')]" 'Every isolated topology validates ownership and required subnets.'
+    Assert-Equal $t.resources.networkLayoutValidation.condition "[variables('_acaVnetIntegration')]" 'Every VNet-integrated topology validates ownership and required subnets.'
     $layout = $t.resources.networkLayoutValidation.properties.template
     Assert-Equal $t.resources.networkLayoutValidation.properties.parameters.useExistingVNet.value "[parameters('useExistingVNet')]" 'BYO validation does not assume new-VNet addressing.'
     Assert-Contains $layout.outputs.validated.value "fail('An enabled consumer requires a subnet that is not managed in the new VNet. Enable its subnet creation or disable the consumer.')" 'Unmanaged required new-VNet subnets fail closed.'
