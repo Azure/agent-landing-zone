@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v7.2.1] - 2026-11-06
 
 ### Changed
 
@@ -14,6 +14,25 @@
 - Remove the unwanted automatic issue-type classifier from the ingestion
   repository's engineering workflows. Runtime components and deployment
   behavior are unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.6.0 |
+| agent-app-orchestrator | v7.1.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Foundry configuration, real-SDK Toolbox registration, native knowledge
+  connections and release contracts passed 40 tests and 9 subtests with the
+  updated dependency versions.
+- Runtime source commits, the bundled application definition, component-pin
+  review fixture, infrastructure provenance and provider/module pins are
+  unchanged. Neither infrastructure provider nor the shared lifecycle changes.
+- No live Azure deployment or deployed provider-parity validation was performed
+  for this maintenance release.
 
 ## [v7.2.0] - 2026-11-06
 
