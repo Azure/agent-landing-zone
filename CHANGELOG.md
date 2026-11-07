@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Update the deployment configuration dependencies to `azure-ai-projects`
+  2.10.0 and `azure-keyvault-secrets` 4.12.0.
+- Refresh the pinned `Azure/setup-azd` action commit while retaining Azure
+  Developer CLI 1.28.1 in the Copilot setup workflow.
+
+### Removed
+
+- Remove the unwanted automatic issue-type classifier from the ingestion
+  repository's engineering workflows. Runtime components and deployment
+  behavior are unchanged.
+
 ## [v7.2.0] - 2026-11-06
 
 ### Added
