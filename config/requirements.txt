@@ -10,12 +10,12 @@ azure-mgmt-appcontainers==5.1.0
 # aifoundry
 
 azure-mgmt-cognitiveservices==13.6.0
-azure-ai-projects==2.7.0
+azure-ai-projects==2.10.0
 
 # search
 
 requests==2.34.2
-azure-keyvault-secrets==4.11.3
+azure-keyvault-secrets==4.12.0
 jinja2==3.1.6
 
 # platform outputs contract validation
