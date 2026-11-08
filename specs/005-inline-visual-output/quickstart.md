@@ -19,9 +19,53 @@ The umbrella source and canonical contracts were committed at
 `5e18715f21aef156d3828b1278073ccf31821bac`; five canonical contract tests passed
 after final staging. Draft schema/hash files now explicitly retain LF through
 Git attributes. Final publication does not supersede the component quality
-findings recorded below. Accepting the schema-stub dependency in the protected
-quality policy requires an explicit decision; the unavailable-user response
-does not authorize changing that policy.
+findings recorded below.
+
+The maintainer explicitly approved the development-only
+`types-jsonschema==4.26.0.20261006` dependency. Both component requirements and
+candidate policies use that exact version. The four existing tool pins remain
+unchanged. Policy loaders accept the prior four-tool record or that record plus
+the known, exactly pinned stub package, and still reject missing tools, unknown
+names and version ranges. The orchestrator discovers the installed stub version
+in its isolated tool process. No runtime dependency or quality exemption was added.
+
+The orchestrator's two presentation modules now declare their public surfaces,
+responsibilities, consumers, blocking typing coverage and committed source
+provenance. Its immutable snapshot in-place union is typed as `NoReturn`,
+preserving the raising behavior without a new type suppression. Nonmutating
+dictionary union delegates to the inherited implementation. The UI protected
+base continues to report candidate toolchain/checker/requirements changes for
+review. These controls were not bypassed.
+
+### Approved dependency qualification
+
+The follow-up commits are published in the existing component PRs:
+
+| Repository | Published follow-up HEAD |
+| --- | --- |
+| ORCH | `a2e60129fcb4ccb3c1a41989d2aeeef601c18331` |
+| UI | `1bc2ef6be431f30e95aab3d026686bfa62b3fe30` |
+
+Both PR heads were verified against the published local commits. Their updated
+descriptions retain the existing screenshots and report the outcomes below.
+
+| Check | Result |
+| --- | --- |
+| ORCH settings, schema-stub and quality-policy regression selector | 29 passed |
+| UI schema and protected-base regression selector | 7 passed |
+| Affected ORCH/UI Ruff | Passed |
+| ORCH direct settings mypy | Passed |
+| ORCH protected typing | Passed, 37 imported diagnostics outside blocking scope on unchanged files |
+| ORCH protected policy | Passed |
+| UI protected typing | Passed |
+| UI protected policy | Three review deltas for the candidate toolchain, checker and development requirements |
+
+The ORCH protected checks use `python -I -S` and `origin/develop`. Its native
+environment now also contains the already-declared Container Apps adapters:
+`agent-framework-durabletask==1.0.0b261029`, `durabletask==1.12.0` and
+`durabletask-azuremanaged==1.12.0`. They were restored after the hosted-only
+environment reported missing imports. `pip check` is clean. No dependency
+manifest or runtime pin was changed by that environment restoration.
 
 **Status**: Local runtime/UI technical acceptance and integration evidence.
 Azure LIVE validation is removed from completion by explicit maintainer
