@@ -1,5 +1,28 @@
 # Quickstart: Validation of Native Inline Visual Output
 
+## Published review handoff
+
+| Repository | Pull request | Target |
+| --- | --- | --- |
+| ALZ | https://github.com/Azure/agent-landing-zone/pull/876 | develop |
+| ORCH | https://github.com/Azure/agent-app-orchestrator/pull/444 | develop |
+| UI | https://github.com/Azure/agent-app-ui/pull/191 | develop |
+| DOCS | https://github.com/Azure/AI-Landing-Zones/pull/178 | main |
+
+All four PR heads match the published local commits. Both existing screenshots
+are tracked in the documentation branch and referenced in all four PR bodies.
+Generated Chainlit configuration is preserved in session artifacts rather than
+included in the umbrella PR. Internal documentation drafts remain untracked.
+No issue comment, release, tag, deployment or manifest pin was published.
+
+The umbrella source and canonical contracts were committed at
+`5e18715f21aef156d3828b1278073ccf31821bac`; five canonical contract tests passed
+after final staging. Draft schema/hash files now explicitly retain LF through
+Git attributes. Final publication does not supersede the component quality
+findings recorded below. Accepting the schema-stub dependency in the protected
+quality policy requires an explicit decision; the unavailable-user response
+does not authorize changing that policy.
+
 **Status**: Local runtime/UI technical acceptance and integration evidence.
 Azure LIVE validation is removed from completion by explicit maintainer
 amendment, not postponed. No Azure operation or issue publication is authorized.
