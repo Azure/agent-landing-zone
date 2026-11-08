@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Inline visuals: version-1 schemas, integrity fixtures and optional
+  `AGENT_PRESENTATION_SETTINGS` JSON validation through the existing generic
+  configuration adapters. The feature is enabled per agent and adds no default
+  resources.
+
+### Fixed
+
+- Inline-presentation configuration reconciliation publishes an empty agent map
+  when the declaration is removed, disabling stale opt-ins through the shared
+  publisher for both infrastructure providers without deleting authentication
+  settings.
+
 ## [v7.2.1] - 2026-11-06
 
 ### Changed

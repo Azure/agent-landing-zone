@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "agents": {
+    "agent-lz-conversation": { "enabled": "true" }
+  }
+}

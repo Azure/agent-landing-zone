@@ -1,0 +1,73 @@
+{
+  "kind": "agent_lz_presentation",
+  "schemaVersion": 1,
+  "presentationId": "fixture-presentation-1",
+  "settingsRevision": "0000000000000000000000000000000000000000000000000000000000000000",
+  "markdown": "Monthly revenue in USD: January 10.125, February 12.500, March 9.750. March growth is -2.750 (down). Inspect a month or compare with the prior year.",
+  "contributions": [{
+    "contributionId": "fixture-contribution-1",
+    "agentId": "agent-lz-conversation",
+    "workflowOrdinal": 0,
+    "sourceRefs": [{
+      "sourceId": "source-revenue",
+      "toolName": "fixture_revenue",
+      "resultId": "fixture-result-1"
+    }],
+    "blocks": [
+      {
+        "blockId": "card-1",
+        "type": "cards",
+        "title": "Latest revenue",
+        "cards": [{
+          "label": "March",
+          "value": { "type": "decimal", "value": "9.750" },
+          "binding": { "sourceId": "source-revenue", "sourceRowId": "mar", "field": "revenue" },
+          "unit": "USD",
+          "trend": {
+            "value": "down",
+            "provenance": {
+              "origin": "rule",
+              "ruleId": "revenue-trend",
+              "binding": { "sourceId": "source-revenue", "sourceRowId": "mar", "field": "growth" }
+            }
+          }
+        }]
+      },
+      {
+        "blockId": "table-1",
+        "type": "table",
+        "title": "Monthly revenue",
+        "sourceId": "source-revenue",
+        "columns": [
+          { "id": "month", "label": "Month", "type": "string", "sourceField": "month" },
+          { "id": "revenue", "label": "Revenue", "type": "decimal", "sourceField": "revenue", "unit": "USD" }
+        ],
+        "rows": [
+          { "id": "row-jan", "sourceRowId": "jan", "values": { "month": "January", "revenue": "10.125" }, "entityId": "jan", "followUp": { "prompt": "Inspect revenue for month jan" } },
+          { "id": "row-feb", "sourceRowId": "feb", "values": { "month": "February", "revenue": "12.500" }, "entityId": "feb", "followUp": { "prompt": "Inspect revenue for month feb" } },
+          { "id": "row-mar", "sourceRowId": "mar", "values": { "month": "March", "revenue": "9.750" }, "entityId": "mar", "followUp": { "prompt": "Inspect revenue for month mar" } }
+        ],
+        "rowAction": { "label": "Inspect month" }
+      },
+      {
+        "blockId": "chart-1",
+        "type": "chart",
+        "chartType": "line",
+        "title": "Revenue trend",
+        "sourceId": "source-revenue",
+        "categoryField": "month",
+        "categories": [
+          { "label": "January", "sourceRowId": "jan" },
+          { "label": "February", "sourceRowId": "feb" },
+          { "label": "March", "sourceRowId": "mar" }
+        ],
+        "series": [{ "label": "Revenue", "sourceField": "revenue", "unit": "USD", "values": ["10.125", "12.500", "9.750"] }]
+      },
+      {
+        "blockId": "suggestions-1",
+        "type": "suggestions",
+        "items": [{ "prompt": "Compare these months with the same period last year." }]
+      }
+    ]
+  }]
+}

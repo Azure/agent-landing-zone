@@ -42,6 +42,42 @@ def test_explicit_name_label_and_content_type_override_generated_defaults(compos
     assert not any(item["name"] == "CHAT_BACKEND" for item in settings)
 
 
+def test_presentation_settings_both_adapters_compact_and_default_off(compose):
+    assert not any(item["name"] == "AGENT_PRESENTATION_SETTINGS" for item in compose([]))
+    settings = compose([{
+        "name": "AGENT_PRESENTATION_SETTINGS", "value": '{ "schemaVersion": 1, "agents": {} }',
+    }])
+    assert next(item for item in settings if item["name"] == "AGENT_PRESENTATION_SETTINGS") == {
+        "name": "AGENT_PRESENTATION_SETTINGS", "value": '{"schemaVersion":1,"agents":{}}',
+        "label": "agent-lz", "contentType": "text/plain",
+    }
+
+
+def test_presentation_settings_both_adapters_enable_disable_remove_are_request_owned(compose):
+    key = "AGENT_PRESENTATION_SETTINGS"
+    enabled = {"name": key, "value": '{"schemaVersion":1,"agents":{"a":{"enabled":true},"b":{"enabled":false}}}'}
+    first = compose([enabled])
+    disabled = compose([{**enabled, "value": '{"schemaVersion":1,"agents":{"a":{"enabled":false}}}'}])
+    removed = compose([])
+    assert next(s for s in first if s["name"] == key)["value"] == enabled["value"]
+    assert next(s for s in disabled if s["name"] == key)["value"].endswith('"enabled":false}}}')
+    assert not any(s["name"] == key for s in removed)
+    assert next(s for s in first if s["name"] == key)["value"] == enabled["value"]
+
+
+@pytest.mark.parametrize("override", [
+    {"value": '{"schemaVersion":2,"agents":{}}'},
+    {"label": "other"},
+    {"contentType": "application/json"},
+])
+def test_presentation_settings_both_adapters_reject_invalid_present(compose, override):
+    with pytest.raises(ValueError, match="AGENT_PRESENTATION_SETTINGS"):
+        compose([{
+            "name": "AGENT_PRESENTATION_SETTINGS",
+            "value": '{"schemaVersion":1,"agents":{}}', **override,
+        }])
+
+
 def test_additional_settings_resolve_once_and_retain_literal_native_json(compose):
     text = 'literal ${DO_NOT_EXPAND}; "quote"; \\slash\ncafé $HOME'
     settings = compose(

@@ -17,6 +17,54 @@ END = "# END infrastructure provider validation"
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
+@pytest.mark.parametrize("provider", ["bicep", "terraform"])
+@pytest.mark.parametrize("failure", [False, True])
+def test_predeploy_presentation_reconciliation_uses_shared_publisher_and_stops(
+    tmp_path, shell, provider, failure
+):
+    """Execute only the affected lifecycle block; no Azure or component deploy."""
+    extension = "ps1" if shell == "pwsh" else "sh"
+    source = (ROOT / "scripts" / f"preDeploy.{extension}").read_text(encoding="utf-8-sig")
+    block = source.split("# BEGIN native application lifecycle", 1)[1].split(
+        "# END native application lifecycle", 1
+    )[0]
+    if shell == "pwsh":
+        prefix = (
+            "$ErrorActionPreference='Stop'\n$nativeMode=$true\n$repoRoot=$PSScriptRoot\n"
+            "function Get-AzdEnv { param($projectPath) return [pscustomobject]@{} }\n"
+            "function Invoke-PythonModule { param($ModuleName, $Arguments)\n"
+            "if ($ModuleName -eq 'config.deployment.native_deploy') {\n"
+            "if ($Arguments -notcontains '--deploy') { exit 9 }; Write-Output 'PREPARE'; $global:LASTEXITCODE=0\n"
+            "} elseif ($ModuleName -eq 'config.deployment.appconfig') {\n"
+            "if ($Arguments -notcontains '--require-hosted-endpoint') { exit 9 }\n"
+            "Write-Output 'RECONCILE'; $global:LASTEXITCODE=[int]$env:PUBLISH_EXIT\n"
+            "} else { exit 9 }\n}\n"
+        )
+        suffix = "\nWrite-Output 'COMPONENTS'\n"
+        command = [shutil.which(shell), "-NoProfile", "-File", str(tmp_path / "local.ps1")]
+    else:
+        prefix = (
+            'native_mode=true\nrepo_root="$PWD"\nred() { echo "$*"; }\n'
+            'python3() {\ncase "$*" in\n'
+            '"-m config.deployment.native_deploy --deploy") echo PREPARE;;\n'
+            '"-m config.deployment.appconfig --require-hosted-endpoint") echo RECONCILE; return "$PUBLISH_EXIT";;\n'
+            '*) return 9;;\nesac\n}\n'
+        )
+        suffix = "\necho COMPONENTS\n"
+        command = [shutil.which(shell), str(tmp_path / "local.sh")]
+    assert command[0], f"{shell} is required"
+    Path(command[-1]).write_text(prefix + block + suffix, encoding="utf-8", newline="\n")
+    result = subprocess.run(
+        command, cwd=tmp_path, capture_output=True, text=True, timeout=10,
+        env={**os.environ, "INFRA_PROVIDER": provider, "PUBLISH_EXIT": "17" if failure else "0"},
+    )
+    assert "PREPARE" in result.stdout
+    assert "RECONCILE" in result.stdout
+    assert ("COMPONENTS" in result.stdout) is not failure
+    assert (result.returncode == 0) is not failure
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "bash"])
 @pytest.mark.parametrize("failure", [False, True])
 def test_postgresql_protection_runs_before_private_deferral_and_publication(tmp_path, shell, failure):
     extension = "ps1" if shell == "pwsh" else "sh"

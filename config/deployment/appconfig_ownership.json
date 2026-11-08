@@ -48,6 +48,7 @@
     "PANEL_OPERATOR_SURFACES_ENABLED": "false"
   },
   "ordinary": {
+    "AGENT_PRESENTATION_SETTINGS": "json_object",
     "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS": "positive_integer",
     "HOSTED_AGENT_RESPONSES_PROTOCOL_VERSION": "string",
     "PANEL_OVERVIEW_MIN_CARDINALITY": "positive_integer",
