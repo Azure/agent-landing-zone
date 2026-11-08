@@ -3,8 +3,10 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,3 +63,34 @@ def test_default_settings_and_measurement_free_selection():
 def test_duplicate_keys_are_not_valid_contract_input():
     with pytest.raises(ValueError, match="Duplicate"):
         json.loads('{"schemaVersion":1,"schemaVersion":2}', object_pairs_hook=unique_pairs)
+
+
+def test_ci_qualifies_the_matched_reader_on_both_platforms():
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/infra-validate.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    for event in ("pull_request", "push"):
+        assert "contracts/**" in workflow["on"][event]["paths"]
+    job = workflow["jobs"]["deployment-contracts"]
+    assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "windows-latest"]
+    reader, = (
+        step for step in job["steps"]
+        if step.get("with", {}).get("repository") == "Azure/agent-app-ui"
+    )
+    checkout = reader["with"]
+    assert re.fullmatch(r"[0-9a-f]{40}", checkout["ref"])
+    assert checkout["ref"] in (
+        ROOT / "specs/005-inline-visual-output/quickstart.md"
+    ).read_text(encoding="utf-8")
+    assert checkout["sparse-checkout"] == "src"
+    assert checkout["persist-credentials"] == "false"
+    test, = (
+        step for step in job["steps"]
+        if step.get("name") == "Test deployment contracts"
+    )
+    assert job["steps"].index(reader) < job["steps"].index(test)
+    assert test["env"]["PYTHONPATH"] == (
+        "${{ github.workspace }}/" + checkout["path"] + "/src"
+    )
+    assert test["run"] == "python -m pytest tests --quiet"

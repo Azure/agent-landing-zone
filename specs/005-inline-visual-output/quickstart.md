@@ -67,6 +67,26 @@ environment now also contains the already-declared Container Apps adapters:
 environment reported missing imports. `pip check` is clean. No dependency
 manifest or runtime pin was changed by that environment restoration.
 
+### Platform CI reader qualification
+
+The deployment/hook matrix checks out the actual UI reader source at the
+published candidate commit `1bc2ef6be431f30e95aab3d026686bfa62b3fe30`.
+Only the test process receives that checkout's `src` through `PYTHONPATH`;
+the existing declared `jsonschema` dependency is sufficient for the reader.
+The full `python -m pytest tests --quiet` command remains unchanged on both
+Ubuntu and Windows. Contract changes now also trigger the workflow.
+
+The naming map records four additional complete source lines for the UI's
+inherited Python package and packaged schema path. There is no file-wide
+exception or package rename. Regression tests reject the same lines in another
+file, additional legacy tokens and unrelated legacy labels.
+
+The focused naming, customer adapter, canonical contract and workflow selector
+passes: 19 tests and 18 subtests. The adapter uses the actual shared UI reader,
+not a copied parser or mocked projection. Bicep/Terraform source, inputs,
+ownership, outputs, RBAC, hooks, lock files and manifest pins are unchanged;
+this change supplies a test dependency to the shared provider-neutral CI job.
+
 **Status**: Local runtime/UI technical acceptance and integration evidence.
 Azure LIVE validation is removed from completion by explicit maintainer
 amendment, not postponed. No Azure operation or issue publication is authorized.

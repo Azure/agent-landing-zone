@@ -126,13 +126,18 @@ infra/**
 
 ### Exact-line inherited package compatibility
 
-The native source gate and cross-component test must address the UI's actual
-inherited Python package. This is not a new product identifier or permission to
-introduce legacy names elsewhere. The scanner accepts only the complete source
-line below in its exact repository-relative file (ignoring indentation); adding
+The native source gate, customer adapter and cross-component tests must address
+the UI's actual inherited Python package, including its packaged schema assets.
+This is not a new product identifier or permission to introduce legacy names
+elsewhere. The scanner accepts only the complete source lines below in their
+exact repository-relative files (ignoring indentation); adding
 another token or moving the line to another file still fails.
 
 ```naming-allow-exact-lines
 config/deployment/native_deploy.py | entrypoint = path / "src/gpt_rag_ui/config/native.py"
 tests/test_native_component_binding.py | ui = importlib.import_module("gpt_rag_ui.clients.native_durable")
+contracts/examples/inline-presentation/text_only_adapter.py | from gpt_rag_ui.services.native_presentation import text_projection
+tests/test_presentation_packaging.py | for variable, package in (("INLINE_ORCH_WHEEL", "native"), ("INLINE_UI_WHEEL", "gpt_rag_ui")):
+tests/test_presentation_packaging.py | import gpt_rag_ui.services.native_presentation as implementation
+tests/test_presentation_packaging.py | assert pathlib.Path(implementation.SCHEMA) == package_root / 'gpt_rag_ui/contracts/turn-presentation-v1.schema.json'
 ```
