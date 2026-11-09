@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v7.3.0] - 2026-11-09
 
 ### Added
 
@@ -15,6 +15,39 @@
   when the declaration is removed, disabling stale opt-ins through the shared
   publisher for both infrastructure providers without deleting authentication
   settings.
+
+### Changed
+
+- Adopt orchestrator v7.2.0 and UI v3.7.0 together for optional native inline
+  cards, tables, charts and source-backed follow-ups, including workflow and
+  restored-history readers. Bind the manifest, bundled application definition,
+  component-pin review and CI reader to the published source commits.
+- Preserve default-off behavior. Enable generation explicitly per agent and
+  disable new generation for rollback while retaining saved-message readers.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature qualification passed both operating-system deployment/hook and
+  Terraform jobs plus compiled Bicep contracts in CI run `42539144150`.
+  Ordinary orchestrator and UI release quality gates passed in runs
+  `42540800968` and `42553476131`.
+- Actual isolated orchestrator-to-UI presentation integration passed 17 tests.
+  The platform's actual consumer binding gate passed 7 tests with published
+  Durable SDKs and verified component source origins, without cloud I/O.
+- Bicep and Terraform foundation source, infrastructure provenance, provider
+  lock and module pins remain unchanged. Both providers use the same generic
+  opt-in publication and removal reconciliation.
+- No new Azure resources, live Azure deployment or deployed provider-parity
+  validation is claimed. Live production browser acceptance and production
+  enablement remain outside this release qualification.
 
 ## [v7.2.1] - 2026-11-06
 
