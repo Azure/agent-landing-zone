@@ -33,6 +33,11 @@ def actual_components(monkeypatch):
     for root in (runtime_root, ui_root):
         assert (root / "src").is_dir(), "Component source directory is missing"
         monkeypatch.syspath_prepend(str(root / "src"))
+    # Platform collection already imports util; the runtime owns distinct submodules.
+    utilities = importlib.import_module("util")
+    monkeypatch.setattr(utilities, "__path__", [
+        str(runtime_root / "src" / "util"), *utilities.__path__,
+    ])
     for name, expected in (
         ("agent-framework-durabletask", "1.0.0b261029"),
         ("durabletask-azuremanaged", "1.12.0"),
@@ -44,6 +49,8 @@ def actual_components(monkeypatch):
     runtime = importlib.import_module("native.durable")
     contracts = importlib.import_module("native.contracts")
     ui = importlib.import_module("gpt_rag_ui.clients.native_durable")
+    foundry_platform = importlib.import_module("util.foundry_platform")
+    assert Path(foundry_platform.__file__).resolve() == runtime_root / "src/util/foundry_platform.py"
     assert Path(runtime.__file__).resolve() == runtime_root / "src/native/durable.py"
     assert Path(contracts.__file__).resolve() == runtime_root / "src/native/contracts.py"
     ui_file = ui_root / "src" / Path(*ui.__name__.split(".")).with_suffix(".py")

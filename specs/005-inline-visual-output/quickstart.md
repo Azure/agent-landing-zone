@@ -1,6 +1,37 @@
 # Quickstart: Validation of Native Inline Visual Output
 
-## Current qualification follow-up
+## Coordinated v7.3.0 release qualification
+
+The release manifest, bundled application definition, reviewed component pins
+and umbrella CI reader now bind the published component commits below. Earlier
+source and report tables remain historical feature receipts, not release pins.
+
+| Component | Published version | Qualified source |
+| --- | --- | --- |
+| ORCH | v7.2.0 | `72909db145ca41b954e18261d89e50318bed592a` |
+| UI | v3.7.0 | `b5e2462adb047c4e91110a87580d2c97a0d94b84` |
+
+Ordinary release workflows
+[42540800968](https://github.com/Azure/agent-app-orchestrator/actions/runs/42540800968)
+and [42553476131](https://github.com/Azure/agent-app-ui/actions/runs/42553476131)
+passed. Both published component trees match their qualified release heads.
+The platform's loaded-definition/release and actual native-consumer binding
+gates passed 24 tests and 6 subtests with the bound manifest. Actual isolated
+orchestrator-to-UI presentation integration passed 17 tests.
+
+The native-consumer gate uses the orchestrator's declared Container Apps
+dependencies with published `agent-framework-durabletask==1.0.0b261029` and
+`durabletask-azuremanaged==1.12.0`. Source-origin checks cover runtime, contracts,
+the UI client and the orchestrator's Foundry helper. The platform and runtime
+own distinct `util` submodules, so the fixture retains both source search paths.
+UI and orchestrator dependency environments remain separate.
+
+Release PR #877 still requires all existing Bicep, Terraform and both
+operating-system deployment/hook checks before publication. The feature remains
+off by default. No new Azure deployment, live production browser acceptance or
+production enablement is claimed.
+
+## Historical feature qualification follow-up
 
 This section supersedes earlier pending dependency, typing-policy and CI findings.
 Earlier source/report tables remain historical receipts, not fingerprints of the
