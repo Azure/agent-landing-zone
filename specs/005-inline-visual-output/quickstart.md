@@ -1,5 +1,89 @@
 # Quickstart: Validation of Native Inline Visual Output
 
+## Current qualification follow-up
+
+This section supersedes earlier pending dependency, typing-policy and CI findings.
+Earlier source/report tables remain historical receipts, not fingerprints of the
+latest test changes.
+
+| Repository | Qualified source |
+| --- | --- |
+| ALZ | `93a1c1799ee4602fa0fa442980f2fbe5a026934b`; this follow-up changes acceptance receipts only |
+| ORCH | `a2e60129fcb4ccb3c1a41989d2aeeef601c18331` |
+| UI | `6669b5ad77e91a9750b1d919840ec36ef6452d31` |
+| DOCS | `1bc229ae58d82c857eb8eb574e83365f81a6834d` |
+
+### Separate dependency and installed-package qualification
+
+The actual orchestrator middleware runs in a separate interpreter from Chainlit
+2.12.0. The JSON application boundary is exercised without combining incompatible
+SDK dependencies. Both declared dependency environments pass `pip check`.
+
+| Qualification | Result |
+| --- | --- |
+| Actual middleware-to-UI integration, `test_native_presentation.py` | 17 passed in 130.437s |
+| Fresh non-editable UI acceptance, `test_installed_package.py` | 11 passed in 993.134s, including the copied behavioral suite and installed-origin checks |
+| Unchanged protected evidence runner, `--pattern test_native_presentation_history.py` | 24 passed in 2.802s; valid metadata for all H01-H20 cases |
+| Unchanged protected evidence runner, `--pattern test_inline_presentation_browser.py` | 1 passed in 31.005s; standalone/embedded and light/dark, without screenshots |
+
+The Windows installed-package run used a local-only constraint snapshot from the
+clean, already-qualified UI environment. Runtime/browser requirements were
+installed together and dependency compatibility remained mandatory. No committed
+dependency constraint or production dependency change was introduced.
+
+Twenty generated history-test closures were replaced with independently declared
+test methods using the same H01-H20 inputs and assertions. The browser test now
+waits for the follow-up button to become enabled after the preceding send finishes,
+then verifies both exact prompts. Visibility alone did not establish keyboard
+readiness. Neither fix changes runtime behavior or weakens the protected runner.
+
+| Focused source-sealed report | SHA-256 |
+| --- | --- |
+| `ui-history-static-evidence.json` | `d389ba0d1c5db0fb626b938afade5ac159b01a8852abd7d7f6bc8bddfa516a05` |
+| `ui-browser-enabled-evidence.json` | `70a26f66cfbe2249eacf3d242f7c11945c74102e47120e314938ea6dcf475993` |
+
+These focused reports are session artifacts. They are regression receipts, not a
+replacement for the complete exact-head GitHub Actions workflow.
+
+### Protected CI transition and final workflow
+
+The scoped CI-only change in
+[Azure/agent-app-ui#193](https://github.com/Azure/agent-app-ui/pull/193) was merged
+at `398638a259f39f7343b992f8bf5187f97526f8b7`. Its only policy finding was the
+protected workflow difference. Unit/container tests and lint, typing,
+architecture and exceptions passed before the explicitly authorized transition.
+The original active ruleset was restored immediately, with no bypass actors and
+the same strict `unit-tests`, `container-tests` and `quality-gate` requirements.
+
+The UI feature incorporates that approved base. Its quality workflow now matches
+`develop`; no evaluator, required job or protected check was relaxed.
+
+Final UI workflow:
+[42538167847](https://github.com/Azure/agent-app-ui/actions/runs/42538167847),
+at the UI source above. All eight jobs passed: `unit-tests`, `container-tests`,
+`lint`, `typing`, `architecture`, `exceptions`, `policy` and `quality-gate`.
+The complete unittest receipt records 783 passed cases, no non-passing cases,
+no metadata errors and unchanged source. The offline installed container suite
+records 710 passed cases in 31.628s.
+
+GitHub evaluated synthetic merge commit
+`c0b16244c13ab30e24e73e1e080a4634a38b4981` against protected base
+`398638a259f39f7343b992f8bf5187f97526f8b7`. Its Git tree and the published UI
+candidate's tree are identical:
+`9cf5ffffdf8657d0b603bd13d41f7c54ebfe268f`.
+The complete same-run unittest report has source digest
+`880f9f65c646aab20bd2eac59db81f86d23cd7325024497b220a2a3114efc402`
+and file SHA-256
+`5852b16e272798d1bf0492cc4c3581757e58f585429445d7f517c2b3eb2dbf08`.
+The reader pinned by the umbrella CI remains byte-identical to the current
+`src/gpt_rag_ui/services/native_presentation.py`.
+
+The umbrella's Bicep, both Terraform contract jobs and both deployment/hook
+contract jobs passed at the source above. All orchestrator quality/behavior checks
+and the documentation build/CLA checks passed at their listed heads. The four
+feature PRs remain review handoffs. No feature merge, release, tag, deployment or
+manifest pin change is part of this CI-only integration.
+
 ## Published review handoff
 
 | Repository | Pull request | Target |

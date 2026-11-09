@@ -6,10 +6,11 @@ description: "Story-organized implementation tasks for native inline visual outp
 
 **Input**: Design artifacts in `specs\005-inline-visual-output\`.
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts](contracts/README.md), [quickstart.md](quickstart.md).
-**Status**: Working local native-middleware-to-UI increment. Full local
-quality/acceptance remains incomplete. Maintainer-approved scope amendment
+**Status**: Local implementation and acceptance are complete. All protected
+UI CI checks pass. Current dependency/test/CI receipts are in
+quickstart's current qualification follow-up. Maintainer-approved scope amendment
 (2026-11-08) removes Azure LIVE validation from completion, not defers it.
-**Implementation gate**: T001 local approval remains. T054-T056 are retired,
+**Implementation gate**: T001 local approval is recorded. T054-T056 are retired,
 not executed. T057-T058 retain controlled SDK/history/Playwright counts and
 automated usability/provider checks and measured performance. Azure persistence,
 authorization enforcement and deployed parity remain unverified residual risks.
