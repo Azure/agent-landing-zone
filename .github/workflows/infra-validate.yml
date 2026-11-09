@@ -98,8 +98,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Azure/agent-app-ui
-          # CI-only candidate qualification, not a deployment or manifest pin.
-          ref: 1bc2ef6be431f30e95aab3d026686bfa62b3fe30
+          # Published reader matched to manifest.json and app-definition.json.
+          ref: b5e2462adb047c4e91110a87580d2c97a0d94b84
           path: .ci/inline-visual-ui
           sparse-checkout: src
           persist-credentials: false
