@@ -1,0 +1,22 @@
+{
+  "kind": "agent_lz_presentation",
+  "schemaVersion": 1,
+  "presentationId": "fixture-invalid",
+  "settingsRevision": "0000000000000000000000000000000000000000000000000000000000000000",
+  "markdown": "Use the text fallback.",
+  "contributions": [{
+    "contributionId": "fixture-contribution",
+    "agentId": "agent-lz-conversation",
+    "workflowOrdinal": 0,
+    "sourceRefs": [],
+    "blocks": [{
+      "blockId": "card-invalid",
+      "type": "cards",
+      "cards": [{
+        "label": "March",
+        "value": { "type": "decimal", "value": 9.75 },
+        "binding": { "sourceId": "missing-source", "sourceRowId": "mar", "field": "revenue" }
+      }]
+    }]
+  }]
+}

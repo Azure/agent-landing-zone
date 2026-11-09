@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Azure/agent-landing-zone/contracts/presentation-selection-v1.schema.json",
+  "title": "Untrusted presentation selection v1 (design)",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "blocks"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "blocks": {
+      "type": "array", "maxItems": 10,
+      "items": { "oneOf": [
+        { "$ref": "#/$defs/Cards" }, { "$ref": "#/$defs/Table" },
+        { "$ref": "#/$defs/Chart" }, { "$ref": "#/$defs/Suggestions" }
+      ] }
+    }
+  },
+  "$defs": {
+    "Id": { "type": "string", "minLength": 1 },
+    "Base": {
+      "type": "object", "required": ["type"],
+      "properties": {
+        "type": { "enum": ["cards", "table", "chart", "suggestions"] },
+        "title": { "type": "string" },
+        "citationRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/Id" } }
+      }
+    },
+    "IndicatorSelection": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["sourceField"], "properties": { "sourceField": { "$ref": "#/$defs/Id" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["ruleId"], "properties": { "ruleId": { "$ref": "#/$defs/Id" } }
+        }
+      ]
+    },
+    "Card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "sourceRowId", "field", "label"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "sourceRowId": { "$ref": "#/$defs/Id" },
+        "field": { "$ref": "#/$defs/Id" },
+        "label": { "type": "string" },
+        "status": { "$ref": "#/$defs/IndicatorSelection" },
+        "trend": { "$ref": "#/$defs/IndicatorSelection" }
+      }
+    },
+    "Cards": {
+      "allOf": [{ "$ref": "#/$defs/Base" }], "unevaluatedProperties": false,
+      "required": ["cards"],
+      "properties": {
+        "type": { "const": "cards" },
+        "cards": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Card" } }
+      }
+    },
+    "Table": {
+      "allOf": [{ "$ref": "#/$defs/Base" }], "unevaluatedProperties": false,
+      "required": ["sourceId", "columns"],
+      "properties": {
+        "type": { "const": "table" },
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "columns": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["field", "label"],
+            "properties": { "field": { "$ref": "#/$defs/Id" }, "label": { "type": "string" } }
+          }
+        },
+        "status": { "$ref": "#/$defs/IndicatorSelection" },
+        "rowAction": {
+          "type": "object", "additionalProperties": false,
+          "required": ["label", "identifierField", "promptPrefix"],
+          "properties": {
+            "label": { "type": "string" },
+            "identifierField": { "$ref": "#/$defs/Id" },
+            "promptPrefix": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "Chart": {
+      "allOf": [{ "$ref": "#/$defs/Base" }], "unevaluatedProperties": false,
+      "required": ["chartType", "sourceId", "categoryField", "series"],
+      "properties": {
+        "type": { "const": "chart" },
+        "chartType": { "enum": ["bar", "grouped_bar", "line"] },
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "categoryField": { "$ref": "#/$defs/Id" },
+        "series": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["field", "label"],
+            "properties": { "field": { "$ref": "#/$defs/Id" }, "label": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Suggestions": {
+      "allOf": [{ "$ref": "#/$defs/Base" }], "unevaluatedProperties": false,
+      "required": ["prompts"],
+      "properties": {
+        "type": { "const": "suggestions" },
+        "prompts": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

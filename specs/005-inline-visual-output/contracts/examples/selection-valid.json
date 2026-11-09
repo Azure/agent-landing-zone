@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "blocks": [
+    {
+      "type": "cards",
+      "title": "Latest revenue",
+      "cards": [{
+        "sourceId": "source-revenue",
+        "sourceRowId": "mar",
+        "field": "revenue",
+        "label": "March",
+        "trend": { "ruleId": "revenue-trend" }
+      }]
+    },
+    {
+      "type": "table",
+      "title": "Monthly revenue",
+      "sourceId": "source-revenue",
+      "columns": [
+        { "field": "month", "label": "Month" },
+        { "field": "revenue", "label": "Revenue" }
+      ],
+      "rowAction": {
+        "label": "Inspect month",
+        "identifierField": "month_id",
+        "promptPrefix": "Inspect revenue for month "
+      }
+    },
+    {
+      "type": "chart",
+      "title": "Revenue trend",
+      "chartType": "line",
+      "sourceId": "source-revenue",
+      "categoryField": "month",
+      "series": [{ "field": "revenue", "label": "Revenue" }]
+    },
+    {
+      "type": "suggestions",
+      "prompts": ["Compare these months with the same period last year."]
+    }
+  ]
+}

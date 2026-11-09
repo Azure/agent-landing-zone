@@ -24,7 +24,7 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "8a45595aa321d8841e7a4555d542b890beebf1b0" },
+      "source": { "commit": "b5e2462adb047c4e91110a87580d2c97a0d94b84" },
       "profiles": ["blob-delegator", "retrieval-reader"],
       "egress": [],
       "ingress": "external"
@@ -33,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "666d39862590cfb165097ee55737a1ef66fd2afc" },
+      "source": { "commit": "72909db145ca41b954e18261d89e50318bed592a" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {

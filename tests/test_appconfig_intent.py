@@ -55,6 +55,42 @@ def by_name(entries):
     return {entry["name"]: entry for entry in entries}
 
 
+def test_presentation_settings_publish_compact_ordinary_json(tmp_path):
+    loaded = resolved(tmp_path, [{
+        "name": "AGENT_PRESENTATION_SETTINGS",
+        "value": '{ "schemaVersion": 1, "agents": {} }',
+    }])
+    record = by_name(intent.prepare_publication(loaded, AUTHORITY))["AGENT_PRESENTATION_SETTINGS"]
+    assert record == {
+        "name": "AGENT_PRESENTATION_SETTINGS",
+        "value": '{"schemaVersion":1,"agents":{}}',
+        "label": "agent-lz", "contentType": "text/plain",
+    }
+
+
+@pytest.mark.parametrize("value", [
+    '{"schemaVersion":1,"schemaVersion":1,"agents":{}}',
+    '{"schemaVersion":2,"agents":{}}',
+    '{"schemaVersion":1,"agents":{"a":{"enabled":"true"}}}',
+    '{"schemaVersion":1,"agents":{},"timeout":30}',
+    '{"schemaVersion":1,"agents":{},"extra":NaN}',
+])
+def test_invalid_present_presentation_settings_error(tmp_path, value):
+    with pytest.raises(ValueError, match="AGENT_PRESENTATION_SETTINGS"):
+        loaded = resolved(tmp_path, [{"name": "AGENT_PRESENTATION_SETTINGS", "value": value}])
+        intent.prepare_publication(loaded, AUTHORITY)
+
+
+def test_presentation_settings_reject_wrong_metadata(tmp_path):
+    with pytest.raises(ValueError, match="AGENT_PRESENTATION_SETTINGS"):
+        loaded = resolved(tmp_path, [{
+            "name": "AGENT_PRESENTATION_SETTINGS",
+            "value": '{"schemaVersion":1,"agents":{}}',
+            "contentType": "application/json",
+        }])
+        intent.prepare_publication(loaded, AUTHORITY)
+
+
 def test_ordinary_override_is_consumed_from_declared_source_on_fresh_runner(tmp_path):
     loaded = resolved(tmp_path, [{"name": "HOSTED_AGENT_SSE_IDLE_TIMEOUT_SECONDS", "value": "50"}])
     published = by_name(intent.prepare_publication(loaded, AUTHORITY))
@@ -186,6 +222,41 @@ def main_context(monkeypatch, path):
     monkeypatch.setattr(appconfig, "selected_environment", lambda root, name: dict(ENVIRONMENT))
     monkeypatch.setattr(appconfig, "build_settings", lambda environment, **kwargs: dict(AUTHORITY))
     return ["--input", str(path)]
+
+
+@pytest.mark.parametrize("disabled", [None, {}, {"a": {"enabled": False}}])
+def test_cli_reconciles_removed_or_disabled_presentation_without_touching_auth(
+    tmp_path, monkeypatch, disabled
+):
+    key = "AGENT_PRESENTATION_SETTINGS"
+    stored = {(key, "agent-lz"): '{"schemaVersion":1,"agents":{"a":{"enabled":true}}}',
+              (key, "other"): "unrelated",
+              ("ORCHESTRATOR_ALLOWED_CALLER_IDS", "agent-lz"): "existing-caller"}
+    entries = [] if disabled is None else [{
+        "name": key, "value": json.dumps({"schemaVersion": 1, "agents": disabled}),
+    }]
+    def write(arguments, **kwargs):
+        assert arguments[:3] == ["appconfig", "kv", "set"]
+        name = arguments[arguments.index("--key") + 1]
+        label = arguments[arguments.index("--label") + 1]
+        if name == key:
+            assert arguments[arguments.index("--content-type") + 1] == "text/plain"
+        stored[name, label] = arguments[arguments.index("--value") + 1]
+    monkeypatch.setattr(appconfig, "_run_az", write)
+    initial = main_context(monkeypatch, declaration(tmp_path, [{
+        "name": key, "value": '{"schemaVersion":1,"agents":{"a":{"enabled":true}}}',
+    }]))
+    assert appconfig.main(initial) == 0
+    assert json.loads(stored[key, "agent-lz"])["agents"]["a"]["enabled"] is True
+    args = main_context(monkeypatch, declaration(tmp_path, entries))
+    assert appconfig.main(args) == 0
+    expected = {"schemaVersion": 1, "agents": disabled or {}}
+    assert json.loads(stored[key, "agent-lz"]) == expected
+    first = dict(stored)
+    assert appconfig.main(args) == 0
+    assert stored == first
+    assert stored[key, "other"] == "unrelated"
+    assert stored["ORCHESTRATOR_ALLOWED_CALLER_IDS", "agent-lz"] == "existing-caller"
 
 
 def test_cli_validates_everything_before_any_publication(tmp_path, monkeypatch):
