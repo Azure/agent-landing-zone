@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Azure/agent-landing-zone/contracts/agent-presentation-settings-v1.schema.json",
+  "title": "Agent presentation settings v1 (design)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "agents"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "agents": {
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/AgentSettings" }
+    }
+  },
+  "$defs": {
+    "AgentSettings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "guidance": { "type": "string" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/Rule" } }
+      }
+    },
+    "Rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "toolName", "field", "kind", "missing", "cases"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "toolName": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["status", "trend"] },
+        "missing": { "const": "omit" },
+        "cases": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["tests", "value"],
+            "properties": {
+              "tests": {
+                "type": "array", "minItems": 1, "maxItems": 2,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["operator", "threshold"],
+                  "properties": {
+                    "operator": { "enum": ["lt", "lte", "eq", "gte", "gt"] },
+                    "threshold": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" }
+                  }
+                }
+              },
+              "value": { "enum": ["ok", "warning", "critical", "up", "down", "flat"] }
+            }
+          }
+        }
+      },
+      "allOf": [{
+        "if": { "properties": { "kind": { "const": "status" } } },
+        "then": { "properties": { "cases": { "items": { "properties": { "value": { "enum": ["ok", "warning", "critical"] } } } } } },
+        "else": { "properties": { "cases": { "items": { "properties": { "value": { "enum": ["up", "down", "flat"] } } } } } }
+      }]
+    }
+  }
+}

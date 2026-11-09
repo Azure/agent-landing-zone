@@ -17,6 +17,7 @@ from typing import Mapping, TypedDict
 from config.deployment.input_types import INPUT_TYPES
 from config.deployment.resolution import resolve_parameters
 from config.deployment.resource_groups import resolve_resource_groups
+from config.deployment.presentation_settings import KEY as PRESENTATION_KEY, validate_settings
 from config.deployment.terraform_inputs import _native_value, _substitute
 
 OWNERSHIP_PATH = Path(__file__).with_name("appconfig_ownership.json")
@@ -47,6 +48,12 @@ def normalize_settings(value: object, label: str = "agent-lz") -> list[Setting]:
         name, data = item.get("name"), item.get("value")
         entry_label = item.get("label") if item.get("label") is not None else label
         content_type = item.get("contentType") if item.get("contentType") is not None else "text/plain"
+        if name == PRESENTATION_KEY:
+            if entry_label != "agent-lz" or content_type != "text/plain":
+                raise ValueError(f"{PRESENTATION_KEY}: requires agent-lz label and text/plain contentType.")
+            if not isinstance(data, str):
+                raise ValueError(f"{PRESENTATION_KEY}: requires a serialized JSON object.")
+            data = validate_settings(data)
         if (
             not isinstance(name, str) or not name or not isinstance(data, str)
             or not isinstance(entry_label, str) or not isinstance(content_type, str)
@@ -206,6 +213,8 @@ def prepare_publication(intent: RuntimeIntent, authority: Mapping[str, str]) -> 
                 raise ValueError(f"{name}: runtime intent requires true or false.")
             if kind == "positive_integer" and (not re.fullmatch(r"[0-9]+", value) or int(value) < 1):
                 raise ValueError(f"{name}: runtime intent requires a positive integer.")
+            if kind == "json_object":
+                setting = Setting(**{**setting, "value": validate_settings(value)})
             result[name] = setting
         elif name in policy["evidence"]:
             result[name] = Setting(name=name, value=policy["evidence"][name], label=policy["label"], contentType="text/plain")
@@ -213,4 +222,11 @@ def prepare_publication(intent: RuntimeIntent, authority: Mapping[str, str]) -> 
         # Their existing owner's authority above controls what is actually written.
     if set(authority).intersection(policy["retired"]):
         raise ValueError("Obsolete runtime authority cannot be published by the native lifecycle.")
+    # Omission must disable previously published opt-ins as well as fresh
+    # deployments. Converge through the existing writer, without listing or
+    # deleting unrelated owner-edited settings or authentication values.
+    result.setdefault(PRESENTATION_KEY, Setting(
+        name=PRESENTATION_KEY, value='{"schemaVersion":1,"agents":{}}',
+        label=policy["label"], contentType="text/plain",
+    ))
     return list(result.values())

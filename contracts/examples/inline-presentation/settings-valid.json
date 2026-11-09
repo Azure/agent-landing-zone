@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "agents": {
+    "agent-lz-conversation": {
+      "enabled": true,
+      "guidance": "Prefer a table and a line chart for monthly revenue. Preserve source units.",
+      "rules": [{
+        "id": "revenue-trend",
+        "toolName": "fixture_revenue",
+        "field": "growth",
+        "kind": "trend",
+        "missing": "omit",
+        "cases": [
+          { "tests": [{ "operator": "lt", "threshold": "0" }], "value": "down" },
+          { "tests": [{ "operator": "eq", "threshold": "0" }], "value": "flat" },
+          { "tests": [{ "operator": "gt", "threshold": "0" }], "value": "up" }
+        ]
+      }]
+    },
+    "fixture-secondary-agent": { "enabled": false }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "description": "Synthetic authorized result registry for future adapter and acceptance tests. This is not a public source API.",
+  "sources": [
+    {
+      "domain": "sales",
+      "sourceId": "source-revenue",
+      "toolName": "fixture_revenue",
+      "resultId": "fixture-result-1",
+      "fields": [
+        { "id": "month", "type": "string" },
+        { "id": "month_id", "type": "string" },
+        { "id": "revenue", "type": "decimal", "unit": "USD" },
+        { "id": "growth", "type": "decimal", "unit": "USD" }
+      ],
+      "rows": [
+        { "sourceRowId": "jan", "data": { "month": "January", "month_id": "jan", "revenue": "10.125", "growth": null } },
+        { "sourceRowId": "feb", "data": { "month": "February", "month_id": "feb", "revenue": "12.500", "growth": "2.375" } },
+        { "sourceRowId": "mar", "data": { "month": "March", "month_id": "mar", "revenue": "9.750", "growth": "-2.750" } }
+      ]
+    },
+    {
+      "domain": "operations",
+      "sourceId": "source-operations",
+      "toolName": "fixture_operations",
+      "resultId": "fixture-result-2",
+      "fields": [
+        { "id": "region", "type": "string" },
+        { "id": "latency", "type": "decimal", "unit": "ms" },
+        { "id": "status", "type": "string" }
+      ],
+      "rows": [
+        { "sourceRowId": "west", "data": { "region": "West", "latency": "42.500", "status": "ok" } },
+        { "sourceRowId": "east", "data": { "region": "East", "latency": "120.000", "status": "critical" } }
+      ]
+    },
+    {
+      "domain": "finance",
+      "sourceId": "source-invoices",
+      "toolName": "fixture_invoices",
+      "resultId": "fixture-result-3",
+      "fields": [
+        { "id": "invoice_id", "type": "string" },
+        { "id": "amount", "type": "decimal", "unit": "USD" },
+        { "id": "overdue_days", "type": "integer" }
+      ],
+      "rows": [
+        { "sourceRowId": "invoice-a", "data": { "invoice_id": "INV-A", "amount": "9007199254740993.001", "overdue_days": "45" } },
+        { "sourceRowId": "invoice-b", "data": { "invoice_id": "INV-B", "amount": null, "overdue_days": "0" } }
+      ]
+    }
+  ]
+}

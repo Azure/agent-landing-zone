@@ -136,6 +136,27 @@ class NamingPatternTests(unittest.TestCase):
         self.assertTrue(find_hits(path, line + " # alz fallback", allowed))
         self.assertTrue(find_hits(path, "label = 'gpt-rag'", allowed))
 
+    def test_presentation_package_exceptions_are_exact_file_and_complete_line_only(self) -> None:
+        allowed = load_allowed_lines()
+        expected = {
+            "contracts/examples/inline-presentation/text_only_adapter.py": {
+                "from gpt_rag_ui.services.native_presentation import text_projection",
+            },
+            "tests/test_presentation_packaging.py": {
+                'for variable, package in (("INLINE_ORCH_WHEEL", "native"), ("INLINE_UI_WHEEL", "gpt_rag_ui")):',
+                "import gpt_rag_ui.services.native_presentation as implementation",
+                "assert pathlib.Path(implementation.SCHEMA) == package_root / 'gpt_rag_ui/contracts/turn-presentation-v1.schema.json'",
+            },
+        }
+        for path, lines in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(lines, allowed[path])
+                for line in lines:
+                    self.assertEqual([], find_hits(path, "    " + line, allowed))
+                    self.assertTrue(find_hits("tests/another_adapter.py", line, allowed))
+                    self.assertTrue(find_hits(path, line + " # alz fallback", allowed))
+                self.assertTrue(find_hits(path, "label = 'gpt-rag'", allowed))
+
 
 class NamingInventoryTests(unittest.TestCase):
     def test_allow_list_blocks_are_present(self) -> None:

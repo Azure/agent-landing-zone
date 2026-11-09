@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Mapping, Sequence
 
+from config.deployment.presentation_settings import KEY as PRESENTATION_KEY, validate_settings
+
 _PLACEHOLDER = re.compile(r"^\$\{([A-Z_][A-Z0-9_]*)(?:=(.*))?\}$", re.DOTALL)
 _RESERVED_KEYS = frozenset({"COSMOS_DB_ACCOUNT_RESOURCE_ID", "COSMOS_DB_ENDPOINT"})
 OWNERSHIP_PATH = Path(__file__).with_name("appconfig_ownership.json")
@@ -98,6 +100,10 @@ def merge_app_configuration_settings(
             **item, "label": key[1],
             "contentType": item["contentType"] if item.get("contentType") is not None else "text/plain",
         }
+        if item["name"] == PRESENTATION_KEY:
+            if key[1] != policy["label"] or normalized["contentType"] != "text/plain":
+                raise ValueError(f"{PRESENTATION_KEY}: requires agent-lz label and text/plain contentType.")
+            normalized["value"] = validate_settings(item["value"])
         if key[1] == policy["label"] and (
             item["name"] in protected or any(
                 re.fullmatch(pattern, item["name"]) for pattern in policy["patterns"]

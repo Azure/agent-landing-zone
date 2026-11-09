@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Azure/agent-landing-zone/contracts/turn-presentation-v1.schema.json",
+  "title": "Agent Landing Zone turn presentation v1 (design)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schemaVersion", "presentationId", "settingsRevision", "markdown", "contributions"],
+  "properties": {
+    "kind": { "const": "agent_lz_presentation" },
+    "schemaVersion": { "const": 1 },
+    "presentationId": { "$ref": "#/$defs/Id" },
+    "settingsRevision": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "markdown": { "type": "string", "minLength": 1 },
+    "contributions": {
+      "type": "array", "minItems": 1, "maxItems": 10,
+      "items": { "$ref": "#/$defs/Contribution" }
+    }
+  },
+  "$defs": {
+    "Id": { "type": "string", "minLength": 1 },
+    "Text": { "type": "string", "pattern": "^[^\\u0000]*$" },
+    "Decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "Scalar": { "type": ["string", "boolean", "null"] },
+    "ValueType": { "enum": ["string", "decimal", "integer", "boolean", "date", "datetime"] },
+    "TypedValue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "$ref": "#/$defs/ValueType" },
+        "value": { "$ref": "#/$defs/Scalar" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "decimal" } } },
+          "then": { "properties": { "value": { "anyOf": [{ "$ref": "#/$defs/Decimal" }, { "type": "null" }] } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } } },
+          "then": { "properties": { "value": { "type": ["string", "null"], "pattern": "^-?(0|[1-9][0-9]*)$" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "boolean" } } },
+          "then": { "properties": { "value": { "type": ["boolean", "null"] } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "string" } } },
+          "then": { "properties": { "value": { "type": ["string", "null"] } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "date" } } },
+          "then": { "properties": { "value": { "type": ["string", "null"], "format": "date" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "datetime" } } },
+          "then": { "properties": { "value": { "type": ["string", "null"], "format": "date-time" } } }
+        }
+      ]
+    },
+    "Binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "sourceRowId", "field"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "sourceRowId": { "$ref": "#/$defs/Id" },
+        "field": { "$ref": "#/$defs/Id" }
+      }
+    },
+    "Provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["origin", "binding"],
+      "properties": {
+        "origin": { "enum": ["source", "rule"] },
+        "binding": { "$ref": "#/$defs/Binding" },
+        "ruleId": { "$ref": "#/$defs/Id" }
+      },
+      "allOf": [{
+        "if": { "properties": { "origin": { "const": "rule" } } },
+        "then": { "required": ["ruleId"] },
+        "else": { "not": { "required": ["ruleId"] } }
+      }]
+    },
+    "Status": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": { "enum": ["ok", "warning", "critical"] },
+        "provenance": { "$ref": "#/$defs/Provenance" }
+      }
+    },
+    "Trend": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": { "enum": ["up", "down", "flat"] },
+        "provenance": { "$ref": "#/$defs/Provenance" }
+      }
+    },
+    "FollowUp": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prompt"],
+      "properties": { "prompt": { "allOf": [{ "$ref": "#/$defs/Text" }], "minLength": 1 } }
+    },
+    "BlockBase": {
+      "type": "object", "required": ["blockId", "type"],
+      "properties": {
+        "blockId": { "$ref": "#/$defs/Id" },
+        "type": { "enum": ["cards", "table", "chart", "suggestions"] },
+        "title": { "$ref": "#/$defs/Text" },
+        "citationRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/Id" } }
+      }
+    },
+    "Card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "value", "binding"],
+      "properties": {
+        "label": { "$ref": "#/$defs/Text" },
+        "value": { "$ref": "#/$defs/TypedValue" },
+        "binding": { "$ref": "#/$defs/Binding" },
+        "unit": { "$ref": "#/$defs/Text" },
+        "displayDecimalPlaces": { "type": "integer", "minimum": 0 },
+        "status": { "$ref": "#/$defs/Status" },
+        "trend": { "$ref": "#/$defs/Trend" }
+      }
+    },
+    "Cards": {
+      "allOf": [{ "$ref": "#/$defs/BlockBase" }],
+      "unevaluatedProperties": false,
+      "required": ["cards"],
+      "properties": {
+        "type": { "const": "cards" },
+        "cards": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Card" } }
+      }
+    },
+    "Column": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "label", "type", "sourceField"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "label": { "$ref": "#/$defs/Text" },
+        "type": { "$ref": "#/$defs/ValueType" },
+        "sourceField": { "$ref": "#/$defs/Id" },
+        "unit": { "$ref": "#/$defs/Text" },
+        "displayDecimalPlaces": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Row": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "sourceRowId", "values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "sourceRowId": { "$ref": "#/$defs/Id" },
+        "values": { "type": "object", "additionalProperties": { "$ref": "#/$defs/Scalar" } },
+        "status": { "$ref": "#/$defs/Status" },
+        "entityId": { "$ref": "#/$defs/Id" },
+        "followUp": { "$ref": "#/$defs/FollowUp" }
+      },
+      "dependentRequired": { "followUp": ["entityId"] }
+    },
+    "Table": {
+      "allOf": [{ "$ref": "#/$defs/BlockBase" }],
+      "unevaluatedProperties": false,
+      "required": ["sourceId", "columns", "rows"],
+      "properties": {
+        "type": { "const": "table" },
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "columns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Column" } },
+        "rows": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "$ref": "#/$defs/Row" } },
+        "rowAction": {
+          "type": "object", "additionalProperties": false,
+          "required": ["label"], "properties": { "label": { "$ref": "#/$defs/Text" } }
+        }
+      }
+    },
+    "Category": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "sourceRowId"],
+      "properties": { "label": { "$ref": "#/$defs/Text" }, "sourceRowId": { "$ref": "#/$defs/Id" } }
+    },
+    "Series": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "sourceField", "values"],
+      "properties": {
+        "label": { "$ref": "#/$defs/Text" },
+        "sourceField": { "$ref": "#/$defs/Id" },
+        "unit": { "$ref": "#/$defs/Text" },
+        "values": { "type": "array", "minItems": 1, "items": { "anyOf": [{ "$ref": "#/$defs/Decimal" }, { "type": "null" }] } }
+      }
+    },
+    "Chart": {
+      "unevaluatedProperties": false,
+      "required": ["chartType", "sourceId", "categoryField", "categories", "series"],
+      "properties": {
+        "type": { "const": "chart" },
+        "chartType": { "enum": ["bar", "grouped_bar", "line"] },
+        "sourceId": { "$ref": "#/$defs/Id" },
+        "categoryField": { "$ref": "#/$defs/Id" },
+        "categories": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Category" } },
+        "series": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/Series" } }
+      },
+      "allOf": [
+        { "$ref": "#/$defs/BlockBase" },
+        {
+          "if": { "properties": { "chartType": { "const": "bar" } } },
+          "then": { "properties": { "series": { "maxItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "chartType": { "const": "grouped_bar" } } },
+          "then": { "properties": { "series": { "minItems": 2 } } }
+        }
+      ]
+    },
+    "Suggestions": {
+      "allOf": [{ "$ref": "#/$defs/BlockBase" }],
+      "unevaluatedProperties": false,
+      "required": ["items"],
+      "properties": {
+        "type": { "const": "suggestions" },
+        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/FollowUp" } }
+      }
+    },
+    "Contribution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contributionId", "agentId", "workflowOrdinal", "sourceRefs", "blocks"],
+      "properties": {
+        "contributionId": { "$ref": "#/$defs/Id" },
+        "agentId": { "$ref": "#/$defs/Id" },
+        "workflowOrdinal": { "type": "integer", "minimum": 0 },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["sourceId", "toolName", "resultId"],
+            "properties": {
+              "sourceId": { "$ref": "#/$defs/Id" },
+              "toolName": { "$ref": "#/$defs/Id" },
+              "resultId": { "$ref": "#/$defs/Id" }
+            }
+          }
+        },
+        "blocks": {
+          "type": "array", "minItems": 1, "maxItems": 10,
+          "items": { "oneOf": [
+            { "$ref": "#/$defs/Cards" }, { "$ref": "#/$defs/Table" },
+            { "$ref": "#/$defs/Chart" }, { "$ref": "#/$defs/Suggestions" }
+          ] }
+        }
+      }
+    }
+  }
+}

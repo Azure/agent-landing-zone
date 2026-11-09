@@ -1,5 +1,23 @@
 # Shared Agent Landing Zone contracts
 
+## Inline presentation v1 (unshipped local implementation)
+
+The three `*-presentation-*-v1.schema.json` / `turn-presentation-v1.schema.json`
+contracts and sibling integrity files are promoted unchanged from ADR-0040's
+reviewed design. Synthetic positive/negative fixtures, source data and a matched-reader
+[text-only adapter example](examples/inline-presentation/README.md) are under
+`examples/inline-presentation/`. This is not a shipped runtime feature or an
+authorized opt-in. Matched packaging, safe readers, hydration and controlled
+native-history/local acceptance remain required. By the 2026-11-08 maintainer
+amendment, Azure live proof is removed from implementation completion, not
+deferred. Azure persistence/ACL/deployed parity are unverified residual risks;
+global release rules and independent human/performance/operator criteria remain.
+
+Selection carries bindings/layout/wording, never authoritative measurements.
+Schemas establish shape only, not authorization, source fidelity, disjoint rule
+semantics, aggregate budgets or runtime deadlines. See the
+[delivery design](../specs/005-inline-visual-output/contracts/delivery.md).
+
 ## Audit event v2 (current)
 
 `audit-event-v2.schema.json` and

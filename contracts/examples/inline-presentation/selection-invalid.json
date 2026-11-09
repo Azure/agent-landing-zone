@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "blocks": [{
+    "type": "cards",
+    "cards": [{
+      "sourceId": "source-revenue",
+      "sourceRowId": "mar",
+      "field": "revenue",
+      "label": "March",
+      "value": "999.000"
+    }]
+  }]
+}
