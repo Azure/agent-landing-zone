@@ -26,7 +26,7 @@ jobs:
           submodules: recursive
 
       - name: Install Azure Developer CLI
-        uses: Azure/setup-azd@6255b8f0b6c288f11fd56184290009266e3faa07
+        uses: Azure/setup-azd@a2855ef5c4bf20233e19aa57ca53ef3a1d95b665
         with:
           version: 1.28.1
 
