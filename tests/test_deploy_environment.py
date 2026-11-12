@@ -12,6 +12,58 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
+@pytest.mark.parametrize("mode", ["appConfig", "containerEnv", "none"])
+def test_postprovision_dispatch_skips_unselected_foundry_and_apps(tmp_path, shell, mode):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    suffix = "ps1" if shell == "pwsh" else "sh"
+    source = (ROOT / "scripts" / f"postProvision.{suffix}").read_text(encoding="utf-8-sig")
+    driver = tmp_path / "optional_setup.py"
+    driver.write_text(
+        "import importlib, os, sys\n"
+        "from unittest.mock import patch\n"
+        "sys.path.insert(0, sys.argv[2])\n"
+        "if sys.argv[1] == 'config.governance.setup': sys.exit(0)\n"
+        "module = importlib.import_module(sys.argv[1])\n"
+        "settings = {'DEPLOY_AI_FOUNDRY': 'false', 'CONTAINER_APPS': [],\n"
+        "            'APP_RUNTIME_CONFIGURATION_MODE': os.environ['TEST_RUNTIME_MODE']}\n"
+        "credential_name = 'get_azure_credential' if sys.argv[1] == 'config.aifoundry.setup' else 'get_credentials'\n"
+        "with patch.object(module, 'load_setup_settings', return_value=settings), "
+        "patch.object(module, credential_name, side_effect=AssertionError('Unselected credential acquisition')) as credential:\n"
+        "    module.main()\n"
+        "    credential.assert_not_called()\n"
+        "print('skipped:' + sys.argv[1])\n",
+        encoding="utf-8",
+    )
+    if shell == "pwsh":
+        start = source.index("foreach ($module in @(", source.index("# Selected services decide applicability"))
+        block = source[start:source.index("# BEGIN selected Search setup", start)]
+        prefix = (
+            "function Invoke-PythonModule { param($ModuleName)\n"
+            "& $env:REAL_PYTHON $env:SETUP_DRIVER $ModuleName $env:TEST_REPO_ROOT }\n"
+        )
+        command = [executable, "-NoProfile", "-File", str(tmp_path / "dispatch.ps1")]
+        tail = "\nWrite-Output 'next-stage'\n"
+    else:
+        start = source.index("# 3) AI Foundry Setup")
+        block = source[start:source.index("# 5) AI Search Setup", start)]
+        prefix = 'python() { "$REAL_PYTHON" "$SETUP_DRIVER" "$2" "$TEST_REPO_ROOT"; }\n'
+        command = [executable, str(tmp_path / "dispatch.sh")]
+        tail = "\necho next-stage\n"
+    Path(command[-1]).write_text(prefix + block + tail, encoding="utf-8")
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env={
+        **os.environ, "REAL_PYTHON": subprocess.sys.executable, "SETUP_DRIVER": str(driver),
+        "TEST_REPO_ROOT": str(ROOT), "TEST_RUNTIME_MODE": mode,
+    }, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert [line for line in result.stdout.splitlines() if line.startswith("skipped:")] == [
+        "skipped:config.aifoundry.setup", "skipped:config.containerapps.setup",
+    ]
+    assert "next-stage" in result.stdout
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "bash"])
 @pytest.mark.parametrize("software,search,project,backend,expected", [
     ("false", "true", "true", "foundry_iq", []),
     ("true", "false", "true", "foundry_iq", []),

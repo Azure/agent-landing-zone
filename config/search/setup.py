@@ -229,18 +229,21 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
                 model_deployments = model_deployments_str
             
             # Find the embedding model by canonical_name
-            for model in model_deployments:
-                if model.get("canonical_name") == "EMBEDDING_DEPLOYMENT_NAME":
-                    embedding_info = {
-                        "deployment_name": model.get("name"),
-                        "model_name": model.get("model", {}).get("name") if isinstance(model.get("model"), dict) else model.get("model"),
-                        "endpoint": model.get("endpoint", ""),
-                        "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
-                    }
-                    logging.info(f"✅ Found embedding model: {embedding_info['deployment_name']} at {embedding_info['endpoint']}")
-                    return embedding_info
+            model = next((
+                item for canonical in ("EMBEDDING_DEPLOYMENT_NAME", "EMBEDDING_MODEL")
+                for item in model_deployments if item.get("canonical_name") == canonical
+            ), None)
+            if model:
+                embedding_info = {
+                    "deployment_name": model.get("name"),
+                    "model_name": model.get("model", {}).get("name") if isinstance(model.get("model"), dict) else model.get("model"),
+                    "endpoint": model.get("endpoint", ""),
+                    "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
+                }
+                logging.info(f"✅ Found embedding model: {embedding_info['deployment_name']} at {embedding_info['endpoint']}")
+                return embedding_info
             
-            logging.warning("❗️ Embedding model with canonical_name 'EMBEDDING_DEPLOYMENT_NAME' not found in MODEL_DEPLOYMENTS")
+            logging.warning("❗️ No EMBEDDING_DEPLOYMENT_NAME or native EMBEDDING_MODEL mapping found in MODEL_DEPLOYMENTS")
             return {}
             
         except (json.JSONDecodeError, KeyError, TypeError) as e:
@@ -258,38 +261,41 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
                 model_deployments = model_deployments_str
             
             # Find the GPT model by canonical_name (same approach as embedding model)
-            for model in model_deployments:
-                if model.get("canonical_name") == "CHAT_DEPLOYMENT_NAME":
-                    model_obj = model.get("model")
-                    if isinstance(model_obj, dict):
-                        model_name = model_obj.get("name")
-                        model_format = model_obj.get("format") or model.get("modelFormat")
-                    else:
-                        model_name = model_obj
-                        model_format = model.get("modelFormat")
+            model = next((
+                item for canonical in ("CHAT_DEPLOYMENT_NAME", "GPT_MODEL")
+                for item in model_deployments if item.get("canonical_name") == canonical
+            ), None)
+            if model:
+                model_obj = model.get("model")
+                if isinstance(model_obj, dict):
+                    model_name = model_obj.get("name")
+                    model_format = model_obj.get("format") or model.get("modelFormat")
+                else:
+                    model_name = model_obj
+                    model_format = model.get("modelFormat")
 
-                    gpt_info = {
-                        "deployment_name": model.get("name"),
-                        "model_name": model_name,
-                        "model_format": model_format,
-                        "endpoint": model.get("endpoint", ""),
-                        "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
-                    }
+                gpt_info = {
+                    "deployment_name": model.get("name"),
+                    "model_name": model_name,
+                    "model_format": model_format,
+                    "endpoint": model.get("endpoint", ""),
+                    "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
+                }
 
-                    model_format_l = (gpt_info.get("model_format") or "").lower()
-                    if model_format_l != "openai":
-                        logging.info(
-                            "ℹ️ CHAT_DEPLOYMENT_NAME ignored because model.format is not OpenAI "
-                            f"(format='{gpt_info.get('model_format')}', model='{gpt_info.get('model_name')}')"
-                        )
-                        return {}
-
+                model_format_l = (gpt_info.get("model_format") or "").lower()
+                if model_format_l != "openai":
                     logging.info(
-                        f"✅ Found GPT model: {gpt_info['deployment_name']} ({gpt_info['model_name']}, format={gpt_info.get('model_format')}) at {gpt_info['endpoint']}"
+                        "ℹ️ Selected chat deployment ignored because model.format is not OpenAI "
+                        f"(format='{gpt_info.get('model_format')}', model='{gpt_info.get('model_name')}')"
                     )
-                    return gpt_info
+                    return {}
+
+                logging.info(
+                    f"✅ Found GPT model: {gpt_info['deployment_name']} ({gpt_info['model_name']}, format={gpt_info.get('model_format')}) at {gpt_info['endpoint']}"
+                )
+                return gpt_info
             
-            logging.warning("❗️ GPT model with canonical_name 'CHAT_DEPLOYMENT_NAME' not found in MODEL_DEPLOYMENTS")
+            logging.warning("❗️ No CHAT_DEPLOYMENT_NAME or native GPT_MODEL mapping found in MODEL_DEPLOYMENTS")
             return {}
             
         except (json.JSONDecodeError, KeyError, TypeError) as e:

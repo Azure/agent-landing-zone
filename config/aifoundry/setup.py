@@ -272,6 +272,9 @@ def associate_policy_to_deployment(client: CognitiveServicesManagementClient, re
 def main() -> None:
     configure_logging()
     settings = load_setup_settings()
+    if settings.get("DEPLOY_AI_FOUNDRY") == "false":
+        logging.info("Foundry account setup is not selected.")
+        return
     validate_json_file(RAI_POLICIES_JSON_FILE)
     validate_json_file(RAI_BLOCKLIST_JSON_FILE)
     cred = get_azure_credential()
@@ -296,17 +299,20 @@ def main() -> None:
         logging.error("MODEL_DEPLOYMENTS is not valid JSON: %s", e)
         sys.exit(1)
     deployment_name: Optional[str] = None
-    for item in deployments:
-        if item.get("canonical_name") == CANONICAL_DEPLOYMENT_NAME:
-            deployment_name = item.get("name")
+    for canonical_name in (CANONICAL_DEPLOYMENT_NAME, "GPT_MODEL"):
+        for item in deployments:
+            if item.get("canonical_name") == canonical_name:
+                deployment_name = item.get("name")
+                break
+        if deployment_name:
             break
     if not deployment_name:
         logging.error(
-            "No deployment with canonical_name '%s' found in MODEL_DEPLOYMENTS",
+            "No deployment with canonical_name '%s' or 'GPT_MODEL' found in MODEL_DEPLOYMENTS",
             CANONICAL_DEPLOYMENT_NAME
         )
         sys.exit(1)
-    logging.info(f"Selected deployment: {deployment_name} (canonical_name={CANONICAL_DEPLOYMENT_NAME})")
+    logging.info(f"Selected deployment: {deployment_name} (canonical_name={canonical_name})")
     client = CognitiveServicesManagementClient(cred, subscription_id)
     if not settings.get("KEY_VAULT_URI"):
         account = client.accounts.get(resource_group, account_name)

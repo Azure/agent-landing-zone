@@ -92,3 +92,36 @@ def test_foundation_handoff_preserves_disabled_and_external_hosted_cases(name, f
         (False, True, value), (True, True, value),
     ):
         assert (value if provisioned or hosted else "") == expected
+
+
+def test_native_model_defaults_match_the_metadata_verifier():
+    import hcl2
+    from config.deployment.metadata import _DEFAULT_MODELS
+
+    bicep = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
+    fallback = re.search(
+        r"var _deploymentMetadataModels = .*? : \[(.*?)^\]", bicep, re.M | re.S,
+    )[1]
+    bicep_models = re.findall(
+        r"format: '([^']+)'\s+name: '([^']+)'\s+version: '([^']+)'", fallback,
+    )
+    terraform = (ROOT / "infra" / "terraform" / "main.foundry.tf").read_text(encoding="utf-8")
+    fallback = re.search(
+        r"services_model_deployments = concat\(var.modelDeploymentList, \[for deployment in "
+        r"(\[.*?\]) : deployment if", terraform, re.S,
+    )[1]
+    terraform_models = hcl2.loads("locals { models = " + fallback + " }")["locals"][0]["models"]
+    expected = [
+        {"canonical_name": canonical, "name": name,
+         "model": {"format": "OpenAI", "name": name, "version": version}}
+        for canonical, name, version in _DEFAULT_MODELS
+    ]
+    assert bicep_models == [
+        (row["model"]["format"], row["model"]["name"], row["model"]["version"])
+        for row in expected
+    ]
+    assert "(index == 0 ? 'GPT_MODEL' : 'EMBEDDING_MODEL')" in bicep
+    assert [
+        {key: row[key] for key in ("canonical_name", "name", "model")}
+        for row in terraform_models
+    ] == expected

@@ -29,6 +29,62 @@ BASE = {
 }
 
 
+@pytest.mark.parametrize("failure", ["missing", "stale", "environment", "group", "resource", "identity"])
+def test_direct_role_entry_rejects_invalid_native_metadata_before_assignment(failure, caplog):
+    from config.appdefinition.__main__ import main
+
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "tests" / "fixtures" / "deployment-metadata-v1.json").read_text(encoding="utf-8"))
+    document["context"]["applicationId"] = "agent-lz-default"
+    selected = {
+        **deployment_metadata.aliases(document), "AGENTLZ_APP_DEFINITION": "",
+        "ORCHESTRATION_HOST": "container_apps", "DEPLOYMENT_METADATA": json.dumps(document),
+    }
+    bound = deployment_metadata.resolve_resource_groups(selected)
+    if failure == "missing":
+        document = None
+    elif failure == "stale":
+        document["context"]["deploymentName"] = "stale-foundation"
+    elif failure == "environment":
+        document["context"]["environmentName"] = "foreign"
+    elif failure == "group":
+        selected["AZURE_APP_RESOURCE_GROUP"] = "foreign"
+    elif failure == "resource":
+        resource = document["resources"]["registry"]["resource"]
+        resource["resourceId"] = resource["resourceId"].replace("/rg-example-app/", "/foreign/")
+    else:
+        document["containerApps"][0]["identity"]["principalId"] = "55555555-5555-5555-5555-555555555555"
+
+    read_native = deployment_metadata.read_bicep
+
+    def run(command, **kwargs):
+        assert command[1:4] == ["deployment", "group", "show"]
+        return "Succeeded" if command[-1] == "properties.provisioningState" else document
+
+    with (
+        patch.dict(os.environ, selected, clear=True),
+        patch.object(deployment_metadata, "selected_environment", return_value=selected),
+        patch.object(deployment_metadata, "resolve_provider", return_value={"provider": "bicep"}),
+        patch.object(deployment_metadata, "resolve_az_command", return_value="az"),
+        patch.object(deployment_metadata, "read_binding", return_value=bound),
+        patch.object(deployment_metadata, "resolve_declared_parameters", return_value={
+            "appRuntimeConfigurationMode": "containerEnv",
+        }),
+        patch.object(deployment_metadata, "read_bicep", side_effect=lambda env, runner: read_native(env, run)),
+        patch("config.appdefinition.roles.assign_roles") as assign,
+    ):
+        assert main(["--assign-roles"]) == 3
+    assert "Capability-profile role assignment failed" in caplog.text
+    expected_error = {
+        "missing": "source: Missing DEPLOYMENT_METADATA",
+        "stale": "context.deploymentName", "environment": "context.environmentName",
+        "group": "selection: Invalid declared inputs", "resource": "cache: Stale saved metadata",
+        "identity": "cache: Stale saved metadata",
+    }[failure]
+    assert expected_error in caplog.text
+    assign.assert_not_called()
+
+
 @pytest.mark.parametrize("application,network", [("", ""), ("rg-app", ""), ("rg-app", "rg-net"), ("RG-AI", "rg-ai")])
 def test_flat_destinations_preserve_json_v1(application, network):
     environment = {**BASE, "AZURE_APP_RESOURCE_GROUP": application, "AZURE_NETWORK_RESOURCE_GROUP": network}

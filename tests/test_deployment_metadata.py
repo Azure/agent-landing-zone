@@ -3,6 +3,7 @@
 import copy
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -374,6 +375,112 @@ def test_foundry_endpoint_requires_live_domain(candidate, live_boundary):
     rows[candidate["resources"]["foundryAccount"]["resource"]["resourceId"].lower()]["properties"].clear()
     with pytest.raises(metadata.MetadataError, match="endpoint"):
         metadata.verify_live(candidate, parameters, run)
+
+
+@pytest.mark.parametrize("provider", ["bicep", "terraform"])
+def test_foundry_endpoints_from_actual_provider_expressions(candidate, live_boundary, provider):
+    parameters, _, run = live_boundary
+    candidate["context"]["provider"] = provider
+    if provider == "bicep":
+        source = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
+        expressions = [
+            re.search(rf"^var aiFoundry{kind}Endpoint = '([^']+)'", source, re.M)[1]
+            for kind in ("Account", "Project")
+        ]
+        assert "endpoint: aiFoundryAccountEndpoint" in source
+        assert "endpoint: aiFoundryProjectEndpoint" in source
+    else:
+        source = (ROOT / "infra" / "terraform" / "main.foundry.tf").read_text(encoding="utf-8")
+        expressions = [
+            re.search(rf'^\s+{kind}_endpoint\s*=.*?"(https://[^"]+)"', source, re.M)[1]
+            for kind in ("account", "project")
+        ]
+        outputs = (ROOT / "infra" / "terraform" / "outputs.tf").read_text(encoding="utf-8")
+        assert "endpoint   = local.foundry_context.account_endpoint" in outputs
+        assert "endpoint   = local.foundry_context.project_endpoint" in outputs
+    bindings = {
+        "aiFoundry!.outputs.aiServicesName": "example-foundry",
+        "aiFoundry!.outputs.aiProjectName": "example-project",
+        "local.resource_names.aiFoundryAccountName": "example-foundry",
+        "local.resource_names.aiFoundryProjectName": "example-project",
+    }
+    for slot, expression in zip(("foundryAccount", "foundryProject"), expressions):
+        candidate["resources"][slot]["resource"]["endpoint"] = re.sub(
+            r"\$\{([^}]+)\}", lambda match: bindings[match[1]], expression,
+        )
+    metadata.verify_live(candidate, parameters, run)
+
+
+@pytest.mark.parametrize("slot,url", [
+    ("foundryAccount", "https://another.cognitiveservices.azure.com/"),
+    ("foundryAccount", "https://example-foundry.services.ai.azure.com/"),
+    ("foundryProject", "https://another.services.ai.azure.com/api/projects/example-project"),
+    ("foundryProject", "https://example-foundry.cognitiveservices.azure.com/api/projects/example-project"),
+    ("foundryProject", "https://example-foundry.services.ai.azure.com/api/projects/another"),
+])
+def test_foundry_service_endpoints_cannot_be_substituted(candidate, live_boundary, slot, url):
+    parameters, _, run = live_boundary
+    candidate["resources"][slot]["resource"]["endpoint"] = url
+    with pytest.raises(metadata.MetadataError, match="endpoint"):
+        metadata.verify_live(candidate, parameters, run)
+
+
+@pytest.mark.parametrize("provider", ["bicep", "terraform"])
+@pytest.mark.parametrize("change", ["", "canonical", "model", "extra", "disabled"])
+def test_evaluated_native_model_defaults(candidate, live_boundary, provider, change):
+    parameters, rows, run = live_boundary
+    candidate["context"]["provider"] = provider
+    parameters["modelDeploymentList"] = []
+    account_id = candidate["resources"]["foundryAccount"]["resource"]["resourceId"]
+    candidate["modelDeployments"] = []
+    for canonical, name, version in (
+        ("GPT_MODEL", "gpt-5-nano", "2025-08-07"),
+        ("EMBEDDING_MODEL", "text-embedding-3-large", "1"),
+    ):
+        model = {
+            "canonicalName": canonical, "resourceId": account_id + "/deployments/" + name,
+            "name": name, "model": {"format": "OpenAI", "name": name, "version": version},
+            "apiVersion": "2025-01-01-preview", "endpoint": "https://example-foundry.openai.azure.com/",
+        }
+        candidate["modelDeployments"].append(model)
+        rows[model["resourceId"].lower()] = {
+            "id": model["resourceId"], "name": name,
+            "type": "Microsoft.CognitiveServices/accounts/deployments",
+            "properties": {"model": model["model"], "provisioningState": "Succeeded"},
+        }
+    if change == "canonical":
+        candidate["modelDeployments"][0]["canonicalName"] = "UNDECLARED"
+    elif change == "model":
+        candidate["modelDeployments"][0]["model"]["version"] = "unexpected"
+    elif change == "extra":
+        candidate["modelDeployments"].append(copy.deepcopy(candidate["modelDeployments"][0]))
+    elif change == "disabled":
+        parameters.update(deployAiFoundry=False, deployAfProject=False)
+        for slot in ("foundryAccount", "foundryProject"):
+            candidate["resources"][slot] = {"status": "disabled", "resource": None}
+        candidate["modelDeployments"] = []
+    if change in ("canonical", "model", "extra"):
+        with pytest.raises(metadata.MetadataError, match="mapping|modelDeployments"):
+            metadata.verify_live(candidate, parameters, run)
+    else:
+        metadata.validate_shape(candidate)
+        metadata.verify_live(candidate, parameters, run)
+
+
+@pytest.mark.parametrize("provider,api_version", [
+    ("bicep", "omitted"), ("bicep", None),
+    ("terraform", "omitted"), ("terraform", None), ("terraform", ""),
+])
+def test_declared_models_use_provider_api_version_default(candidate, live_boundary, provider, api_version):
+    parameters, _, run = live_boundary
+    candidate["context"]["provider"] = provider
+    declaration = parameters["modelDeploymentList"][0]
+    if api_version == "omitted":
+        declaration.pop("apiVersion")
+    else:
+        declaration["apiVersion"] = api_version
+    candidate["modelDeployments"][0]["apiVersion"] = "2025-01-01-preview"
+    metadata.verify_live(candidate, parameters, run)
 
 
 def test_non_openai_model_preserves_provider_openai_endpoint(candidate, live_boundary):

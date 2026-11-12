@@ -8,7 +8,11 @@ import pytest
 from config.search import setup
 
 
-def test_real_templates_derive_setup_values_before_store_free_execution():
+@pytest.mark.parametrize("model_selection", ["explicit", "native", "both"])
+def test_real_templates_derive_setup_values_before_store_free_execution(model_selection):
+    native_defaults = model_selection == "native"
+    embedding_name = "text-embedding-3-large" if native_defaults else "selected-embedding"
+    chat_name = "gpt-5-nano" if native_defaults else "selected-chat"
     settings = {
         "APP_RUNTIME_CONFIGURATION_MODE": "containerEnv",
         "RESOURCE_TOKEN": "fixture",
@@ -21,8 +25,14 @@ def test_real_templates_derive_setup_values_before_store_free_execution():
         "NETWORK_ISOLATION": "false",
         "RETRIEVAL_BACKEND": "ai_search",
         "MODEL_DEPLOYMENTS": [{
-            "canonical_name": "EMBEDDING_DEPLOYMENT_NAME", "name": "selected-embedding",
+            "canonical_name": "EMBEDDING_MODEL" if native_defaults else "EMBEDDING_DEPLOYMENT_NAME",
+            "name": embedding_name,
             "model": {"name": "text-embedding-3-large", "format": "OpenAI"},
+            "endpoint": "https://verified-foundry.openai.azure.com",
+            "api_version": "2025-01-01-preview",
+        }, {
+            "canonical_name": "GPT_MODEL" if native_defaults else "CHAT_DEPLOYMENT_NAME",
+            "name": chat_name, "model": {"name": "gpt-5-nano", "format": "OpenAI"},
             "endpoint": "https://verified-foundry.openai.azure.com",
             "api_version": "2025-01-01-preview",
         }],
@@ -35,6 +45,15 @@ def test_real_templates_derive_setup_values_before_store_free_execution():
         "SEARCH_TABLES_INDEX_NAME": "nl2sql-fixture-tables",
         "SEARCH_MEASURES_INDEX_NAME": "nl2sql-fixture-measures",
     }
+    if model_selection == "both":
+        settings["MODEL_DEPLOYMENTS"][:0] = [
+            {"canonical_name": canonical, "name": name,
+             "model": {"name": name, "format": "OpenAI"},
+             "endpoint": "https://verified-foundry.openai.azure.com"}
+            for canonical, name in (
+                ("GPT_MODEL", "gpt-5-nano"), ("EMBEDDING_MODEL", "text-embedding-3-large"),
+            )
+        ]
     assert not template_owned.keys() & settings.keys()
     template_dir = Path(setup.__file__).parent
     with (
@@ -47,6 +66,8 @@ def test_real_templates_derive_setup_values_before_store_free_execution():
     ):
         definitions, context = setup.prepare_context_and_render(setup.TEMPLATE_NAME, str(template_dir))
         assert definitions is not None
+        assert context["EMBEDDING_MODEL_INFO"]["deployment_name"] == embedding_name
+        assert context["GPT_MODEL_INFO"]["deployment_name"] == chat_name
         assert {key: context[key] for key in template_owned} == template_owned
         index = definitions["indexes"][0]
         vector = next(field for field in index["fields"] if field["name"] == "contentVector")

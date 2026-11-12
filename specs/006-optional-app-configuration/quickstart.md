@@ -2,9 +2,10 @@
 
 ## Status and scope
 
-Implementation and integration checks are in progress. The metadata loader,
-setup adapters and service migrations exist. Completed observations are recorded
-below, and remaining acceptance work is tracked in [tasks.md](tasks.md).
+Implementation and integration checks are complete, including convergence tasks
+T061-T065. The metadata loader, setup adapters and service migrations are covered
+by the observations below. All implementation tasks in [tasks.md](tasks.md)
+are checked.
 
 Do not create a validation application, rewrite samples/runtimes or run a live
 reference-app deployment for this feature. Both current samples require a store.
@@ -511,6 +512,53 @@ Unrelated sensitive Terraform outputs remain irrelevant, while direct and
 transitive `nonsensitive()` dependencies are rejected. The native backend
 probe uses Terraform commands, not deployment-code state inspection. Existing
 Key Vault failures remain failures without granting broader roles.
+
+### Convergence corrections: T061-T065
+
+| Task | Correction and regression evidence |
+| --- | --- |
+| T061 | The verifier independently checks the live account's `cognitiveservices.azure.com` endpoint and the project's `services.ai.azure.com/api/projects/...` endpoint. Tests derive the endpoint shapes from both actual producers and reject foreign accounts, services and projects. Native Terraform assertions check the emitted endpoints. |
+| T062 | Verified disabled Foundry exits before account/model prerequisites, credentials and clients. Both shipped hook dispatch paths execute the real no-op module. Selected accounts retain RAI/evaluation configuration and fail for missing prerequisites. |
+| T063 | Verified empty app lists exit before registry, identity options and credentials. Both shipped hook dispatch paths execute the real no-op module. Selected apps still fail before mutation when the registry is missing. |
+| T064 | Direct `--assign-roles` loads the verified setup environment, checks the application binding and derives the mode from that verified selection. Real native-loader/context rejection cases stop missing/stale metadata and wrong environment/group/resource/identity bindings before assignment. Valid verified selection reaches the role boundary instead of caller aliases. |
+| T065 | Empty declared model lists match the actual native fallback models, and omitted/null API versions match each provider's evaluated defaults. Terraform's empty-string default is preserved. Altered/extra mappings remain rejected and disabled Foundry has no models. Foundry RAI and Search rendering also recognize the native canonical mappings, preferring explicit chat/embedding mappings when both exist. |
+
+Final convergence commands and results:
+
+```powershell
+python -m pytest tests\test_deployment_metadata.py tests\test_deployment_setup_settings.py tests\test_custom_foundation_outputs.py tests\test_aifoundry_setup.py tests\test_containerapps_setup.py tests\test_app_definition_binding.py tests\test_app_definition_roles.py tests\test_resource_group_consumers.py tests\test_search_setup.py config\search\tests --quiet --tb=short
+python -m pytest tests\test_deploy_environment.py tests\test_search_setup.py config\search\tests --quiet --tb=short
+python -m pytest tests\test_aifoundry_setup.py tests\test_search_setup.py --quiet --tb=short
+terraform -chdir=infra\terraform fmt -check -diff tests\root.tftest.hcl
+terraform -chdir=infra\terraform validate -no-color
+terraform -chdir=infra\terraform test -no-color
+pwsh -NoProfile -File infra\tests\contracts\Test-ScopedGraphNormalizationContract.ps1
+git diff --check
+```
+
+| Check | Result |
+| --- | --- |
+| Final metadata/selected-service integration | 407 passed and 248 subtests |
+| Both-shell dispatch/loaders and Search integration, jq available on runner PATH | 296 passed and 231 subtests, no skips |
+| Final explicit/native model preference and required-model checks | 19 passed and 3 subtests |
+| Terraform formatting and validation | Passed |
+| Complete native mocked Terraform suite | 145 passed, zero failures, including the new fallback-model run |
+| Actual compiled Bicep normalization contract | Passed, including 80 graph and 110 subnet/Basic/native-delta rejection cases |
+| Runtime-v1 schema/integrity file, manifest and provider lock SHA256 | All four protected baselines unchanged |
+| Whitespace integrity | Passed |
+
+The shared consumer corrections require no production Bicep or Terraform
+changes. Both existing producers retain their distinct endpoint semantics and
+native default models, with cross-provider producer/consumer regression checks.
+Resource ownership, inputs, outputs, identities/RBAC, networking, runtime
+publication and lifecycle ordering are unchanged. Only the Terraform test file
+adds native assertions. No new provider difference is introduced.
+
+The documentation-source search for metadata discovery, model declarations,
+canonical mappings, role entry and Foundry service endpoints confirmed that
+these corrections restore the already documented contract. The existing
+coordinated central documentation revision remains applicable without another
+product-page change.
 
 ### Central documentation
 

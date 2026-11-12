@@ -50,6 +50,8 @@ run "product_defaults" {
       length(output.DEPLOYMENT_METADATA.containerApps) == length(var.containerAppsList) &&
       output.DEPLOYMENT_METADATA.resources.cosmos.status == "disabled" &&
       output.DEPLOYMENT_METADATA.resources.cosmos.resource == null &&
+      output.DEPLOYMENT_METADATA.resources.foundryAccount.resource.endpoint == "https://${local.resource_names.aiFoundryAccountName}.cognitiveservices.azure.com/" &&
+      output.DEPLOYMENT_METADATA.resources.foundryProject.resource.endpoint == "https://${local.resource_names.aiFoundryAccountName}.services.ai.azure.com/api/projects/${local.resource_names.aiFoundryProjectName}" &&
       alltrue([for app in output.DEPLOYMENT_METADATA.containerApps :
         app.identity.kind == "systemAssigned" && app.identity.clientId == null && app.identity.resourceId == null
       ]) &&
@@ -125,6 +127,25 @@ run "product_defaults" {
       output.PUBLIC_INGRESS_LIVE == false
     )
     error_message = "The complete output contract must distinguish prepared/deployed/disabled contexts."
+  }
+}
+
+run "empty_model_list_metadata_uses_native_defaults" {
+  command = plan
+
+  variables {
+    modelDeploymentList = []
+  }
+
+  assert {
+    condition = (
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.canonicalName] == ["GPT_MODEL", "EMBEDDING_MODEL"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.model.version] == ["2025-08-07", "1"] &&
+      alltrue([for model in output.DEPLOYMENT_METADATA.modelDeployments : model.apiVersion == "2025-01-01-preview"])
+    )
+    error_message = "Empty declared model lists must expose the actual native fallback models and default API versions."
   }
 }
 

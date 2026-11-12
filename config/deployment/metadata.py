@@ -89,6 +89,10 @@ _ALIAS_EQUIVALENTS = {
     "AZURE_SPEECH_ENDPOINT": "SPEECH_SERVICE_ENDPOINT",
 }
 JsonRunner = Callable[..., Any]
+_DEFAULT_MODELS = (
+    ("GPT_MODEL", "gpt-5-nano", "2025-08-07"),
+    ("EMBEDDING_MODEL", "text-embedding-3-large", "1"),
+)
 
 
 def _selection(slot: str, parameters: Mapping[str, Any]) -> tuple[bool, str | None]:
@@ -472,6 +476,11 @@ def verify_live(
         if not isinstance(declarations, list):
             raise MetadataError("intent.mappings: Restore original typed resource declarations.")
         expected = declarations if enabled else []
+        if parameter == "modelDeploymentList" and enabled and not declarations:
+            expected = [{
+                "canonical_name": canonical, "name": name,
+                "model": {"format": "OpenAI", "name": name, "version": version},
+            } for canonical, name, version in _DEFAULT_MODELS]
         if len(expected) != len(actual):
             raise MetadataError("intent.mappings: Missing or unexpected selected resource mapping. Reprovision.")
         by_name = {row.get("canonical_name"): row for row in expected}
@@ -480,7 +489,15 @@ def verify_live(
             if not isinstance(declaration, dict):
                 raise MetadataError("intent.mappings: Undeclared canonical mapping. Restore selection and reprovision.")
             if parameter == "modelDeploymentList":
-                if any(declaration.get(field) != row[field] for field in ("name", "model", "apiVersion")):
+                api_version = declaration.get("apiVersion")
+                if api_version is None or (
+                    context["provider"] == "terraform" and api_version == ""
+                ):
+                    api_version = "2025-01-01-preview"
+                if (
+                    any(declaration.get(field) != row[field] for field in ("name", "model"))
+                    or api_version != row["apiVersion"]
+                ):
                     raise MetadataError("modelDeployments: Evaluated model conflicts with the original declaration.")
             elif parameter == "containerAppsList":
                 if (
@@ -582,7 +599,7 @@ def verify_live(
             "keyVault": properties.get("vaultUri"),
             "storage": (properties.get("primaryEndpoints") or {}).get("blob"),
             "cosmos": properties.get("documentEndpoint"),
-            "foundryAccount": f"https://{domain}.services.ai.azure.com" if domain else None,
+            "foundryAccount": f"https://{domain}.cognitiveservices.azure.com" if domain else None,
             "search": f"https://{resource['name']}.search.windows.net",
             "speech": properties.get("endpoint"),
         }.get(slot)
@@ -595,7 +612,9 @@ def verify_live(
     if project:
         if not foundry or project["resourceId"].rsplit("/projects/", 1)[0].casefold() != foundry["resourceId"].casefold():
             raise MetadataError("resources.foundryProject: Project is not a child of the selected account.")
-        if endpoint(project["endpoint"]) != endpoint(foundry["endpoint"] + "/api/projects/" + project["name"]):
+        domain = live["foundryAccount"]["properties"]["customSubDomainName"]
+        expected_project_endpoint = f"https://{domain}.services.ai.azure.com/api/projects/{project['name']}"
+        if endpoint(project["endpoint"]) != endpoint(expected_project_endpoint):
             raise MetadataError("resources.foundryProject.endpoint: Exact account/project endpoint mismatch.")
     for model in document["modelDeployments"]:
         if not foundry or model["resourceId"].casefold() != (foundry["resourceId"] + "/deployments/" + model["name"]).casefold():

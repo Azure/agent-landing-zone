@@ -253,23 +253,6 @@ def main():
     logging.info(f"Max Workers: {MAX_WORKERS}")
     logging.info(f"Poll Timeout: {POLL_TIMEOUT_SECONDS}s")
 
-    # Create and test credentials once
-    logging.debug("Creating and testing shared credential")
-    shared_credential = get_credentials()
-    
-    subscription_id = settings["SUBSCRIPTION_ID"]
-    resource_group = resource_group_for(settings, "application")
-    use_uai = settings["USE_UAI"]
-    acr_server = settings.get("AZURE_CONTAINER_REGISTRY_ENDPOINT")
-    if not acr_server:
-        raise RuntimeError("Selected Container Apps require a verified registry endpoint.")
-    
-    logging.info(f"Configuration loaded:")
-    logging.info(f"  Subscription: {subscription_id}")
-    logging.info(f"  Resource Group: {resource_group}")
-    logging.info(f"  ACR Server: {acr_server}")
-    logging.info(f"  Use UAI: {use_uai}")
-
     # Read and parse the list of container apps
     logging.debug("Fetching CONTAINER_APPS list")
     raw_list = settings["CONTAINER_APPS"]
@@ -293,9 +276,23 @@ def main():
         )
     
     if not app_names:
-        logging.warning("No container apps found to process.")
+        logging.info("No container apps selected for registry setup.")
         return
-    
+
+    subscription_id = settings["SUBSCRIPTION_ID"]
+    resource_group = resource_group_for(settings, "application")
+    use_uai = settings["USE_UAI"]
+    acr_server = settings.get("AZURE_CONTAINER_REGISTRY_ENDPOINT")
+    if not acr_server:
+        raise RuntimeError("Selected Container Apps require a verified registry endpoint.")
+    logging.debug("Creating and testing shared credential")
+    shared_credential = get_credentials()
+    logging.info(f"Configuration loaded:")
+    logging.info(f"  Subscription: {subscription_id}")
+    logging.info(f"  Resource Group: {resource_group}")
+    logging.info(f"  ACR Server: {acr_server}")
+    logging.info(f"  Use UAI: {use_uai}")
+
     logging.info(f"Found {len(app_names)} container apps to process: {', '.join(app_names)}")
     
     if MAX_WORKERS == 2:

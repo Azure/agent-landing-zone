@@ -318,11 +318,11 @@ class RoleAssignmentTests(unittest.TestCase):
         self.assertFalse(any(f"{SUB}/Microsoft.KeyVault/vaults/kv-a" in call for call in az.creates()))
 
     def test_cli_assign_roles_exit_codes(self) -> None:
-        environment = {**CONTEXT, "ORCHESTRATION_HOST": "container_apps", "AGENTLZ_APP_DEFINITION": "", "DEPLOY_INGESTION_CONTAINER_APP": "true"}
-        with patch.dict("os.environ", environment), patch("config.deployment.appconfig._run_az", FakeAz()):
+        environment = {**CONTEXT, "ORCHESTRATION_HOST": "container_apps", "AGENTLZ_APP_ID": "agent-lz-default", "AGENTLZ_APP_DEFINITION": "", "DEPLOY_INGESTION_CONTAINER_APP": "true"}
+        with patch.dict("os.environ", environment), patch("config.deployment.setup_settings.load_setup_environment", return_value=environment), patch("config.deployment.appconfig._run_az", FakeAz()):
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(0, cli_main(["--assign-roles"]))
-        with patch.dict("os.environ", {**environment, "AZURE_RESOURCE_GROUP": ""}):
+        with patch.dict("os.environ", environment), patch("config.deployment.setup_settings.load_setup_environment", return_value={**environment, "AZURE_RESOURCE_GROUP": ""}):
             with self.assertLogs("config.appdefinition", "ERROR") as logs, redirect_stderr(io.StringIO()):
                 self.assertEqual(3, cli_main(["--assign-roles"]))
             self.assertIn("AZURE_RESOURCE_GROUP is required", "\n".join(logs.output))
