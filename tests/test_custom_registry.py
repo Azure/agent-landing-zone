@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from config.containerapps import setup
+from config.containerapps import registry
 
 ENV = {
     "AZURE_SUBSCRIPTION_ID": "subscription",
@@ -13,6 +14,13 @@ ENV = {
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": "platform.azurecr.io",
 }
 IMAGE = "platform.azurecr.io/custom/worker@sha256:" + "a" * 64
+
+
+@pytest.fixture(autouse=True)
+def verified_registry_settings(monkeypatch):
+    monkeypatch.setattr(registry, "load_setup_settings", lambda env: {
+        **env, "CONTAINER_APPS": [{"name": "actual-worker"}],
+    })
 
 
 def app(name="actual-worker", service="worker", identities=None, principal=None):

@@ -284,6 +284,7 @@ run "public_classic_foundation_and_least_privilege" {
   assert {
     condition = (
       contains(keys(local.rbac_assignments), "app:frontend:storage:StorageBlobDelegator") &&
+      contains(keys(local.rbac_assignments), "app:frontend:app_config:AppConfigurationDataReader") &&
       !contains(keys(local.rbac_assignments), "app:frontend:search:SearchIndexDataReader") &&
       !contains(keys(local.cosmos_application_grants), "app:frontend") &&
       contains(keys(local.cosmos_application_grants), "app:orchestrator") &&
@@ -451,9 +452,27 @@ run "container_env_mode_keeps_store_authorization_separate_from_publication" {
       one(local.app_config_authorization_ready) == azurerm_role_assignment.app_config_executor["this"].id &&
       length(terraform_data.app_config_authorization) == 0 &&
       length(azapi_resource.foundation_setting) == 0 &&
+      alltrue([for grant in local.app_grants : grant.role != "AppConfigurationDataReader"]) &&
       local.compute_context.environment_principal_id == azapi_resource.container_environment["this"].identity[0].principal_id
     )
     error_message = "An enabled store retains its real executor grant, but containerEnv mode must not create ARM settings or publication-readiness consumers."
+  }
+}
+
+run "container_env_without_store_preserves_other_runtime_grants" {
+  command = plan
+  variables {
+    deployAppConfig             = false
+    appRuntimeConfigurationMode = "containerEnv"
+  }
+  assert {
+    condition = (
+      length(azurerm_role_assignment.app_config_executor) == 0 &&
+      alltrue([for grant in local.app_grants : grant.role != "AppConfigurationDataReader"]) &&
+      contains(keys(local.rbac_assignments), "app:frontend:registry:AcrPull") &&
+      contains(keys(local.rbac_assignments), "app:frontend:key_vault:KeyVaultSecretsUser")
+    )
+    error_message = "Store-free application grants must omit store access while preserving selected registry and Key Vault access."
   }
 }
 

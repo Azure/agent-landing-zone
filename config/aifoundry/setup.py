@@ -1,32 +1,12 @@
 #!/usr/bin/env python3
 """
-AI Foundry Service Configuration Script
+Configure RAI and evaluation secrets using verified deployment settings.
 
-This script automates the configuration of Responsible AI (RAI) blocklists and policies for an Azure OpenAI deployment, and securely stores the model API key in Azure Key Vault for use with evaluation workflows.
-
-Prerequisites:
-- Export the environment variable APP_CONFIG_ENDPOINT with your Azure App Configuration endpoint, e.g.:
-    export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
-- The following keys must be present in App Configuration (label: agent-lz):
-    - SUBSCRIPTION_ID
-    - AZURE_RESOURCE_GROUP
-    - AI_FOUNDRY_ACCOUNT_NAME
-    - MODEL_DEPLOYMENTS (JSON list)
-    - KEY_VAULT_URI
-- The JSON files for blocklist and policy must exist and be valid:
-    - config/aifoundry/raipolicies.json
-    - config/aifoundry/raiblocklist.json
-- Azure CLI or Managed Identity authentication must be available.
-
-Features:
-- Loads configuration values from Azure App Configuration (subscription, resource group, account, deployment, Key Vault URI, etc).
-- Reads RAI blocklist and policy definitions from JSON files and applies them to the specified Azure OpenAI (Cognitive Services) resource.
-- Creates or updates the RAI blocklist and its items, ensuring the blocklist is always in sync with the provided JSON.
-- Creates or updates the RAI policy, associates it with the deployment, and normalizes policy structure as needed.
-- Fetches the Azure OpenAI (AI Foundry) model API key and stores it as a secret in Azure Key Vault, enabling secure integration with AI Foundry Evaluation tools and workflows.
-
-Typical use case:
-Run this script after provisioning your Azure OpenAI resource and before running evaluation jobs that require access to the model API key via Key Vault.
+The selected foundation must expose deployment metadata and the original typed
+declarations must be available. Azure CLI or managed identity authentication
+and the local RAI JSON definitions are required. No runtime store is used for
+discovery. Evaluation API-key injection requires a selected vault when local
+authentication is enabled; Entra-only accounts never request an API key.
 """
 
 import os
@@ -38,6 +18,7 @@ from typing import Any, Dict, Optional
 from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
 from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
 from azure.appconfiguration import AzureAppConfigurationClient
+from config.deployment.setup_settings import load_setup_settings
 from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
 from azure.mgmt.cognitiveservices.models import (
     RaiBlocklist,
@@ -170,6 +151,8 @@ def add_ai_foundry_account_api_key_to_key_vault(
                 account_name,
             )
             return False
+        if not vault_uri:
+            raise ValueError("Foundry evaluation API-key injection requires a selected Key Vault.")
         logging.info("🔑 Fetching AI Foundry Account API key for account %s ...", account_name)
         keys = mgmt_client.accounts.list_keys(resource_group, account_name)
         api_key = keys.key1
@@ -288,18 +271,14 @@ def associate_policy_to_deployment(client: CognitiveServicesManagementClient, re
 # ── Main Logic ───────────────────────────────────────
 def main() -> None:
     configure_logging()
-    check_env()
+    settings = load_setup_settings()
     validate_json_file(RAI_POLICIES_JSON_FILE)
     validate_json_file(RAI_BLOCKLIST_JSON_FILE)
-    endpoint = os.environ["APP_CONFIG_ENDPOINT"]
     cred = get_azure_credential()
-    # Removed explicit token test - let Azure SDK handle authentication lazily
-    # The token will be obtained when actually needed by the App Configuration client
-    app_conf = AzureAppConfigurationClient(endpoint, cred)
-    subscription_id = cfg(app_conf, "SUBSCRIPTION_ID")
-    resource_group = foundry_resource_group(app_conf)
-    account_name = cfg(app_conf, "AI_FOUNDRY_ACCOUNT_NAME")
-    account_id = cfg(app_conf, "AI_FOUNDRY_ACCOUNT_RESOURCE_ID", required=False)
+    subscription_id = settings["SUBSCRIPTION_ID"]
+    resource_group = resource_group_for(settings, "foundry")
+    account_name = settings["AI_FOUNDRY_ACCOUNT_NAME"]
+    account_id = settings.get("AI_FOUNDRY_ACCOUNT_RESOURCE_ID")
     if account_id:
         context = bound_resource_id(account_id, {
             "AZURE_SUBSCRIPTION_ID": subscription_id,
@@ -310,9 +289,9 @@ def main() -> None:
     logging.info(f"Loaded: subscriptionId={subscription_id}, resourceGroupName={resource_group}")
     logging.info(f"Loaded: aiFoundryAccountName={account_name}")
     # Determine deployment name from list
-    raw_list = cfg(app_conf, "MODEL_DEPLOYMENTS")
+    raw_list = settings["MODEL_DEPLOYMENTS"]
     try:
-        deployments = json.loads(raw_list)
+        deployments = json.loads(raw_list) if isinstance(raw_list, str) else raw_list
     except json.JSONDecodeError as e:
         logging.error("MODEL_DEPLOYMENTS is not valid JSON: %s", e)
         sys.exit(1)
@@ -329,6 +308,10 @@ def main() -> None:
         sys.exit(1)
     logging.info(f"Selected deployment: {deployment_name} (canonical_name={CANONICAL_DEPLOYMENT_NAME})")
     client = CognitiveServicesManagementClient(cred, subscription_id)
+    if not settings.get("KEY_VAULT_URI"):
+        account = client.accounts.get(resource_group, account_name)
+        if account.properties.disable_local_auth is not True:
+            raise RuntimeError("Foundry evaluation API-key injection requires a selected Key Vault.")
     # Blocklist
     bl_def = load_and_replace(
         RAI_BLOCKLIST_JSON_FILE,
@@ -352,7 +335,7 @@ def main() -> None:
     associate_policy_to_deployment(client, resource_group, account_name, deployment_name, p_name)
     # Store API key in Key Vault
     logging.info("🔑 Adding AI Foundry Account API Key to Key Vault …")
-    key_vault_uri = cfg(app_conf, "KEY_VAULT_URI")
+    key_vault_uri = settings.get("KEY_VAULT_URI")
     secret_stored = add_ai_foundry_account_api_key_to_key_vault(
         client,
         resource_group,

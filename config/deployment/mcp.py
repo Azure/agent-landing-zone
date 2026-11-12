@@ -32,6 +32,7 @@ from config.deployment.native import resolve_application
 from config.deployment.native_access import grant_secrets
 from config.deployment.native_deploy import publication_environment
 from config.deployment.resource_groups import resource_group_for
+from config.deployment.setup_settings import load_setup_environment
 from config.panel.setup import (
     COSMOS_DATA_READER_ROLE_GUID,
     container_scope_path,
@@ -97,8 +98,6 @@ def capture_capabilities(environment: Mapping[str, str]) -> list[str]:
     if not mcp_config.vector_required(environment):
         return mcp_config.account_capabilities(environment)
     resource_id = environment.get("COSMOS_DB_ACCOUNT_RESOURCE_ID", "")
-    if not resource_id and environment.get("APP_CONFIG_ENDPOINT"):
-        resource_id = stored(environment, "COSMOS_DB_ACCOUNT_RESOURCE_ID")
     if not resource_id:
         return mcp_config.account_capabilities(environment)
     bound_resource_id(
@@ -249,22 +248,35 @@ def ensure_api(environment: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def app_mapping(environment: Mapping[str, str], service: str) -> dict:
+    rows = json.loads(environment.get("CONTAINER_APPS", "[]"))
+    if not isinstance(rows, list):
+        raise ValueError("Verified Container Apps mapping is required.")
+    selected = [row for row in rows if isinstance(row, dict) and row.get("service_name") == service]
+    if len(selected) != 1 or not selected[0].get("name") or not selected[0].get("identity", {}).get("principalId"):
+        raise ValueError("Selected MCP operation requires an exact verified app and identity mapping.")
+    return selected[0]
+
+
 def server_binding(environment: Mapping[str, str]) -> dict[str, str]:
     group = resource_group_for(environment, "application")
-    name = "ca-" + environment["RESOURCE_TOKEN"] + "-mcp"
+    mapped = app_mapping(environment, "mcp")
+    name = mapped["name"]
     server = _container_app(
         group,
         name,
         required=True,
         subscription=environment["AZURE_SUBSCRIPTION_ID"],
         require_identity_selection=True,
-        identity_client_id=environment.get("MCP_APP_CLIENT_ID", ""),
+        identity_client_id=mapped["identity"].get("clientId") or "",
     )
     principal = server.get("uaiPrincipalId") or server.get("principalId")
     if not principal or not server["fqdn"]:
         raise ValueError(
             "MCP Container App requires its provisioned identity and HTTPS ingress."
         )
+    if guid(principal) != guid(mapped["identity"]["principalId"]):
+        raise ValueError("MCP app identity changed after verified discovery.")
     return {
         "MCP_APP_NAME": name,
         "MCP_APP_ENDPOINT": "https://" + server["fqdn"],
@@ -274,15 +286,16 @@ def server_binding(environment: Mapping[str, str]) -> dict[str, str]:
 
 
 def grant_catalog(environment: Mapping[str, str], principal: str) -> None:
-    endpoint = environment["APP_CONFIG_ENDPOINT"]
-    account_id = _config_value(run_az, endpoint, "COSMOS_DB_ACCOUNT_RESOURCE_ID")
+    account_id = environment.get("COSMOS_DB_ACCOUNT_RESOURCE_ID", "")
     context = bound_resource_id(
         account_id,
         environment,
         "Microsoft.DocumentDB/databaseAccounts",
         area="application",
     )
-    database = _config_value(run_az, endpoint, "DATABASE_NAME")
+    database = environment.get("DATABASE_NAME", "")
+    if not database:
+        raise ValueError("MCP catalog requires its verified Cosmos database mapping.")
     values = mcp_config.settings(environment)
     for key in ("MCP_SOURCES_CONTAINER", "MCP_METADATA_CONTAINER"):
         ensure_cosmos_sql_role_assignment(
@@ -299,7 +312,7 @@ def grant_catalog(environment: Mapping[str, str], principal: str) -> None:
                 values[key],
             ),
         )
-    model_id = _config_value(run_az, endpoint, "AI_FOUNDRY_ACCOUNT_RESOURCE_ID")
+    model_id = environment.get("AI_FOUNDRY_ACCOUNT_RESOURCE_ID", "")
     bound_resource_id(
         model_id, environment, "Microsoft.CognitiveServices/accounts", area="foundry"
     )
@@ -350,12 +363,8 @@ def prepare(root: Path, environment: Mapping[str, str]) -> dict[str, str]:
     }
     if mcp_config.nl2sql_enabled(environment):
         values.update({
-            "MCP_COSMOS_ENDPOINT": _config_value(
-                run_az, environment["APP_CONFIG_ENDPOINT"], "COSMOS_DB_ENDPOINT"
-            ),
-            "MCP_COSMOS_DATABASE": _config_value(
-                run_az, environment["APP_CONFIG_ENDPOINT"], "DATABASE_NAME"
-            ),
+            "MCP_COSMOS_ENDPOINT": environment["COSMOS_DB_ENDPOINT"],
+            "MCP_COSMOS_DATABASE": environment["DATABASE_NAME"],
         })
         vault = environment.get("KEY_VAULT_URI", "")
         if vault:
@@ -519,13 +528,7 @@ def restart_server(environment: Mapping[str, str], binding: Mapping[str, str]) -
 def caller_principals(environment: Mapping[str, str]) -> list[str]:
     app = resolve_application(environment)
     if app.host.value == "container_apps":
-        worker = _container_app(
-            resource_group_for(environment, "application"),
-            "ca-" + environment["RESOURCE_TOKEN"] + "-orchestrator",
-            required=True,
-            subscription=environment["AZURE_SUBSCRIPTION_ID"],
-        )
-        return [guid(worker.get("uaiPrincipalId") or worker["principalId"])]
+        return [guid(app_mapping(environment, "orchestrator")["identity"]["principalId"])]
     return [
         guid(discover_instance(publication_environment(environment, mode)).principal_id)
         for mode in app.publications
@@ -698,7 +701,7 @@ def main() -> int:
         environment = (
             os.environ
             if args.capture_capabilities
-            else selected_environment(root, os.environ["AZURE_ENV_NAME"])
+            else load_setup_environment(os.environ, project_root=root)
         )
         if args.capture_capabilities:
             print(json.dumps(capture(root, environment)))

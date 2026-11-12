@@ -36,6 +36,10 @@ ENDPOINT_SUFFIXES = {
     "AZURE_AI_PROJECT_ENDPOINT": ".services.ai.azure.com",
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": ".azurecr.io",
     "DURABLE_TASK_SCHEDULER_ENDPOINT": ".durabletask.io",
+    "KEY_VAULT_URI": ".vault.azure.net",
+    "SEARCH_SERVICE_QUERY_ENDPOINT": ".search.windows.net",
+    "STORAGE_BLOB_ENDPOINT": ".blob.core.windows.net",
+    "COSMOS_DB_ENDPOINT": ".documents.azure.com",
 }
 _DNS_SCRIPT = (
     "import json, socket, sys; "
@@ -165,6 +169,7 @@ def check_endpoint(key: str, endpoint: str) -> None:
 
 
 def check_stage(environment: Mapping[str, str], stage: str) -> int:
+    """Probe an already verified setup context (the CLI verifies before calling)."""
     if stage not in STAGES:
         raise PrivateNetworkError("Unknown private network check stage.")
     isolation = (environment.get("NETWORK_ISOLATION") or "").strip().lower()
@@ -185,7 +190,10 @@ def check_stage(environment: Mapping[str, str], stage: str) -> int:
             )
             return DEFERRED
 
-    keys = ["APP_CONFIG_ENDPOINT"]
+    mode = environment.get("APP_RUNTIME_CONFIGURATION_MODE") or "appConfig"
+    if mode not in {"appConfig", "containerEnv", "none"}:
+        raise PrivateNetworkError("Invalid APP_RUNTIME_CONFIGURATION_MODE; restore the declared selection.")
+    keys = ["APP_CONFIG_ENDPOINT"] if mode == "appConfig" else []
     if stage == "hosted-build":
         keys = ["AZURE_CONTAINER_REGISTRY_ENDPOINT"]
     elif stage == "pre-deploy" and requires_hosted_foundation(
@@ -194,6 +202,16 @@ def check_stage(environment: Mapping[str, str], stage: str) -> int:
     ):
         keys.append("AZURE_AI_PROJECT_ENDPOINT")
     endpoints = [(key, environment.get(key) or "") for key in keys]
+    if stage == "post-provision":
+        # These are verified bound destinations supplied by the setup resolver,
+        # never guessed names or store discovery. Disabled resources are absent.
+        for key in (
+            "AZURE_AI_PROJECT_ENDPOINT", "KEY_VAULT_URI",
+            "SEARCH_SERVICE_QUERY_ENDPOINT", "STORAGE_BLOB_ENDPOINT",
+            "COSMOS_DB_ENDPOINT",
+        ):
+            if environment.get(key) and key not in keys:
+                endpoints.append((key, environment[key]))
     if stage == "pre-deploy" and is_bundled_application(environment) and resolve_application(environment).host == "container_apps":
         # Validate the actual output before probing it. No constructed hostname,
         # public-network fallback or RUN_FROM_JUMPBOX connectivity bypass.
@@ -218,7 +236,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
-        return check_stage(os.environ, args.stage)
+        from config.deployment.setup_settings import load_setup_environment
+
+        # The shared adapter verifies resource destinations while retaining
+        # selected specialized handoffs and explicit local deferral controls.
+        # It returns a mapping; it never hydrates the process environment.
+        environment = load_setup_environment(os.environ)
+        return check_stage(environment, args.stage)
     except ValueError as exc:
         LOGGER.error("Private network prerequisite failed: %s", exc)
         return 4

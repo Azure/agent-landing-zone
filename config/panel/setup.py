@@ -262,6 +262,8 @@ def resolve_subscription_id(environment: Mapping[str, str]) -> str:
 
 def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     """Assign native metadata access when selected; return newly created grants."""
+    from config.deployment.setup_settings import load_setup_settings
+    environment = load_setup_settings(environment)
     from config.deployment.native import resolve_application
     from config.deployment.composition import is_bundled_application
     metadata = is_bundled_application(environment) and resolve_application(environment).metadata
@@ -276,10 +278,8 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     # so a misconfigured environment fails fast and deterministically.
     resource_group = (environment.get("AZURE_RESOURCE_GROUP") or "").strip()
     account_name = (environment.get("DATABASE_ACCOUNT_NAME") or "").strip()
-    resource_token = (environment.get("RESOURCE_TOKEN") or "").strip()
     for value, name in (
         (resource_group, "AZURE_RESOURCE_GROUP"),
-        (resource_token, "RESOURCE_TOKEN"),
     ):
         if not value:
             raise PanelRbacError(
@@ -290,20 +290,6 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
     except ResourceGroupError as error:
         raise PanelRbacError(str(error)) from error
     database_name = (environment.get("DATABASE_NAME") or "").strip()
-    if not account_name and (environment.get("APP_CONFIG_ENDPOINT") or "").strip():
-        endpoint = environment["APP_CONFIG_ENDPOINT"].strip()
-        for key in ("DATABASE_ACCOUNT_NAME", "DATABASE_NAME"):
-            value = _run_az([
-                "appconfig", "kv", "show", "--endpoint", endpoint,
-                "--key", key, "--label", LABEL, "--auth-mode", "login",
-                "--query", "value", "--output", "tsv",
-            ]).strip()
-            if not value:
-                raise PanelRbacError(f"App Configuration {key} is empty; cannot assign panel Cosmos RBAC.")
-            if key == "DATABASE_ACCOUNT_NAME":
-                account_name = value
-            elif not database_name:
-                database_name = value
     if not account_name:
         raise PanelRbacError(
             "Native frontend metadata requires DATABASE_ACCOUNT_NAME; cannot assign Cosmos RBAC."
@@ -313,10 +299,14 @@ def configure_panel_rbac(environment: Mapping[str, str]) -> int:
         raise PanelRbacError(
             "Native frontend metadata requires an AZURE_SUBSCRIPTION_ID; cannot assign Cosmos RBAC."
         )
-    database_name = database_name or account_name
+    if not database_name:
+        raise PanelRbacError("Native frontend metadata requires the verified DATABASE_NAME.")
 
+    frontend_name = environment.get("FRONTEND_APP_NAME")
+    if not frontend_name:
+        raise PanelRbacError("Native frontend metadata requires the verified FRONTEND_APP_NAME.")
     app_names = {
-        FRONTEND_APP_SERVICE_NAME: f"ca-{resource_token}-frontend",
+        FRONTEND_APP_SERVICE_NAME: frontend_name,
     }
     principal_ids = {
         service_name: resolve_container_app_principal_id(resource_group, app_name)

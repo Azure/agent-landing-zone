@@ -123,7 +123,7 @@ acr_task_agent_pool="$(get_azd_value "$repo_root" "ACR_TASK_AGENT_POOL")"
 
 # Foundation guard (first step, before any Azure change): azd deploy only
 # deploys applications onto a foundation created by azd provision.
-if [ -z "$global_rg" ] || [ -z "${APP_CONFIG_ENDPOINT:-}" ]; then
+if [ -z "$global_rg" ]; then
   red "The foundation is not provisioned. Run azd provision first."
   exit 3
 fi
@@ -131,9 +131,12 @@ command -v python3 >/dev/null 2>&1 || { red "python3 is required to verify the f
 python3 -m config.deployment.resource_groups --azure-dir "$dot_azure" --check >/dev/null || {
   red "Resource-group binding check failed. No changes were made."; exit 3;
 }
-python3 -m config.deployment.outputs --check-foundation || {
-  red "Foundation destination/project verification failed. Run azd provision first."; exit 3;
+# BEGIN deployment metadata verification
+python3 -m config.deployment.metadata --check --environment "${AZURE_ENV_NAME:-}" --project-root "$repo_root" || {
+  metadata_exit=$?
+  exit "$metadata_exit"
 }
+# END deployment metadata verification
 
 # Re-validate the application definition and compare it with the binding.
 app_definition_path="${AGENTLZ_APP_DEFINITION:-$repo_root/app-definition.json}"
@@ -251,10 +254,12 @@ if [ "$native_mode" = "true" ]; then
     red "Native application preparation/publication failed; component deployment has not started."
     exit 1
   }
+  if [[ "${APP_RUNTIME_CONFIGURATION_MODE:-appConfig}" == "appConfig" ]]; then
   (cd "$repo_root" && python3 -m config.deployment.appconfig --require-hosted-endpoint) || {
     red "Native runtime settings could not be published."
     exit 1
   }
+  fi
 fi
 # END native application lifecycle
 

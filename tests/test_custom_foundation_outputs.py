@@ -8,6 +8,73 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_deployment_schema_is_independent_closed_and_integrity_checked():
+    import hashlib
+    import json
+    import jsonschema
+
+    path = ROOT / "contracts/deployment-metadata-v1.schema.json"
+    schema = json.loads(path.read_bytes())
+    assert schema["additionalProperties"] is False
+    assert "/specs/" not in schema["$id"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == path.with_suffix(
+        ".json.sha256"
+    ).read_text().split()[0]
+    example = json.loads((ROOT / "tests/fixtures/deployment-metadata-v1.json").read_text())
+    jsonschema.Draft202012Validator(schema).validate(example)
+    example["resources"]["appConfig"] = {"status": "disabled", "resource": {"name": "wrong"}}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(schema).validate(example)
+    runtime = ROOT / "contracts/platform-outputs-v1.schema.json"
+    assert hashlib.sha256(runtime.read_bytes()).hexdigest() == (
+        "7217acf4ab374fd2f6426f849d013756f911ae297ab99c13aed78bc976aecd3d"
+    )
+    assert runtime.with_suffix(".json.sha256").read_bytes() == (
+        b"7217acf4ab374fd2f6426f849d013756f911ae297ab99c13aed78bc976aecd3d  platform-outputs-v1.schema.json\n"
+    )
+
+
+def test_native_named_terraform_and_azd_json_transport(tmp_path):
+    """Resource-free native roundtrip, not an Azure deployment or state reader."""
+    import json
+    import shutil
+    import subprocess
+
+    terraform, azd = shutil.which("terraform"), shutil.which("azd")
+    if not terraform or not azd:
+        pytest.skip("Terraform and azd are required for native transport evidence")
+    example = json.loads((ROOT / "tests/fixtures/deployment-metadata-v1.json").read_text())
+    (tmp_path / "main.tf.json").write_text(json.dumps({
+        "output": {"DEPLOYMENT_METADATA": {"value": example, "sensitive": False}},
+    }), encoding="utf-8")
+    for args in (["init", "-backend=false", "-input=false", "-lockfile=readonly"],
+                 ["apply", "-input=false", "-auto-approve"]):
+        result = subprocess.run([terraform, f"-chdir={tmp_path}", *args],
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stderr
+    result = subprocess.run([terraform, f"-chdir={tmp_path}", "output", "-json", "DEPLOYMENT_METADATA"],
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == example
+    # azd 1.37.3 manager.UpdateEnvironment json.Marshal's object values before
+    # DotenvSet. Exercise the resulting string through its real persisted reader.
+    encoded = json.dumps(json.loads(result.stdout), separators=(",", ":"))
+    assert len(encoded.encode("utf-8")) < 32767
+    (tmp_path / "azure.yaml").write_text("name: metadata-contract\n", encoding="utf-8")
+    selected = tmp_path / ".azure" / "contract"
+    selected.mkdir(parents=True)
+    (selected / ".env").write_text('AZURE_ENV_NAME="contract"\n', encoding="utf-8")
+    result = subprocess.run([azd, "env", "set", "DEPLOYMENT_METADATA", encoded,
+                             "--cwd", str(tmp_path), "--environment", "contract", "--no-prompt"],
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run([azd, "env", "get-value", "DEPLOYMENT_METADATA",
+                             "--cwd", str(tmp_path), "--environment", "contract", "--no-prompt"],
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == example
+
+
 @pytest.mark.parametrize("name,flag,value", [
     ("AZURE_AI_PROJECT_RESOURCE_ID", "deployAiFoundry", "aiFoundryProjectResourceId"),
     ("AZURE_AI_PROJECT_ENDPOINT", "deployAiFoundry", "aiFoundryProjectEndpoint"),

@@ -27,6 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 RG = "rg-test"
 SUB = "/subscriptions/0000/resourceGroups/rg-test/providers"
 CONTEXT = {"AZURE_RESOURCE_GROUP": RG, "AZURE_SUBSCRIPTION_ID": "0000", "SUBSCRIPTION_ID": "0000"}
+
+
+def test_base_reader_is_runtime_mode_aware():
+    for mode in ("containerEnv", "none"):
+        assignments = expand_profiles(["secret-reader"], runtime_mode=mode)
+        assert "AppConfigurationDataReader" not in {item.role for item in assignments}
+        assert {"AcrPull", "KeyVaultSecretsUser"} <= {item.role for item in assignments}
+    assert "AppConfigurationDataReader" in {item.role for item in expand_profiles([])}
 ACR = f"{SUB}/Microsoft.ContainerRegistry/registries/crx"
 COSMOS = f"{SUB}/Microsoft.DocumentDB/databaseAccounts/cosmos-x"
 RESOURCES = {
@@ -92,6 +100,18 @@ def bundled():
 
 
 class RoleAssignmentTests(unittest.TestCase):
+    def test_store_free_assignment_never_resolves_store_and_retains_other_roles(self):
+        for mode in ("containerEnv", "none"):
+            az = FakeAz()
+            created = assign_hosted_roles(
+                {"name": "agent", "profiles": ["secret-reader"]},
+                "22222222-2222-4222-8222-222222222222",
+                {**CONTEXT, "APP_RUNTIME_CONFIGURATION_MODE": mode},
+                run_az=az,
+            )
+            self.assertEqual({"AcrPull", "KeyVaultSecretsUser"}, {item.assignment.role for item in created})
+            self.assertFalse(any("Microsoft.AppConfiguration/configurationStores" in args for args in az.calls))
+
     def test_key_vault_scope_uses_foundation_name_without_guessing(self):
         vaults = [{"name": "kv-app", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-app"}, {"name": "kv-foundry", "id": f"{SUB}/Microsoft.KeyVault/vaults/kv-foundry"}]
         with patch.dict(RESOURCES, {"Microsoft.KeyVault/vaults": vaults}):

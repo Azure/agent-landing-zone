@@ -1,29 +1,12 @@
 #!/usr/bin/env python3
 """
-Azure Cognitive Search Setup Script
+Provision template-defined Search resources from verified deployment settings.
 
-This script automates the provisioning and configuration of Azure Cognitive Search resources (datasources, indexes, skillsets, indexers) using definitions rendered from Jinja2 templates and values from Azure App Configuration.
-
-Prerequisites:
-- Export the environment variable APP_CONFIG_ENDPOINT with your Azure App Configuration endpoint, e.g.:
-    export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
-- The following keys must be present in App Configuration (label: agent-lz):
-    - SEARCH_SERVICE_QUERY_ENDPOINT
-    - SEARCH_API_VERSION
-    - Any other keys referenced in your Jinja2 templates
-- Azure CLI or Managed Identity authentication must be available.
-- The Jinja2 templates for search (search.j2, search.settings.j2) must exist and be valid in the config/search directory.
-
-Features:
-- Loads settings from Azure App Configuration (optionally filtered by label).
-- Renders Jinja2 templates for search resource definitions, supporting variable expansion from App Config.
-- Seeds variables from a secondary template (e.g., search.settings.j2) back into App Configuration.
-- Provisions or updates Azure Search datasources, indexes, skillsets, and indexers in a safe order, cleaning up dependencies as needed.
-- Handles authentication via Managed Identity or Azure CLI.
-- Logs all actions and errors, and continues on non-fatal errors (fail gracefully).
-
-Typical usage:
-Run this script after provisioning your Azure Search service and App Configuration, and after updating your Jinja2 templates or App Config values.
+Requires provider metadata, original typed declarations, local Jinja templates
+and Azure CLI or managed identity authentication. Derived settings are computed
+in memory. Only appConfig runtime mode reads owned operational preferences
+and publishes derived settings under label agent-lz; stores never discover
+resource bindings.
 """
 
 import os
@@ -38,6 +21,8 @@ from uuid import UUID
 
 from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from azure.appconfiguration import AzureAppConfigurationClient, ConfigurationSetting
+from azure.core.exceptions import ResourceNotFoundError
+from config.deployment.setup_settings import load_setup_settings
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
 from config.search.foundry_iq_mcp_setup import validate_foundry_iq_mcp_settings
@@ -183,42 +168,55 @@ def validate_foundry_iq_settings(settings: Dict[str, Any]) -> None:
         )
 
 
-def load_appconfig_settings(ac_client: AzureAppConfigurationClient, label_filter: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Reads all settings from App Configuration under given label_filter (or None for no label).
-    Returns a dict: { key: parsed_value_or_string }.
-    If a value is JSON (starts with { or [), attempts json.loads; on failure, keeps as string.
-    """
+# Operational source settings owned by Search's existing settings template.
+# Resource bindings and typed foundation choices are deliberately excluded.
+SEARCH_PREFERENCE_KEYS = frozenset({
+    "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED", "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME",
+    "WORK_IQ_ENABLED", "WORK_IQ_KNOWLEDGE_SOURCE_NAME", "WORK_IQ_APPLICATION_ID",
+    "WORK_IQ_FEDERATED_CREDENTIAL_ID", "WORK_IQ_TENANT_ID",
+    "FABRIC_IQ_ENABLED", "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME", "FABRIC_IQ_WORKSPACE_ID", "FABRIC_IQ_ONTOLOGY_ID",
+    "FABRIC_DATA_AGENT_ENABLED", "FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME",
+    "FABRIC_DATA_AGENT_WORKSPACE_ID", "FABRIC_DATA_AGENT_DATA_AGENT_ID",
+    "SHAREPOINT_INDEXED_ENABLED", "SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME",
+    "SHAREPOINT_INDEXED_INDEX_NAME", "SHAREPOINT_INDEXED_SITE_URL", "SHAREPOINT_INDEXED_TENANT_ID",
+    "SHAREPOINT_INDEXED_APPLICATION_ID", "SHAREPOINT_INDEXED_FEDERATED_CREDENTIAL_APPLICATION_ID",
+    "WEB_GROUNDING_ENABLED", "WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME",
+    "WEB_GROUNDING_ALLOWED_DOMAINS", "WEB_GROUNDING_BLOCKED_DOMAINS",
+    "FOUNDRY_IQ_MCP_ENABLED", "FOUNDRY_IQ_MCP_SOURCES_JSON", "FOUNDRY_IQ_MCP_REASONING_EFFORT",
+    "FOUNDRY_IQ_MCP_TRUSTED_HOSTS", "FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS",
+    "RETRIEVAL_AUTH_MODE", "HOSTED_AGENT_AUTH_MODE", "FOUNDRY_IQ_FORWARD_SOURCE_AUTH", "ALLOW_ANONYMOUS",
+})
+
+
+def load_appconfig_settings(ac_client: AzureAppConfigurationClient, label_filter: Optional[str] = LABEL_FILTER) -> Dict[str, Any]:
+    """Read only Search-owned operational preferences; propagate access failures."""
     ctx = {}
-    try:
-        for setting in ac_client.list_configuration_settings(key_filter="*", label_filter=label_filter):
-            ctx[setting.key] = parse_json_like_setting(setting.value)
-    except Exception as e:
-        logging.error(f"Error listing App Configuration settings: {e}")
+    for key in sorted(SEARCH_PREFERENCE_KEYS):
+        try:
+            setting = ac_client.get_configuration_setting(key=key, label=label_filter)
+        except ResourceNotFoundError:
+            continue
+        ctx[key] = parse_json_like_setting(setting.value)
     return ctx
 
 # ── Template Rendering ─────────────────────────────────────────────────────-
 def prepare_context_and_render(template_name: str, template_dir: str, label_filter: str = LABEL_FILTER) -> Tuple[Optional[dict], dict]:
     """
-    Loads settings from App Config, renders templates, and returns (rendered_definitions, context).
+    Verify deployment settings, render templates and optionally publish derived values.
     Returns (None, context) on fatal error.
     """
-    ac_endpoint = os.getenv("APP_CONFIG_ENDPOINT")
-    if not ac_endpoint:
-        logging.error("APP_CONFIG_ENDPOINT not set")
-        return None, {}
-
-    cred = ChainedTokenCredential(
+    context = load_setup_settings()
+    ac_client = None
+    if context.get("APP_RUNTIME_CONFIGURATION_MODE") == "appConfig":
+        ac_endpoint = context.get("APP_CONFIG_ENDPOINT")
+        if not ac_endpoint:
+            raise RuntimeError("appConfig Search setup requires a verified APP_CONFIG_ENDPOINT.")
+        cred = ChainedTokenCredential(
             AzureCliCredential(process_timeout=30),
             ManagedIdentityCredential(process_timeout=30)
         )
-    try:
         ac_client = AzureAppConfigurationClient(ac_endpoint, cred)
-    except Exception as e:
-        logging.error(f"Failed to create AzureAppConfigurationClient: {e}")
-        return None, {}
-
-    context = load_appconfig_settings(ac_client, label_filter=label_filter)
+        context.update(load_appconfig_settings(ac_client, label_filter=label_filter))
     
     # ── Extract embedding model info from MODEL_DEPLOYMENTS ──────────────────────────────────────
     def extract_embedding_model_info(ctx: dict) -> dict:
@@ -234,10 +232,10 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
             for model in model_deployments:
                 if model.get("canonical_name") == "EMBEDDING_DEPLOYMENT_NAME":
                     embedding_info = {
-                        "deployment_name": model.get("name", "text-embedding"),
-                        "model_name": model.get("model", {}).get("name", "text-embedding-3-large") if isinstance(model.get("model"), dict) else model.get("model", "text-embedding-3-large"),
+                        "deployment_name": model.get("name"),
+                        "model_name": model.get("model", {}).get("name") if isinstance(model.get("model"), dict) else model.get("model"),
                         "endpoint": model.get("endpoint", ""),
-                        "api_version": model.get("apiVersion", "2025-01-01-preview")
+                        "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
                     }
                     logging.info(f"✅ Found embedding model: {embedding_info['deployment_name']} at {embedding_info['endpoint']}")
                     return embedding_info
@@ -275,7 +273,7 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
                         "model_name": model_name,
                         "model_format": model_format,
                         "endpoint": model.get("endpoint", ""),
-                        "api_version": model.get("apiVersion", "2025-01-01-preview")
+                        "api_version": model.get("api_version") or model.get("apiVersion", "2025-01-01-preview")
                     }
 
                     model_format_l = (gpt_info.get("model_format") or "").lower()
@@ -365,6 +363,8 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
             if "FOUNDRY_IQ_MCP_SOURCES_JSON" in context:
                 vars_dict["FOUNDRY_IQ_MCP_SOURCES_JSON"] = context["FOUNDRY_IQ_MCP_SOURCES_JSON"]
             for key, val in vars_dict.items():
+                if ac_client is None:
+                    continue
                 if isinstance(val, (dict, list)):
                     final_val = json.dumps(val)
                 else:
@@ -379,7 +379,7 @@ def prepare_context_and_render(template_name: str, template_dir: str, label_filt
                     ac_client.set_configuration_setting(setting)
                     logging.info(f"📝 Set App Config '{key}' = '{final_val}'")
                 except Exception as e:
-                    logging.error(f"❗️ Failed to set '{key}': {e}")
+                    raise RuntimeError(f"Failed to publish Search setting '{key}'.") from e
     else:
         logging.info(f"{VARS_TEMPLATE} not found; skipping variable template step.")
 
@@ -1027,11 +1027,9 @@ def execute_setup(defs: Optional[dict], context: dict):
     search_endpoint = context.get("SEARCH_SERVICE_QUERY_ENDPOINT")
     api_version = context.get("SEARCH_API_VERSION")
     if not search_endpoint:
-        logging.error("❗️ SEARCH_SERVICE_QUERY_ENDPOINT not found in App Configuration; skipping Azure Search setup.")
-        return
+        raise RuntimeError("Selected Search setup requires SEARCH_SERVICE_QUERY_ENDPOINT.")
     if not api_version:
-        logging.error("❗️ SEARCH_API_VERSION not found in search.env; skipping Azure Search setup.")
-        return
+        raise RuntimeError("Selected Search setup requires SEARCH_API_VERSION.")
 
     filter_work_iq_sources(defs, context, cred)
 

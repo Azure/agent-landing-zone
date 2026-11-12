@@ -269,15 +269,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        from config.deployment.setup_settings import load_setup_environment
+        environment = (
+            load_setup_environment(os.environ) if resolve_mode(os.environ).value == "hosted"
+            else os.environ
+        )
         digest, generated_source_commit = prepare_environment(
-            os.environ,
+            environment,
             manifest,
             image_version_override=args.image_version,
         )
         if digest is None:
             LOGGER.info("Container Apps selected; Hosted image preparation is not applicable.")
             return 0
-        persist_digest(os.environ, digest, generated_source_commit)
+        persist_digest(environment, digest, generated_source_commit)
         print(digest)
         LOGGER.info("Hosted image digest materialized. Run azd deploy to publish the agent.")
         return 0

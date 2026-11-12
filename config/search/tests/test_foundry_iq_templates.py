@@ -1990,32 +1990,49 @@ class FoundryIqMcpPreflightCliTests(unittest.TestCase):
 
 
 class PostProvisionMcpSourceGuardTests(unittest.TestCase):
-    """Regression guards for the PowerShell validation/write ordering."""
+    """Shared Python guards replacing the PowerShell-only flat publisher."""
 
     SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "postProvision.ps1"
 
     def test_disabled_path_skips_source_read_and_writes_safe_defaults(self):
-        script = self.SCRIPT.read_text(encoding="utf-8")
-        flag = script.index("$mcpEnabled = Test-Truthy")
-        preflight = script.index(
-            "Invoke-PythonModule -ModuleName 'config.search.foundry_iq_mcp_setup'"
-        )
-        canonical_output = script.index(
-            "-Arguments @('--canonical')"
-        )
-        app_config_import = script.index("Set-AgentLzAppConfiguration -Endpoint")
+        class DisabledEnvironment(dict):
+            def get(self, key, default=None):
+                if key == "FOUNDRY_IQ_MCP_SOURCES_JSON":
+                    raise AssertionError("Disabled source input must not be read")
+                return super().get(key, default)
 
-        self.assertLess(flag, preflight)
-        self.assertLess(preflight, canonical_output)
-        self.assertLess(canonical_output, app_config_import)
-        self.assertNotIn(
-            "$mcpSourcesJson = Get-OptionalEnvValue 'FOUNDRY_IQ_MCP_SOURCES_JSON'",
-            script,
-        )
-        self.assertIn("$mcpSourcesJson = '[]'", script)
-        self.assertIn("$mcpReasoningEffort = 'low'", script)
-        self.assertIn("$mcpTrustedHosts = ''", script)
-        self.assertIn("$mcpLogToolArguments = 'false'", script)
+        with patch.object(mcp_setup.os, "environ", DisabledEnvironment(
+            FOUNDRY_IQ_MCP_ENABLED="false",
+            FOUNDRY_IQ_MCP_SOURCES_JSON="{stale malformed credential content",
+        )):
+            context = mcp_setup.build_preflight_context_from_environ()
+        mcp_setup.validate_foundry_iq_mcp_settings(context)
+        context.update({
+            "RESOURCE_TOKEN": "test",
+            "SEARCH_SERVICE_QUERY_ENDPOINT": "https://search.search.windows.net",
+            "AI_FOUNDRY_ACCOUNT_NAME": "foundry",
+            "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
+            "APP_CONFIG_ENDPOINT": "https://config.azconfig.io",
+        })
+        client = Mock()
+        with (
+            patch.object(setup, "load_setup_settings", return_value=context),
+            patch.object(setup, "ChainedTokenCredential"),
+            patch.object(setup, "AzureAppConfigurationClient", return_value=client),
+            patch.object(setup, "load_appconfig_settings", return_value={}),
+        ):
+            rendered, _ = setup.prepare_context_and_render(
+                "search.settings.j2", str(TEMPLATE_DIR),
+            )
+        self.assertIsNotNone(rendered)
+        written = {
+            call.args[0].key: call.args[0].value
+            for call in client.set_configuration_setting.call_args_list
+        }
+        self.assertEqual("[]", written["FOUNDRY_IQ_MCP_SOURCES_JSON"])
+        self.assertEqual("low", written["FOUNDRY_IQ_MCP_REASONING_EFFORT"])
+        self.assertEqual("", written["FOUNDRY_IQ_MCP_TRUSTED_HOSTS"])
+        self.assertEqual("false", written["FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS"])
 
 
 class WorkIqPreflightTests(unittest.TestCase):

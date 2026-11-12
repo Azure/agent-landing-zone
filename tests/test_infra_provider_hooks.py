@@ -79,7 +79,10 @@ def test_postgresql_protection_runs_before_private_deferral_and_publication(tmp_
     if shell == "pwsh":
         prefix = (
             "$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
-            "$env:AGENTLZ_REPO_ROOT=$PSScriptRoot\n"
+            "$env:AGENTLZ_REPO_ROOT=$PSScriptRoot\n$repoRoot=$PSScriptRoot\n"
+            "function Invoke-PythonModule { param($ModuleName, $Arguments)\n"
+            "if ($ModuleName -ne 'config.deployment.postgresql' -or $Arguments -notcontains 'protect') { exit 9 }\n"
+            "Write-Output 'PROTECT'; $global:LASTEXITCODE=[int]$env:PROTECT_EXIT }\n"
             "function python {\n"
             "if ($args[0] -ne '-c' -or $args[1] -notmatch \"'protect'\" -or "
             "$args[1] -notmatch 'config.deployment.postgresql') { throw 'Wrong protection boundary' }\n"

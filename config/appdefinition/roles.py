@@ -103,6 +103,7 @@ class PlannedAssignment:
 def plan_assignments(
     definition: AppDefinition, *, hosted_orchestration: bool,
     deploy_ingestion: bool = True,
+    runtime_mode: str = "appConfig",
 ) -> list[PlannedAssignment]:
     """Return the profile role assignments for every ``containerapp`` component."""
     planned: list[PlannedAssignment] = []
@@ -113,7 +114,7 @@ def plan_assignments(
         if component.get("kind") != KIND_CONTAINER_APP:
             continue
         service = component_service_name(definition, component)
-        for assignment in expand_profiles(component.get("profiles") or ()):
+        for assignment in expand_profiles(component.get("profiles") or (), runtime_mode=runtime_mode):
             planned.append(PlannedAssignment(str(component.get("name")), service, assignment))
     return planned
 
@@ -334,6 +335,7 @@ def assign_roles(
     planned = plan_assignments(
         definition, hosted_orchestration=hosted_orchestration,
         deploy_ingestion=resolve_ingestion_selection(environment),
+        runtime_mode=environment.get("APP_RUNTIME_CONFIGURATION_MODE") or "appConfig",
     )
     from config.deployment.native import selected as native_selected
     if definition.bundled and native_selected(environment):
@@ -359,7 +361,10 @@ def assign_hosted_roles(
     name = str(component["name"])
     planned = [
         PlannedAssignment(name, name, assignment)
-        for assignment in expand_profiles(component.get("profiles") or ())
+        for assignment in expand_profiles(
+            component.get("profiles") or (),
+            runtime_mode=environment.get("APP_RUNTIME_CONFIGURATION_MODE") or "appConfig",
+        )
     ]
     return _assign_planned(
         planned, environment, run_az=run_az, role_guids=role_guids,

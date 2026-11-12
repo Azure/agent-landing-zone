@@ -2,20 +2,19 @@ import os
 from azure.identity import ChainedTokenCredential, ManagedIdentityCredential, AzureCliCredential
 from azure.keyvault.secrets import SecretClient
 from azure.core.exceptions import AzureError
-from .appconfig import AppConfigClient
+from config.deployment.setup_settings import load_setup_settings
 
 class KeyVaultClient:
     """
     Simple wrapper to fetch and set secrets in Azure Key Vault.
-    Optionally accepts a vault URI; if not provided, reads KEY_VAULT_URI from App Configuration.
+    Optionally accepts a verified vault URI; otherwise verifies deployment settings.
     """
     def __init__(self, vault_uri: str = None):
         # Determine vault URI
         if vault_uri is None:
-            cfg = AppConfigClient()
-            vault_uri = cfg.get("KEY_VAULT_URI")
+            vault_uri = load_setup_settings().get("KEY_VAULT_URI")
             if not vault_uri:
-                raise EnvironmentError("KEY_VAULT_URI must be set to your Key Vault URI in App Configuration")
+                raise EnvironmentError("A selected Key Vault is required for Foundry secrets.")
         # Authenticate
         credential = ChainedTokenCredential(AzureCliCredential(),ManagedIdentityCredential())
         try:

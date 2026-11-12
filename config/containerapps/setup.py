@@ -1,24 +1,10 @@
 #!/usr/bin/env python3
 """
-Simple script to associate each Container App from App Configuration
-with Azure Container Registry (ACR) via its system-assigned or user-assigned identity.
+Associate verified selected Container Apps with the verified platform registry.
 
-Prerequisites:
-- Export the environment variable APP_CONFIG_ENDPOINT with your Azure App Configuration endpoint, e.g.:
-    export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
-- The following keys must be present in App Configuration (label: agent-lz):
-    - SUBSCRIPTION_ID
-    - AZURE_RESOURCE_GROUP
-    - AZURE_APP_RESOURCE_GROUP (optional; defaults to AZURE_RESOURCE_GROUP)
-    - CONTAINER_REGISTRY_NAME
-    - USE_UAI
-    - CONTAINER_APPS (JSON list)
-- Azure CLI or Managed Identity authentication must be available.
-
-This script will:
-- Read container app definitions from Azure App Configuration.
-- For each app, associate the specified Azure Container Registry (ACR) using either system-assigned or user-assigned identity.
-- Update the registry configuration for each Container App in Azure (parallelized).
+Uses provider metadata and original typed declarations, not a runtime store.
+Azure CLI or managed identity authentication is required. Existing app
+identities are reused and failures abort setup.
 """
 
 import os
@@ -34,6 +20,7 @@ from azure.identity import (
     ChainedTokenCredential
 )
 from azure.appconfiguration import AzureAppConfigurationClient
+from config.deployment.setup_settings import load_setup_settings
 from azure.mgmt.appcontainers import ContainerAppsAPIClient
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -47,7 +34,7 @@ def _get_desired_identity(app, app_name, use_uai):
     """Return the identity string/resource id we expect to use for registry auth."""
     logging.debug(f"[{app_name}] Checking identity configuration. USE_UAI={use_uai}")
     
-    if use_uai.lower() == "true":
+    if str(use_uai).lower() == "true":
         logging.debug(f"[{app_name}] Using User-Assigned Identity (UAI)")
         uai_dict = getattr(app.identity, "user_assigned_identities", None)
         
@@ -55,11 +42,15 @@ def _get_desired_identity(app, app_name, use_uai):
             logging.error(f"[{app_name}] No user-assigned identity found for app.")
             return None
         
-        identity_id = next(iter(uai_dict.keys()), None)
+        if len(uai_dict) != 1:
+            raise ValueError(f"Container App {app_name} requires exactly one user-assigned registry identity.")
+        identity_id = next(iter(uai_dict))
         logging.debug(f"[{app_name}] Found UAI: {identity_id}")
         return identity_id
     
     logging.debug(f"[{app_name}] Using System-Assigned Identity")
+    if not getattr(app.identity, "principal_id", None):
+        raise ValueError(f"Container App {app_name} requires an existing system-assigned identity.")
     return "system"
 
 
@@ -160,7 +151,7 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
 
 
 def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential,
-                                *, preserve_other_registries: bool = False):
+                                *, preserve_other_registries: bool = False, expected_identity: dict | None = None):
     """Update registry auth; custom callers can retain unrelated registries.
 
     The default retains the existing bundled setup behavior.
@@ -181,7 +172,22 @@ def update_single_container_app(subscription_id, resource_group, name, acr_serve
         logging.debug(f"[{name}] Current provisioning state: {app.provisioning_state}")
         
         # Check identity
-        desired_identity = _get_desired_identity(app, name, use_uai)
+        if expected_identity:
+            if expected_identity["kind"] == "userAssigned":
+                expected_id = expected_identity["resourceId"]
+                assigned = getattr(app.identity, "user_assigned_identities", None) or {}
+                if expected_id not in assigned:
+                    raise ValueError(f"Container App {name} registry identity conflicts with verified mapping.")
+                desired_identity = expected_id
+                attached = assigned[expected_id]
+            else:
+                desired_identity = "system"
+                attached = app.identity
+            actual_principal = getattr(attached, "principal_id", None)
+            if actual_principal != expected_identity["principalId"]:
+                raise ValueError(f"Container App {name} principal conflicts with verified mapping.")
+        else:
+            desired_identity = _get_desired_identity(app, name, use_uai)
         if not desired_identity:
             elapsed = time.time() - start_time
             logging.error(f"[{name}] Failed: No desired identity found (elapsed: {elapsed:.2f}s)")
@@ -243,12 +249,7 @@ def main():
     logging.info("Container Apps Setup - ACR Association")
     logging.info("="*60)
 
-    endpoint = os.getenv("APP_CONFIG_ENDPOINT")
-    if not endpoint:
-        logging.error("Environment variable APP_CONFIG_ENDPOINT is not set.")
-        sys.exit(1)
-    
-    logging.info(f"App Configuration Endpoint: {endpoint}")
+    settings = load_setup_settings()
     logging.info(f"Max Workers: {MAX_WORKERS}")
     logging.info(f"Poll Timeout: {POLL_TIMEOUT_SECONDS}s")
 
@@ -256,20 +257,12 @@ def main():
     logging.debug("Creating and testing shared credential")
     shared_credential = get_credentials()
     
-    appconfig = AzureAppConfigurationClient(endpoint, shared_credential)
-
-    # Read global settings
-    logging.info("Fetching configuration from App Configuration...")
-    subscription_id = get_config_value(appconfig, "SUBSCRIPTION_ID")
-    resource_group = resource_group_for({
-        "AZURE_RESOURCE_GROUP": get_config_value(appconfig, "AZURE_RESOURCE_GROUP"),
-        "AZURE_APP_RESOURCE_GROUP": get_config_value(
-            appconfig, "AZURE_APP_RESOURCE_GROUP", required=False,
-        ) or "",
-    }, "application")
-    acr_name = get_config_value(appconfig, "CONTAINER_REGISTRY_NAME")
-    use_uai = get_config_value(appconfig, "USE_UAI")
-    acr_server = f"{acr_name}.azurecr.io"
+    subscription_id = settings["SUBSCRIPTION_ID"]
+    resource_group = resource_group_for(settings, "application")
+    use_uai = settings["USE_UAI"]
+    acr_server = settings.get("AZURE_CONTAINER_REGISTRY_ENDPOINT")
+    if not acr_server:
+        raise RuntimeError("Selected Container Apps require a verified registry endpoint.")
     
     logging.info(f"Configuration loaded:")
     logging.info(f"  Subscription: {subscription_id}")
@@ -279,9 +272,9 @@ def main():
 
     # Read and parse the list of container apps
     logging.debug("Fetching CONTAINER_APPS list")
-    raw_list = get_config_value(appconfig, "CONTAINER_APPS")
+    raw_list = settings["CONTAINER_APPS"]
     try:
-        apps_list = json.loads(raw_list)
+        apps_list = json.loads(raw_list) if isinstance(raw_list, str) else raw_list
         logging.debug(f"Parsed {len(apps_list)} container app entries")
     except json.JSONDecodeError as e:
         logging.error(f"CONTAINER_APPS is not valid JSON: {e}")
@@ -289,6 +282,15 @@ def main():
 
     # Extract app names
     app_names = [entry.get("name") for entry in apps_list if entry.get("name")]
+    identities = {entry["name"]: entry.get("identity") for entry in apps_list if entry.get("name")}
+
+    def configure_app(name):
+        identity = identities[name]
+        selected_uai = identity["kind"] == "userAssigned" if identity else use_uai
+        return update_single_container_app(
+            subscription_id, resource_group, name, acr_server, selected_uai, shared_credential,
+            expected_identity=identity,
+        )
     
     if not app_names:
         logging.warning("No container apps found to process.")
@@ -305,7 +307,7 @@ def main():
         for i, name in enumerate(app_names, 1):
             logging.info(f"Processing {i}/{len(app_names)}: {name}")
             try:
-                result = update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential)
+                result = configure_app(name)
                 results.append(result)
             except Exception as e:
                 logging.error(f"Failed to process {name}: {e}")
@@ -320,13 +322,7 @@ def main():
             logging.debug("Submitting tasks to thread pool")
             futures = {
                 executor.submit(
-                    update_single_container_app,
-                    subscription_id,
-                    resource_group,
-                    name,
-                    acr_server,
-                    use_uai,
-                    shared_credential
+                    configure_app, name,
                 ): name
                 for name in app_names
             }
@@ -346,7 +342,6 @@ def main():
     # Summary
     overall_elapsed = time.time() - overall_start
     
-    print()  # Blank line before summary
     logging.info("="*60)
     logging.info("FINAL SUMMARY")
     logging.info("="*60)
@@ -362,6 +357,8 @@ def main():
     
     logging.info(f"⏱️  Total execution time: {overall_elapsed:.2f}s ({overall_elapsed/60:.2f}m)")
     logging.info("="*60)
+    if failed:
+        raise RuntimeError(f"Container App registry setup failed for {len(failed)} selected app(s).")
 
 
 if __name__ == "__main__":

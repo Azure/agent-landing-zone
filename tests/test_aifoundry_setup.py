@@ -59,6 +59,36 @@ class FoundryEvaluationKeyTests(unittest.TestCase):
             self.inject()
         self.vault.assert_not_called()
 
+    def test_missing_vault_never_falls_back_to_store_discovery(self):
+        with self.assertLogs(level="ERROR"), self.assertRaises(SystemExit):
+            setup.add_ai_foundry_account_api_key_to_key_vault(
+                self.client, "test-group", "test-foundry", None, "evaluationsModelApiKey",
+            )
+        self.client.accounts.list_keys.assert_not_called()
+        self.vault.assert_not_called()
+
+    def test_store_free_setup_performs_rai_and_evaluation_operations(self):
+        settings = {
+            "SUBSCRIPTION_ID": "sub", "AZURE_RESOURCE_GROUP": "group",
+            "AI_FOUNDRY_ACCOUNT_NAME": "foundry",
+            "KEY_VAULT_URI": "https://vault.vault.azure.net/",
+            "MODEL_DEPLOYMENTS": [{"canonical_name": "CHAT_DEPLOYMENT_NAME", "name": "selected-chat"}],
+        }
+        with (
+            patch.object(setup, "load_setup_settings", return_value=settings),
+            patch.object(setup, "get_azure_credential"),
+            patch.object(setup, "CognitiveServicesManagementClient", return_value=self.client),
+            patch.object(setup, "AzureAppConfigurationClient") as store,
+            patch.object(setup, "configure_blocklist") as blocklist,
+            patch.object(setup, "configure_policy", return_value="policy"),
+            patch.object(setup, "associate_policy_to_deployment") as associate,
+        ):
+            setup.main()
+        store.assert_not_called()
+        blocklist.assert_called_once()
+        associate.assert_called_once_with(self.client, "group", "foundry", "selected-chat", "policy")
+        self.vault.return_value.set_secret.assert_called_once_with("evaluationsModelApiKey", "test-key")
+
 
 if __name__ == "__main__":
     unittest.main()

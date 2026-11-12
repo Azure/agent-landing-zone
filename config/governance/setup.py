@@ -20,6 +20,7 @@ from azure.identity import (
     ManagedIdentityCredential,
 )
 from azure.keyvault.secrets import SecretClient
+from config.deployment.setup_settings import load_setup_settings
 
 
 LABEL = "agent-lz"
@@ -107,9 +108,13 @@ def ensure_audit_hmac_secret(
     return False
 
 
+def audit_hmac_key_uri(vault_uri: str) -> str:
+    """URI-only AUDIT_HMAC_KEY_URI handoff; never resolve the secret value."""
+    return f"{vault_uri.rstrip('/')}/secrets/{AUDIT_HMAC_SECRET_NAME}"
+
+
 def key_vault_reference(vault_uri: str) -> str:
-    uri = f"{vault_uri.rstrip('/')}/secrets/{AUDIT_HMAC_SECRET_NAME}"
-    return json.dumps({"uri": uri}, separators=(",", ":"))
+    return json.dumps({"uri": audit_hmac_key_uri(vault_uri)}, separators=(",", ":"))
 
 
 def resolve_vault_uri(environ: Mapping[str, str] = os.environ) -> str:
@@ -173,7 +178,7 @@ def effective_setting(
 
 
 def is_truthy(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def apply_governance_configuration(
@@ -215,45 +220,51 @@ def apply_governance_configuration(
     return created
 
 
-def main() -> None:
-    app_config_endpoint = os.environ.get("APP_CONFIG_ENDPOINT", "").strip()
-    if not app_config_endpoint:
-        raise RuntimeError("APP_CONFIG_ENDPOINT is required for governance setup.")
-
+def main() -> str | None:
+    settings = load_setup_settings()
+    # Governance owns only these operational settings, never resource aliases.
+    intent = {
+        key: str(settings[key]).lower() if isinstance(settings[key], bool) else str(settings[key])
+        for key in DEFAULT_SETTINGS if key in settings
+    }
+    app_config_client = None
     credential = create_credential()
-    app_config_client = AzureAppConfigurationClient(app_config_endpoint, credential)
-    deploy_key_vault = os.environ.get("DEPLOY_KEY_VAULT", "true").strip().lower()
-    if deploy_key_vault in {"0", "false", "no", "off"}:
-        seed_governance_settings(app_config_client)
-        audit_enabled = effective_setting(
-            app_config_client,
-            "AUDIT_EVENTS_ENABLED",
-            "false",
+    if settings.get("APP_RUNTIME_CONFIGURATION_MODE") == "appConfig":
+        endpoint = settings.get("APP_CONFIG_ENDPOINT")
+        if not endpoint:
+            raise RuntimeError("appConfig governance requires a verified APP_CONFIG_ENDPOINT.")
+        app_config_client = AzureAppConfigurationClient(endpoint, credential)
+    if not is_truthy(settings.get("DEPLOY_KEY_VAULT", True)):
+        audit_enabled = (
+            effective_setting(app_config_client, "AUDIT_EVENTS_ENABLED", "false", intent)
+            if app_config_client is not None else intent.get("AUDIT_EVENTS_ENABLED", "false")
         )
         if is_truthy(audit_enabled):
             raise RuntimeError(
                 "AUDIT_EVENTS_ENABLED cannot be true when Key Vault is disabled."
             )
-        logging.warning(
-            "Governance defaults were seeded, but AUDIT_HMAC_KEY was not "
-            "provisioned because Key Vault is disabled. Keep audit events disabled."
-        )
+        if app_config_client is not None:
+            seed_governance_settings(app_config_client, intent)
+        logging.info("Audit is disabled and no Key Vault is selected.")
         return
 
-    vault_uri = resolve_vault_uri()
+    vault_uri = resolve_vault_uri(settings)
+    if settings.get("AUDIT_HMAC_KEY_URI", audit_hmac_key_uri(vault_uri)) != audit_hmac_key_uri(vault_uri):
+        raise RuntimeError("AUDIT_HMAC_KEY_URI conflicts with the verified audit vault binding.")
     secret_client = SecretClient(vault_url=vault_uri, credential=credential)
-    created = apply_governance_configuration(
-        app_config_client,
-        secret_client,
-        vault_uri,
+    created = (
+        apply_governance_configuration(app_config_client, secret_client, vault_uri, intent)
+        if app_config_client is not None else ensure_audit_hmac_secret(secret_client)
     )
 
     action = "created" if created else "reused"
     logging.info(
-        "Governance configuration applied: safe defaults written, audit HMAC "
-        "secret %s, and Key Vault reference registered.",
+        "Governance configuration applied: audit HMAC secret %s.",
         action,
     )
+    # appConfig retains its existing owner-managed reference (which may point
+    # elsewhere); only store-free setup hands off the exact key ensured above.
+    return audit_hmac_key_uri(vault_uri) if app_config_client is None else None
 
 
 if __name__ == "__main__":

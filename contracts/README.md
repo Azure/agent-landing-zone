@@ -1,5 +1,40 @@
 # Shared Agent Landing Zone contracts
 
+## Deployment metadata v1
+
+[`deployment-metadata-v1.schema.json`](deployment-metadata-v1.schema.json) is
+the independently versioned, closed, non-secret foundation discovery contract
+emitted as the dedicated `DEPLOYMENT_METADATA` native output by both providers.
+Its sibling `.sha256` covers exact schema bytes. It is not runtime platform
+outputs v1 and does not change that schema or the hosted-agent handoff.
+
+All six sections and thirteen resource slots are required. Disabled slots have
+a null resource; managed and explicitly referenced slots contain only ID, name
+and nullable HTTPS endpoint. Identities and model/data children are selected
+foundation bindings, never credentials, runtime setting bags or connection
+strings. Schema validation alone does not establish authorization or readiness;
+consumers must independently verify selected context, ownership and live bindings.
+
+`context.applicationId` comes from the typed `applicationId` input, not the
+App Configuration label. Both providers default to the checked-in definition ID
+`agent-lz-default`; the root parameter template binds `AGENTLZ_APP_ID` so custom
+selected definitions retain their own identity.
+
+The approved root migration replaces only
+`OBSERVABILITY_MIXED_WORKSPACES_ALLOWED`; the
+`allowMixedObservabilityWorkspaces` input and enforcement remain unchanged.
+Bicep retains 64 roots and Terraform retains the five PostgreSQL adapters in
+addition. Older deployments require same-provider reprovision before consumers
+require this output; do not recover through runtime-store discovery or raw state.
+
+The shared read-only check is
+`python -m config.deployment.metadata --check --environment <name>`.
+Setup consumers revalidate through `config.deployment.setup_settings` on each
+independent invocation. See the central
+[configuration modes](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/configuration/#runtime-configuration-mode)
+and [metadata recovery](https://azure.github.io/AI-Landing-Zones/agent-landing-zone/deployment-operations/#verify-deployment-metadata)
+guidance.
+
 ## Inline presentation v1 (unshipped local implementation)
 
 The three `*-presentation-*-v1.schema.json` / `turn-presentation-v1.schema.json`
