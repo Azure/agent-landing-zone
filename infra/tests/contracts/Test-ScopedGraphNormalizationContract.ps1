@@ -117,6 +117,12 @@ try {
         @{ Name = 'Cosmos ACA ACL subnet prerequisite lost'; Change = { param($t) $t.variables.subnetDefinitions[7].required = "[parameters('deployContainerEnv')]" } },
         @{ Name = 'unreviewed subnet definition injected'; Change = { param($t) $t.variables.subnetDefinitions += @{ purpose = 'unexpected'; create = $true } } },
         @{ Name = 'new VNet ownership projection drift'; Change = { param($t) $t.resources.virtualNetwork.properties.parameters.subnets.value = @() } },
+        @{ Name = 'subnet map reintroduced conditional module reference'; Change = { param($t) $t.variables.subnets = $t.variables.subnets.Replace("resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/networkSecurityGroups', format('nsg-{0}-{1}', variables('resourceNames').vnetName, parameters('azureBastionSubnetName')))", "reference('bastionNsg').outputs.id.value") } },
+        @{ Name = 'subnet aiGateway NSG lost cross-subscription scope'; Change = { param($t) $t.variables.subnets = $t.variables.subnets.Replace("if(parameters('useExistingVNet'), variables('varExistingVnetSubscriptionId'), subscription().subscriptionId), ", '') } },
+        @{ Name = 'BYO route table passthrough dropped'; Change = { param($t) $t.variables._effectiveRouteTableId = "[resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/routeTables', 'rt-drift')]" } },
+        @{ Name = 'BYO NAT gateway passthrough dropped'; Change = { param($t) $t.variables._effectiveNatGatewayId = "[resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/natGateways', 'ng-drift')]" } },
+        @{ Name = 'new VNet lost explicit conditional NSG dependency'; Change = { param($t) $t.resources.virtualNetwork.dependsOn = @($t.resources.virtualNetwork.dependsOn | Where-Object { $_ -cne 'bastionNsg' }) } },
+        @{ Name = 'BYO subnets lost explicit conditional NSG dependency'; Change = { param($t) $t.resources.virtualNetworkSubnets.dependsOn = @($t.resources.virtualNetworkSubnets.dependsOn | Where-Object { $_ -cne 'aiGatewayNsg' }) } },
         @{ Name = 'wrong Foundry scope'; Change = { param($t) $t.resources.aiFoundry.resourceGroup = 'wrong-group' } },
         @{ Name = 'wrong network scope'; Change = { param($t) $t.resources.virtualNetwork.resourceGroup = 'wrong-group' } },
         @{ Name = 'grounding Storage moved to app'; Change = { param($t) $t.resources.storageAccount.resourceGroup = '[resourceGroup().name]' } },
@@ -181,7 +187,8 @@ try {
             }
         }
     }
-    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-SubnetConditionalReferencesProjection)) +
+        @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
         @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection)) +
         @(Get-SubnetDeltaPaths $native) +
         @(Get-SubnetDeltaPaths (Get-KnowledgeToolboxProjection))

@@ -119,6 +119,7 @@ function Get-ArchitectureSubnetProjection {
 . (Join-Path $PSScriptRoot 'FirewallBasicNormalization.ps1')
 . (Join-Path $PSScriptRoot 'PostgreSqlNormalization.ps1')
 . (Join-Path $PSScriptRoot 'DeploymentMetadataNormalization.ps1')
+. (Join-Path $PSScriptRoot 'SubnetConditionalReferencesNormalization.ps1')
 
 function Get-EmbeddingDefaultProjection {
     $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\embedding-default-normalization.json') -Raw |
@@ -140,7 +141,7 @@ function Get-KnowledgeToolboxProjection {
 
 function ConvertTo-ApplicationRootResourceGroupGraph {
     param([Parameter(Mandatory)] $Template)
-    $copy = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreDeploymentMetadataGraph $Template)
+    $copy = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreSubnetConditionalReferencesGraph $Template))
     # Validate the exact managed Toolbox connection, binding and scoped grants
     # before the existing adapters. Historical fingerprints remain unchanged.
     $copy = Invoke-ScopedProjection $copy (Get-KnowledgeToolboxProjection)

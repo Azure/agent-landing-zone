@@ -22,7 +22,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
     $t = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
     $before = ConvertTo-Json -InputObject $t -Depth 100 -Compress
-    $clone = ConvertTo-PrePostgreSqlGraph ($before | ConvertFrom-Json -AsHashtable -Depth 100)
+    $clone = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreSubnetConditionalReferencesGraph ($before | ConvertFrom-Json -AsHashtable -Depth 100))
     $null = Invoke-ScopedProjection $clone (Get-FirewallBasicProjection)
     Assert-Equal 'projection never mutates deployed graph' (ConvertTo-Json -InputObject $t -Depth 100 -Compress) $before
     Assert-Equal 'ARM output budget unchanged' $t.outputs.Count 64

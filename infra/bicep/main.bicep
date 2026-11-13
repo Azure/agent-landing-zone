@@ -1254,8 +1254,9 @@ var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacy
 // natGateway unset). Wired into `subnets[jumpbox].natGatewayResourceId`
 // so both code paths (greenfield + useExistingVNet) attach the subnet
 // to the NAT GW.
-#disable-next-line BCP318
-var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.outputs.resourceId : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
+var _effectiveNatGatewayId  = _deployNatGateway
+  ? resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}${resourceToken}')
+  : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
 
 // ---------------------------------------------------------------------------
 // Observability reuse derivations (Gap 5, issue #58)
@@ -1322,10 +1323,9 @@ var _validatedAzureFirewallSku = azureFirewallSku == 'Basic' && enableFirewallDn
         : azureFirewallSku
 var _basicFirewallManagement = _localFirewall && deploymentMode == 'standalone' && _validatedAzureFirewallSku == 'Basic'
 var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
-#disable-next-line BCP318
 var _effectiveRouteTableId = _hasExistingRouteTable
   ? hubIntegrationExistingRouteTableResourceId!
-  : (_createRouteTable ? routeTable!.outputs.resourceId : '')
+  : (_createRouteTable ? resourceId(_networkResourceGroupName, 'Microsoft.Network/routeTables', '${const.abbrs.networking.routeTable}${resourceToken}') : '')
 var _createDefaultRoute    = _createRouteTable && (deployAzureFirewall || _hasExternalEgress)
 var _defaultRouteNextHopIp = deployAzureFirewall
   ? firewall.outputs.privateIp
@@ -1681,11 +1681,20 @@ var subnets = map(selectedSubnetDefinitions, subnet => {
   addressPrefix: subnet.addressPrefix
   delegation: subnet.delegation
   serviceEndpoints: subnet.serviceEndpoints
-  #disable-next-line BCP318
-  networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs ? bastionNsg!.outputs.id : (subnet.purpose == 'appGateway' && _publicIngressEnabled ? appGwNsg!.outputs.id : (subnet.purpose == 'aiGateway' && deployNsgs ? aiGatewayNsg!.outputs.id : ''))
+  networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs
+    ? resourceId(_networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${resourceNames.vnetName}-${azureBastionSubnetName}')
+    : (subnet.purpose == 'appGateway' && _publicIngressEnabled
+      ? resourceId(_networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${resourceNames.vnetName}-${azureAppGatewaySubnetName}')
+      : (subnet.purpose == 'aiGateway' && deployNsgs
+        ? resourceId(useExistingVNet ? varExistingVnetSubscriptionId : subscription().subscriptionId, useExistingVNet ? varExistingVnetResourceGroupName : _networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${useExistingVNet ? varExistingVnetName : resourceNames.vnetName}-${aiGatewaySubnetName}')
+        : ''))
   // GatewaySubnet and both new delegated reservations have no forced-tunnel UDR.
   routeTableResourceId: contains(['agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'], subnet.purpose) ? _effectiveRouteTableId : ''
-  natGatewayResourceId: subnet.purpose == 'jumpbox' ? _effectiveNatGatewayId : (subnet.purpose == 'acaEnvironment' && _postgreSqlBasic ? containerAppsPostgreSqlNat!.outputs.resourceId : '')
+  natGatewayResourceId: subnet.purpose == 'jumpbox'
+    ? _effectiveNatGatewayId
+    : (subnet.purpose == 'acaEnvironment' && _postgreSqlBasic
+      ? resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}aca-postgresql-${resourceToken}')
+      : '')
 })
 
 module networkLayoutValidation 'modules/validation/subnet-layout.bicep' = if (_acaVnetIntegration) {
@@ -1719,7 +1728,17 @@ module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIs
     useExistingVNet: useExistingVNet
     virtualNetworkResourceId: virtualNetworkResourceId
   }
-  dependsOn: [networkLayoutValidation, componentFlagValidation, postgreSqlValidation]
+  dependsOn: [
+    bastionNsg
+    appGwNsg
+    aiGatewayNsg
+    routeTable
+    natGateway
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    componentFlagValidation
+    postgreSqlValidation
+  ]
 }
 
 // Basic BYO needs only the fresh ACA subnet. Reuse the child template without
@@ -1736,9 +1755,13 @@ module containerAppsPostgreSqlSubnet 'modules/networking/subnet.bicep' = if (_po
       properties: { serviceName: 'Microsoft.App/environments' }
     }]
     serviceEndpoints: [{ service: 'Microsoft.AzureCosmosDB' }]
-    natGatewayId: containerAppsPostgreSqlNat!.outputs.resourceId
+    natGatewayId: resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}aca-postgresql-${resourceToken}')
   }
-  dependsOn: [networkLayoutValidation, postgreSqlValidation]
+  dependsOn: [
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    postgreSqlValidation
+  ]
 }
 
 // VNet
@@ -1754,7 +1777,16 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_a
     tags: _tags
     subnets: subnets
   }
-  dependsOn: [networkLayoutValidation, postgreSqlValidation]
+  dependsOn: [
+    bastionNsg
+    appGwNsg
+    aiGatewayNsg
+    routeTable
+    natGateway
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    postgreSqlValidation
+  ]
 }
 
 // Gap 7 — Spoke→hub VNet peering.

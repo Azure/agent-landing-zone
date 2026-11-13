@@ -148,10 +148,13 @@ try {
     & az bicep build --file $MainFile --outfile $compiledFile
     if ($LASTEXITCODE -ne 0) { throw "Bicep compilation failed: $LASTEXITCODE" }
     $t = Get-Content -LiteralPath $compiledFile -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+    Assert-Equal 'New VNet consumes shared deterministic subnets variable' $t.resources.virtualNetwork.properties.parameters.subnets.value "[variables('subnets')]"
+    Assert-Equal 'BYO VNet consumes shared deterministic subnets variable' $t.resources.virtualNetworkSubnets.properties.parameters.subnets.value "[variables('subnets')]"
+    Assert-Equal 'Compiled subnets map contains zero conditional reference() calls' $t.variables.subnets.Contains('reference(') $false
     # Keep every original disabled/default subnet assertion. The exact bounded
     # inverse rejects unreviewed changes; Test-PostgreSqlContract independently
     # proves disabled AST equivalence in both modes and the enabled PG gates.
-    $t = ConvertTo-PrePostgreSqlGraph $t
+    $t = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreSubnetConditionalReferencesGraph $t)
     $rootParameters = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MainFile))) 'main.parameters.json'
     $bindings = (Get-Content -LiteralPath $rootParameters -Raw | ConvertFrom-Json -AsHashtable -Depth 100).parameters
     Assert-LayoutShape $t $bindings
