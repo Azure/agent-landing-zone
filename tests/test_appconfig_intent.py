@@ -179,6 +179,18 @@ def test_canonical_panel_database_key_stays_foundation_owned():
     assert setting["name"] not in by_name(intent.prepare_publication(loaded, AUTHORITY))
 
 
+def test_disabled_model_deployments_release_canonical_model_names(tmp_path):
+    default_loaded = intent.resolve_intent(declaration(tmp_path, []), ENVIRONMENT)
+    assert {"CHAT_DEPLOYMENT_NAME", "EMBEDDING_DEPLOYMENT_NAME"} <= default_loaded.canonical_names
+
+    gateway_loaded = intent.resolve_intent(
+        declaration(tmp_path, []),
+        {**ENVIRONMENT, "DEPLOY_MODEL_DEPLOYMENTS": "false"},
+    )
+    assert "CHAT_DEPLOYMENT_NAME" not in gateway_loaded.canonical_names
+    assert "EMBEDDING_DEPLOYMENT_NAME" not in gateway_loaded.canonical_names
+
+
 def test_empty_label_is_distinct_from_default_and_duplicate_pairs_fail():
     records = intent.normalize_settings([
         {"name": "CUSTOM", "value": "one", "label": ""},

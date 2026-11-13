@@ -58,6 +58,17 @@ actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
 
+`ModelDeploymentsOptionalNormalization.ps1` checks the bounded optional local
+Foundry model deployment gate (`deployModelDeployments`, default `true`) at the
+front of the normalization pipeline before restoring the pre-change
+`_deploymentMetadataModels` and App Configuration loop representations, leaving
+downstream normalization digests and historical fixtures untouched.
+`Test-ExternalGatewayModelFreeContract.ps1` verifies that `deployModelDeployments = false`
+suppresses local Foundry model deployments, `DEPLOYMENT_METADATA.modelDeployments`,
+and App Configuration model keys even when `main.parameters.json` retains its
+default `modelDeploymentList`, while preserving the two native fallback models
+when `deployModelDeployments = true` and `modelDeploymentList = []`.
+
 `SubnetConditionalReferencesNormalization.ps1` checks the bounded deterministic
 subnet `resourceId(...)` and explicit network-module `dependsOn` delta at the
 front of the normalization pipeline before restoring the pre-change inlined

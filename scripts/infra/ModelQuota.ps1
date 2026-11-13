@@ -71,15 +71,30 @@ function Get-ExistingModelDeployments {
     return @($deployments)
 }
 
+function Test-ModelDeploymentsEnabled {
+    param([AllowNull()]$DeployModelDeployments = $true)
+
+    if ($null -eq $DeployModelDeployments) { return $true }
+    if ($DeployModelDeployments -is [bool]) { return $DeployModelDeployments }
+    $text = "$DeployModelDeployments".Trim()
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -match '^\$\{') { return $true }
+    return $text -notmatch '^(0|false|f|no|n)$'
+}
+
 function Get-ModelQuotaRequirements {
     param(
-        [Parameter(Mandatory = $true)]$Models,
+        [AllowNull()][AllowEmptyCollection()]$Models = @(),
         [AllowEmptyCollection()][object[]]$ExistingDeployments = @()
     )
 
+    $modelEntries = @($Models | Where-Object { $null -ne $_ })
+    if ($modelEntries.Count -eq 0) {
+        return @()
+    }
+
     $requests = @{}
     $seenNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($deployment in @($Models)) {
+    foreach ($deployment in $modelEntries) {
         $model = $deployment.model
         $capacity = [double]$deployment.sku.capacity
         if ($capacity -le 0 -or [double]::IsNaN($capacity) -or [double]::IsInfinity($capacity)) {

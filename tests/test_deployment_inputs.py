@@ -69,6 +69,25 @@ def test_application_id_is_a_strict_string_input():
         compose_inputs({"applicationId": 123}, ENVIRONMENT)
 
 
+@pytest.mark.parametrize("raw,expected", [(None, True), ("true", True), ("false", False)])
+def test_deploy_model_deployments_survives_both_provider_input_adapters(raw, expected):
+    environment = {**ENVIRONMENT}
+    if raw is not None:
+        environment["DEPLOY_MODEL_DEPLOYMENTS"] = raw
+    terraform = compose_inputs(values(), environment)
+    bicep = substitute_values(compose_parameters(source(), environment), environment)["parameters"]
+    assert terraform["deployModelDeployments"] is expected
+    assert bicep["deployModelDeployments"]["value"] == str(expected).lower()
+    seed = json.loads((ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8"))
+    assert seed["parameters"]["deployModelDeployments"] == {"value": "${DEPLOY_MODEL_DEPLOYMENTS=true}"}
+
+
+@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+def test_deploy_model_deployments_rejects_non_boolean_values(invalid):
+    with pytest.raises(ValueError, match="deployModelDeployments"):
+        compose_inputs(values(), {**ENVIRONMENT, "DEPLOY_MODEL_DEPLOYMENTS": invalid})
+
+
 def test_embedding_defaults_match_tracked_bicep_seed():
     seed = json.loads(
         (ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8")
@@ -251,7 +270,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 242
+    assert len(declarations) == 243
     original = values()
     for name, kind in declarations:
         if name in original:

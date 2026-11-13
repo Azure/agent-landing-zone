@@ -455,8 +455,20 @@ function Test-ContentUnderstandingRegion {
 function Test-ModelReadiness {
     param(
         [Parameter(Mandatory = $true)][string]$Location,
-        [Parameter(Mandatory = $true)]$Models
+        [AllowNull()][AllowEmptyCollection()]$Models = @(),
+        [bool]$DeployModelDeployments = $true
     )
+
+    if (-not $DeployModelDeployments) {
+        Write-PreflightCheck -Status PASS -Name 'models' -Message 'deployModelDeployments is false, skipping local model availability and quota checks.'
+        return
+    }
+
+    $modelEntries = @($Models | Where-Object { $null -ne $_ })
+    if ($modelEntries.Count -eq 0) {
+        Write-PreflightCheck -Status PASS -Name 'models' -Message 'no local model deployments requested, skipping model availability and quota checks.'
+        return
+    }
 
     if ($SkipAzureCliChecks) {
         Write-PreflightCheck -Status WARN -Name 'models' -Message 'model availability and quota skipped because SkipAzureCliChecks is set.'
@@ -482,7 +494,7 @@ function Test-ModelReadiness {
         param([string]$Message)
         Write-PreflightCheck -Status WARN -Name 'models:existing-target' -Message $Message
     })
-    foreach ($deployment in @($Models)) {
+    foreach ($deployment in $modelEntries) {
         $model = $deployment.model
         $modelName = $model.name
         $modelVersion = $model.version
@@ -503,7 +515,7 @@ function Test-ModelReadiness {
     }
 
     try {
-        $requests = @(Get-ModelQuotaRequirements -Models $Models -ExistingDeployments $existing)
+        $requests = @(Get-ModelQuotaRequirements -Models $modelEntries -ExistingDeployments $existing)
     } catch {
         Write-PreflightCheck -Status FAIL -Name 'models:quota' -Message $_.Exception.Message
         return
@@ -668,11 +680,16 @@ if ($deployAiFoundry) {
         Test-ContentUnderstandingRegion -Location $aiFoundryLocation
     }
 
-    $models = Get-ParameterValue -Parameters $parameters -Name 'modelDeploymentList' -DefaultValue @()
-    if (@($models).Count -gt 0) {
-        Test-ModelReadiness -Location $aiFoundryLocation -Models $models
+    $deployModelDeployments = Get-DeploymentFlag -Parameters $parameters -Name 'deployModelDeployments' -DefaultValue $true
+    if (-not $deployModelDeployments) {
+        Write-PreflightCheck -Status PASS -Name 'models' -Message 'deployModelDeployments is false, skipping local model availability and quota checks.'
     } else {
-        Write-PreflightCheck -Status WARN -Name 'models' -Message 'modelDeploymentList is empty; no model readiness checks were run.'
+        $models = Get-ParameterValue -Parameters $parameters -Name 'modelDeploymentList' -DefaultValue @()
+        if (@($models).Count -gt 0) {
+            Test-ModelReadiness -Location $aiFoundryLocation -Models $models
+        } else {
+            Write-PreflightCheck -Status WARN -Name 'models' -Message 'modelDeploymentList is empty; no model readiness checks were run.'
+        }
     }
 }
 

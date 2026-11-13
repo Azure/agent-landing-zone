@@ -334,6 +334,9 @@ param deployGroundingWithBing bool = true
 @description('Deploy Azure AI Foundry for building and managing AI models.')
 param deployAiFoundry bool = true
 
+@description('Deploy local AI Foundry model deployments. Set to false when all inference routes through an external AI Gateway.')
+param deployModelDeployments bool = true
+
 @description('Associate Azure AI Foundry Agent Service with agentSubnetName. Subnet creation is independently controlled by deployAgentSubnet.')
 param deployAiFoundrySubnet bool = true
 
@@ -2824,7 +2827,7 @@ var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
   roleAssignments: []
 } : {}
 
-var _deploymentMetadataModels = !empty(modelDeploymentList) ? modelDeploymentList : [
+var _deploymentMetadataModels = deployModelDeployments ? (!empty(modelDeploymentList) ? modelDeploymentList : [
   {
     model: {
       format: 'OpenAI'
@@ -2849,7 +2852,7 @@ var _deploymentMetadataModels = !empty(modelDeploymentList) ? modelDeploymentLis
       capacity: 10
     }
   }
-]
+]) : []
 
 var aiFoundryAccountResourceId = aiFoundry!.outputs.accountResourceId
 
@@ -4213,7 +4216,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
 
 // prepare the model deployment names for the app configuration store
 var _modelDeploymentNamesSettings = [
-  for modelDeployment in modelDeploymentList: {
+  for modelDeployment in (deployModelDeployments ? modelDeploymentList : []): {
     name: modelDeployment.canonical_name
     value: modelDeployment.name
     label: appConfigLabel
@@ -4242,7 +4245,7 @@ var _storageContainerNamesSettings = [
 ]
 
 var _modelDeploymentSettings = [
-  for modelDeployment in modelDeploymentList: { 
+  for modelDeployment in (deployModelDeployments ? modelDeploymentList : []): {
     canonical_name: modelDeployment.canonical_name 
     capacity: modelDeployment.sku.capacity          
     model: modelDeployment.model.name                  

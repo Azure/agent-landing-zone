@@ -254,11 +254,11 @@ resource "terraform_data" "root_contract" {
     }
     precondition {
       condition = length(distinct(concat(
-        [for m in var.modelDeploymentList : m.canonical_name],
+        [for m in(var.deployModelDeployments ? var.modelDeploymentList : []) : m.canonical_name],
         [for a in var.containerAppsList : a.canonical_name],
         [for c in var.databaseContainersList : c.canonical_name],
         [for c in var.storageAccountContainersList : c.canonical_name]
-      ))) == length(var.modelDeploymentList) + length(var.containerAppsList) + length(var.databaseContainersList) + length(var.storageAccountContainersList)
+      ))) == (var.deployModelDeployments ? length(var.modelDeploymentList) : 0) + length(var.containerAppsList) + length(var.databaseContainersList) + length(var.storageAccountContainersList)
       error_message = "Canonical App Configuration keys must be unique across all collections."
     }
   }
