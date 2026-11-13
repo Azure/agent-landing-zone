@@ -155,6 +155,88 @@ class FoundryEvaluationKeyTests(unittest.TestCase):
         client.assert_not_called()
         self.vault.assert_not_called()
 
+    def test_selected_foundry_with_local_models_enabled_still_fails_on_empty_deployments(self):
+        for flag in ("true", "TRUE", None):
+            with self.subTest(flag=flag):
+                settings = {
+                    "DEPLOY_AI_FOUNDRY": "true", "SUBSCRIPTION_ID": "sub",
+                    "AZURE_RESOURCE_GROUP": "group", "AI_FOUNDRY_ACCOUNT_NAME": "foundry",
+                    "MODEL_DEPLOYMENTS": [],
+                }
+                if flag is not None:
+                    settings["DEPLOY_MODEL_DEPLOYMENTS"] = flag
+                with (
+                    patch.object(setup, "load_setup_settings", return_value=settings),
+                    patch.object(setup, "get_azure_credential"),
+                    patch.object(setup, "CognitiveServicesManagementClient") as client,
+                    self.assertLogs(level="ERROR"), self.assertRaises(SystemExit) as error,
+                ):
+                    setup.main()
+                self.assertEqual(error.exception.code, 1)
+                client.assert_not_called()
+                self.vault.assert_not_called()
+
+    def test_external_gateway_mode_configures_account_rai_and_eval_key_without_local_deployment(self):
+        for raw_flag in ("false", "FALSE"):
+            for raw_deployments in ([], "[]"):
+                with self.subTest(raw_flag=raw_flag, raw_deployments=raw_deployments):
+                    self.client.reset_mock()
+                    self.vault.reset_mock()
+                    self.client.accounts.get.return_value = SimpleNamespace(
+                        properties=SimpleNamespace(disable_local_auth=False)
+                    )
+                    settings = {
+                        "DEPLOY_AI_FOUNDRY": "true",
+                        "DEPLOY_MODEL_DEPLOYMENTS": raw_flag,
+                        "SUBSCRIPTION_ID": "sub",
+                        "AZURE_RESOURCE_GROUP": "group",
+                        "AI_FOUNDRY_ACCOUNT_NAME": "foundry",
+                        "KEY_VAULT_URI": "https://vault.vault.azure.net/",
+                        "MODEL_DEPLOYMENTS": raw_deployments,
+                    }
+                    with (
+                        patch.object(setup, "load_setup_settings", return_value=settings),
+                        patch.object(setup, "get_azure_credential"),
+                        patch.object(setup, "CognitiveServicesManagementClient", return_value=self.client),
+                        patch.object(setup, "configure_blocklist") as blocklist,
+                        patch.object(setup, "configure_policy", return_value="policy") as policy,
+                        patch.object(setup, "associate_policy_to_deployment") as associate,
+                        self.assertLogs(level="INFO") as logs,
+                    ):
+                        setup.main()
+                    blocklist.assert_called_once()
+                    policy.assert_called_once()
+                    associate.assert_not_called()
+                    self.vault.return_value.set_secret.assert_called_once_with(
+                        "evaluationsModelApiKey", "test-key"
+                    )
+                    self.assertIn("DEPLOY_MODEL_DEPLOYMENTS=false", "\n".join(logs.output))
+
+    def test_external_gateway_mode_entra_only_account_skips_key_injection(self):
+        self.client.accounts.get.return_value.properties.disable_local_auth = True
+        settings = {
+            "DEPLOY_AI_FOUNDRY": "true",
+            "DEPLOY_MODEL_DEPLOYMENTS": "false",
+            "SUBSCRIPTION_ID": "sub",
+            "AZURE_RESOURCE_GROUP": "group",
+            "AI_FOUNDRY_ACCOUNT_NAME": "foundry",
+            "MODEL_DEPLOYMENTS": [],
+        }
+        with (
+            patch.object(setup, "load_setup_settings", return_value=settings),
+            patch.object(setup, "get_azure_credential"),
+            patch.object(setup, "CognitiveServicesManagementClient", return_value=self.client),
+            patch.object(setup, "configure_blocklist") as blocklist,
+            patch.object(setup, "configure_policy", return_value="policy") as policy,
+            patch.object(setup, "associate_policy_to_deployment") as associate,
+        ):
+            setup.main()
+        blocklist.assert_called_once()
+        policy.assert_called_once()
+        associate.assert_not_called()
+        self.client.accounts.list_keys.assert_not_called()
+        self.vault.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

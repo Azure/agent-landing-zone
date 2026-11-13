@@ -71,6 +71,7 @@ run "product_defaults" {
 
   assert {
     condition = (
+      var.deployModelDeployments &&
       var.appConfigLabel == "agent-lz" && !var.networkIsolation && !var.deployCosmosDb &&
       !var.deployGroundingWithBing && !var.useZoneRedundancy &&
       var.vmSize == "Standard_D2s_v3" && !var.foundryIqFilterAddOnEnabled &&
@@ -139,6 +140,8 @@ run "empty_model_list_metadata_uses_native_defaults" {
 
   assert {
     condition = (
+      var.deployModelDeployments &&
+      length(azapi_resource.model_deployment) == 2 &&
       [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.canonicalName] == ["GPT_MODEL", "EMBEDDING_MODEL"] &&
       [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
       [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
@@ -146,6 +149,39 @@ run "empty_model_list_metadata_uses_native_defaults" {
       alltrue([for model in output.DEPLOYMENT_METADATA.modelDeployments : model.apiVersion == "2025-01-01-preview"])
     )
     error_message = "Empty declared model lists must expose the actual native fallback models and default API versions."
+  }
+}
+
+run "external_ai_gateway_no_local_models" {
+  command = plan
+
+  override_resource {
+    target          = azapi_resource.foundry_account[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-contract/providers/Microsoft.CognitiveServices/accounts/aif-contract"
+    }
+  }
+
+  variables {
+    deployModelDeployments = false
+  }
+
+  assert {
+    condition = (
+      length(var.modelDeploymentList) == 2 &&
+      length(azapi_resource.model_deployment) == 0 &&
+      length(azapi_resource.foundry_account) == 1 &&
+      length(azapi_resource.foundry_project) == 1 &&
+      length(azapi_resource.knowledge_base_connection) == 1 &&
+      length(output.DEPLOYMENT_METADATA.modelDeployments) == 0 &&
+      output.DEPLOYMENT_METADATA.resources.foundryAccount.status == "managed" &&
+      output.DEPLOYMENT_METADATA.resources.foundryProject.status == "managed" &&
+      output.DEPLOYMENT_METADATA.resources.search.status == "managed" &&
+      output.KNOWLEDGE_BASE_CONNECTION_ID == "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-contract/providers/Microsoft.CognitiveServices/accounts/aif-contract/projects/${local.resource_names.aiFoundryProjectName}/connections/${var.knowledgeBaseConnectionName}" &&
+      !issensitive(output.DEPLOYMENT_METADATA)
+    )
+    error_message = "External AI Gateway mode must suppress local model deployments and metadata while keeping Foundry, project, Search, and KB connections intact."
   }
 }
 
@@ -530,4 +566,40 @@ run "invalid_fractional_pool_count" {
     acrTaskAgentPoolCount = 0.5
   }
   expect_failures = [var.acrTaskAgentPoolCount]
+}
+
+run "reject_protected_trace_without_base_trace_reader" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader       = false
+    grantProjectProtectedTraceContentReader = true
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_without_foundry_project" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader = true
+    deployAfProject                   = false
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_without_effective_observability" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader = true
+    deployAppInsights                 = false
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_with_malformed_byo_law_id" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader       = true
+    existingLogAnalyticsWorkspaceResourceId = "not-a-valid-arm-id"
+  }
+  expect_failures = [terraform_data.root_contract]
 }

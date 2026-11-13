@@ -34,7 +34,8 @@ INPUTS = {
     "location": "LOCATION", "resourceToken": "RESOURCE_TOKEN", "useUAI": "USE_UAI",
     "useCAppAPIKey": "USE_CAPP_API_KEY", "networkIsolation": "NETWORK_ISOLATION",
     "deployAppConfig": "DEPLOY_APP_CONFIG", "deploySoftware": "DEPLOY_SOFTWARE",
-    "deployAiFoundry": "DEPLOY_AI_FOUNDRY", "deployAfProject": "DEPLOY_AF_PROJECT",
+    "deployAiFoundry": "DEPLOY_AI_FOUNDRY", "deployModelDeployments": "DEPLOY_MODEL_DEPLOYMENTS",
+    "deployAfProject": "DEPLOY_AF_PROJECT",
     "deployKeyVault": "DEPLOY_KEY_VAULT", "deployLogAnalytics": "DEPLOY_LOG_ANALYTICS",
     "deployAppInsights": "DEPLOY_APP_INSIGHTS", "deploySearchService": "DEPLOY_SEARCH_SERVICE",
     "deploySpeechService": "DEPLOY_SPEECH_SERVICE", "deployStorageAccount": "DEPLOY_STORAGE_ACCOUNT",
@@ -92,6 +93,7 @@ def resolve_setup_settings(verified: VerifiedMetadata) -> dict[str, object]:
         ("search", "DEPLOY_SEARCH_SERVICE"),
     ):
         settings.setdefault(name, _text(document["resources"][slot]["status"] != "disabled"))
+    settings.setdefault("DEPLOY_MODEL_DEPLOYMENTS", "true")
     if not parameters.get("resourceToken") and verified.environment.get("RESOURCE_TOKEN"):
         settings["RESOURCE_TOKEN"] = verified.environment["RESOURCE_TOKEN"]
     settings["MODEL_DEPLOYMENTS"] = [

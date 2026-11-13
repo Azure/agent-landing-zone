@@ -1319,6 +1319,147 @@ foreach ($case in @(
 }
 
 # --------------------------------------------------------------------------
+Write-Host 'External AI Gateway mode: deployModelDeployments validation and quota skip' -ForegroundColor Cyan
+foreach ($validModelFlag in @($true, $false, 'true', 'false')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployModelDeployments = $validModelFlag }
+    Assert-True "deployModelDeployments '$validModelFlag' is accepted" (Test-FindingAbsent 'BOOL_VALUE_INVALID')
+}
+foreach ($invalidModelFlag in @('yes', '1', '')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployModelDeployments = $invalidModelFlag }
+    Assert-True "deployModelDeployments '$invalidModelFlag' is rejected" (Test-FindingPresent 'BOOL_VALUE_INVALID')
+}
+$script:ModelQuotaCalled = $false
+$originalTestModelQuota = ${function:Test-ModelQuota}
+try {
+    function Test-ModelQuota {
+        param($ModelDeployments, $Location, $DeployModelDeployments)
+        $script:ModelQuotaCalled = $true
+    }
+    Reset-Findings
+    Test-RegionalReadiness -P @{
+        location               = 'westus3'
+        deployAiFoundry        = $true
+        deployModelDeployments = $false
+        deploySearchService    = $false
+        deployAAfAgentSvc      = $false
+        deployJumpbox          = $false
+        modelDeploymentList    = @(
+            [pscustomobject]@{
+                name  = 'chat'
+                model = [pscustomobject]@{ format = 'OpenAI'; name = 'gpt-5-nano'; version = '2025-08-07' }
+                sku   = [pscustomobject]@{ name = 'GlobalStandard'; capacity = 100 }
+            }
+        )
+    }
+    Assert-True 'deployModelDeployments=false emits MODEL_DEPLOYMENTS_DISABLED INFO' (Test-FindingPresent 'MODEL_DEPLOYMENTS_DISABLED')
+    Assert-True 'deployModelDeployments=false skips Test-ModelQuota despite seed models' (-not $script:ModelQuotaCalled)
+    Assert-True 'deployModelDeployments=false raises zero FAIL/WARN findings' (
+        @($script:Findings | Where-Object { $_.Severity -in @('FAIL', 'WARN') }).Count -eq 0
+    )
+}
+finally {
+    ${function:Test-ModelQuota} = $originalTestModelQuota
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Private monitoring DNS hyphenation and opt-in trace-evaluation RBAC' -ForegroundColor Cyan
+foreach ($traceKey in @('grantProjectTraceEvaluationReader', 'grantProjectProtectedTraceContentReader')) {
+    foreach ($validFlag in @($true, $false, 'true', 'false')) {
+        Reset-Findings
+        Test-BooleanParameterValues -P @{ $traceKey = $validFlag }
+        Assert-True "$traceKey '$validFlag' is accepted" (Test-FindingAbsent 'BOOL_VALUE_INVALID')
+    }
+    foreach ($invalidFlag in @('yes', '1', '')) {
+        Reset-Findings
+        Test-BooleanParameterValues -P @{ $traceKey = $invalidFlag }
+        Assert-True "$traceKey '$invalidFlag' is rejected" (Test-FindingPresent 'BOOL_VALUE_INVALID')
+    }
+}
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{}
+Assert-True 'Default trace-evaluation flags emit zero findings' ($script:Findings.Count -eq 0)
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{
+    grantProjectTraceEvaluationReader          = $true
+    grantProjectProtectedTraceContentReader    = $true
+    deployAiFoundry                            = $true
+    deployAfProject                            = $true
+    deployLogAnalytics                         = $true
+    deployAppInsights                          = $true
+}
+Assert-True 'Valid opt-in trace-evaluation flags emit zero findings' ($script:Findings.Count -eq 0)
+
+Reset-Findings
+Test-Topology -P @{
+    grantProjectTraceEvaluationReader          = $false
+    grantProjectProtectedTraceContentReader    = $true
+}
+Assert-True 'Protected trace flag without base reader fails with TRACE_EVAL_BASE_READER_REQUIRED' (Test-FindingPresent 'TRACE_EVAL_BASE_READER_REQUIRED')
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{
+    grantProjectTraceEvaluationReader = $true
+    deployAfProject                   = $false
+}
+Assert-True 'Trace evaluation without Foundry project fails with TRACE_EVAL_FOUNDRY_PROJECT_REQUIRED' (Test-FindingPresent 'TRACE_EVAL_FOUNDRY_PROJECT_REQUIRED')
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{
+    grantProjectTraceEvaluationReader = $true
+    deployAppInsights                 = $false
+}
+Assert-True 'Trace evaluation without App Insights fails with TRACE_EVAL_OBSERVABILITY_REQUIRED' (Test-FindingPresent 'TRACE_EVAL_OBSERVABILITY_REQUIRED')
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{
+    grantProjectTraceEvaluationReader          = $true
+    grantProjectProtectedTraceContentReader    = $true
+    deployLogAnalytics                         = $false
+    deployAppInsights                          = $false
+    existingLogAnalyticsWorkspaceResourceId    = '/subscriptions/00000000-0000-0000-0000-000000000098/resourceGroups/rg-obs/providers/Microsoft.OperationalInsights/workspaces/law-central'
+    existingApplicationInsightsResourceId      = '/subscriptions/00000000-0000-0000-0000-000000000099/resourceGroups/rg-obs/providers/Microsoft.Insights/components/appi-central'
+    existingApplicationInsightsConnectionString = 'InstrumentationKey=00000000-0000-0000-0000-000000000005'
+}
+Assert-True 'Cross-subscription BYO App Insights and LAW pass trace evaluation preflight' ($script:Findings.Count -eq 0)
+
+Reset-Findings
+Test-TraceEvaluationConfiguration -P @{
+    grantProjectTraceEvaluationReader       = $true
+    existingLogAnalyticsWorkspaceResourceId = 'not-an-arm-id'
+}
+Assert-True 'Malformed BYO LAW ID fails with TRACE_EVAL_OBSERVABILITY_ID_INVALID' (Test-FindingPresent 'TRACE_EVAL_OBSERVABILITY_ID_INVALID')
+
+$originalSkipAzureLookups = $SkipAzureLookups
+$originalTestAzureContext = ${function:Test-AzureContext}
+$originalInvokeAzCli = ${function:Invoke-AzCli}
+try {
+    $SkipAzureLookups = $false
+    function Test-AzureContext { return $true }
+    function Invoke-AzCli { param([string[]]$Arguments) return [pscustomobject]@{ id = 'mock' } }
+
+    Reset-Findings
+    Test-AzureResources -P @{
+        existingPrivateDnsZoneAzureAutomationResourceId = '/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-dns/providers/Microsoft.Network/privateDnsZones/privatelink.agentsvc.azure-automation.net'
+    }
+    Assert-True 'BYO AzureAutomation DNS zone accepts hyphenated privatelink.agentsvc.azure-automation.net' (Test-FindingAbsent 'DNS_ZONE_NAME_MISMATCH')
+
+    Reset-Findings
+    Test-AzureResources -P @{
+        existingPrivateDnsZoneAzureAutomationResourceId = '/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-dns/providers/Microsoft.Network/privateDnsZones/privatelink.agentsvc.azure.automation.net'
+    }
+    Assert-True 'BYO AzureAutomation DNS zone rejects legacy dot-spelled privatelink.agentsvc.azure.automation.net' (Test-FindingPresent 'DNS_ZONE_NAME_MISMATCH')
+}
+finally {
+    $SkipAzureLookups = $originalSkipAzureLookups
+    ${function:Test-AzureContext} = $originalTestAzureContext
+    ${function:Invoke-AzCli} = $originalInvokeAzCli
+}
+
+# --------------------------------------------------------------------------
 Write-Host ''
 Write-Host ("Tests run: $script:TestsRun  Failures: $script:TestFailures") -ForegroundColor Cyan
 

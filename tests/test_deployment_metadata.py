@@ -489,6 +489,56 @@ def test_non_openai_model_preserves_provider_openai_endpoint(candidate, live_bou
     metadata.verify_live(candidate, parameters, run)
 
 
+@pytest.mark.parametrize("declared_empty", [False, True])
+def test_external_gateway_mode_accepts_zero_models_and_rejects_unexpected_models(
+    candidate, live_boundary, declared_empty,
+):
+    parameters, _, run = live_boundary
+    parameters["deployModelDeployments"] = False
+    if declared_empty:
+        parameters["modelDeploymentList"] = []
+    unexpected = copy.deepcopy(candidate["modelDeployments"])
+    candidate["modelDeployments"] = []
+    metadata.validate_shape(candidate)
+    metadata.verify_live(candidate, parameters, run)
+    candidate["modelDeployments"] = unexpected
+    with pytest.raises(metadata.MetadataError, match="mappings"):
+        metadata.verify_live(candidate, parameters, run)
+
+
+@pytest.mark.parametrize("stale_key,stale_value", [
+    ("CHAT_DEPLOYMENT_NAME", "stale-chat"),
+    ("EMBEDDING_DEPLOYMENT_NAME", "stale-embedding"),
+    ("GPT_MODEL", "gpt-5-nano"),
+    ("EMBEDDING_MODEL", "text-embedding-3-large"),
+    ("CUSTOM_GATEWAY_MODEL", "custom"),
+    ("MODEL_DEPLOYMENTS", json.dumps([{"canonical_name": "CHAT_DEPLOYMENT_NAME", "name": "chat"}])),
+])
+def test_validate_context_rejects_stale_model_cache_when_model_deployments_empty(
+    candidate, stale_key, stale_value,
+):
+    candidate["modelDeployments"] = []
+    context = candidate["context"]
+    environment = {
+        "AZURE_ENV_NAME": context["environmentName"],
+        "AZURE_SUBSCRIPTION_ID": context["subscriptionId"],
+        "AZURE_TENANT_ID": context["tenantId"],
+        "AZURE_RESOURCE_GROUP": context["resourceGroups"]["foundry"],
+        "AZURE_APP_RESOURCE_GROUP": context["resourceGroups"]["application"],
+        "AZURE_NETWORK_RESOURCE_GROUP": context["resourceGroups"]["network"],
+        "DEPLOYMENT_NAME": context["deploymentName"],
+        "AGENTLZ_APP_ID": context["applicationId"],
+    }
+    parameters = {
+        "appRuntimeConfigurationMode": context["runtimeConfigurationMode"],
+        "deployModelDeployments": False,
+        "modelDeploymentList": [{"canonical_name": "CUSTOM_GATEWAY_MODEL", "name": "custom"}],
+    }
+    metadata.validate_context(candidate, {**environment, "MODEL_DEPLOYMENTS": "[]"}, parameters, "bicep")
+    with pytest.raises(metadata.MetadataError, match="cache." + stale_key):
+        metadata.validate_context(candidate, {**environment, stale_key: stale_value}, parameters, "bicep")
+
+
 def test_declared_resource_name_cannot_select_another_same_group_resource(candidate, live_boundary):
     parameters, _, run = live_boundary
     parameters["containerRegistryName"] = "another-registry"

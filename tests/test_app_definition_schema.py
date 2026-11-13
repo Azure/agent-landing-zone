@@ -127,6 +127,113 @@ class SchemaValidationTests(CustomFolderCase):
         self.assertIn("no service named `web`", issues["/components/0/name"])
         self.assertIn("host: azure.ai.agent", issues["/components/1/kind"])
 
+    def test_hosted_service_rejects_platform_reserved_env_vars_and_allows_statsbeat_and_otel(self) -> None:
+        (self.folder / "azure.yaml").write_text(
+            "name: my-app\n"
+            "services:\n"
+            "  web:\n"
+            "    host: containerapp\n"
+            "    project: ./web\n"
+            "    env:\n"
+            "      APPLICATIONINSIGHTS_CONNECTION_STRING: InstrumentationKey=00000000-0000-0000-0000-000000000000\n"
+            "      AGENT_CUSTOM_URL: https://internal.example.test\n"
+            "      FOUNDRY_CUSTOM_FLAG: enabled\n"
+            "  agent:\n"
+            "    host: azure.ai.agent\n"
+            "    project: ./agent\n"
+            "    env:\n"
+            "      FOUNDRY_PROJECT_ENDPOINT: https://example.services.ai.azure.com/api/projects/demo\n"
+            "      foundry_agent_session_id: manual\n"
+            "      AGENT_NAME: override\n"
+            "      APPLICATIONINSIGHTS_CONNECTION_STRING: InstrumentationKey=00000000-0000-0000-0000-000000000000\n"
+            "      APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: 'true'\n"
+            "      OTEL_EXPERIMENTAL_RESOURCE_DETECTORS: ''\n"
+            "      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'false'\n",
+            encoding="utf-8",
+        )
+        issues = self.issues(custom_document())
+        expected_pointers = {
+            "azure.yaml#/services/agent/env/FOUNDRY_PROJECT_ENDPOINT",
+            "azure.yaml#/services/agent/env/foundry_agent_session_id",
+            "azure.yaml#/services/agent/env/AGENT_NAME",
+            "azure.yaml#/services/agent/env/APPLICATIONINSIGHTS_CONNECTION_STRING",
+        }
+        self.assertEqual(expected_pointers, set(issues))
+        for where in expected_pointers:
+            self.assertIn("invalid_payload", issues[where])
+
+        (self.folder / "azure.yaml").write_text(
+            "name: my-app\n"
+            "services:\n"
+            "  web:\n"
+            "    host: containerapp\n"
+            "    project: ./web\n"
+            "  agent:\n"
+            "    host: azure.ai.agent\n"
+            "    project: ./agent\n"
+            "    env:\n"
+            "      - name: FOUNDRY_PROJECT_ARM_ID\n"
+            "        value: /subscriptions/00000000-0000-0000-0000-000000000000\n"
+            "      - agent_version=1\n"
+            "      - name: APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL\n"
+            "        value: 'true'\n",
+            encoding="utf-8",
+        )
+        list_issues = self.issues(custom_document())
+        self.assertEqual(
+            {
+                "azure.yaml#/services/agent/env/0/name",
+                "azure.yaml#/services/agent/env/1",
+            },
+            set(list_issues),
+        )
+
+        (self.folder / "azure.yaml").write_text(
+            "name: my-app\n"
+            "services:\n"
+            "  web:\n"
+            "    host: containerapp\n"
+            "    project: ./web\n"
+            "    env:\n"
+            "      APPLICATIONINSIGHTS_CONNECTION_STRING: InstrumentationKey=00000000-0000-0000-0000-000000000000\n"
+            "  agent:\n"
+            "    host: azure.ai.agent\n"
+            "    project: ./agent\n"
+            "    env:\n"
+            "      APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: 'true'\n"
+            "      OTEL_EXPERIMENTAL_RESOURCE_DETECTORS: ''\n"
+            "      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'false'\n",
+            encoding="utf-8",
+        )
+        validate_definition(self.definition(custom_document()), ROOT)
+
+    def test_hosted_component_agent_yaml_rejects_platform_reserved_env_vars(self) -> None:
+        (self.folder / "agent" / "agent.yaml").write_text(
+            "name: sample-agent\n"
+            "environment_variables:\n"
+            "  FOUNDRY_AGENT_NAME: override\n"
+            "  APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: 'true'\n"
+            "  OTEL_SERVICE_NAME: custom-agent\n"
+            "env:\n"
+            "  - name: applicationinsights_connection_string\n"
+            "    value: InstrumentationKey=00000000-0000-0000-0000-000000000000\n",
+            encoding="utf-8",
+        )
+        issues = self.issues(custom_document())
+        self.assertEqual(
+            {
+                "agent/agent.yaml#/environment_variables/FOUNDRY_AGENT_NAME",
+                "agent/agent.yaml#/env/0/name",
+            },
+            set(issues),
+        )
+
+    def test_shipped_custom_samples_validate_cleanly(self) -> None:
+        for sample in ("containerapp", "hosted"):
+            with self.subTest(sample=sample):
+                definition = load_definition(ROOT / "samples" / "custom-app" / sample, repo_root=ROOT)
+                validate_definition(definition, ROOT)
+
     def test_paths_must_be_local_and_exist(self) -> None:
         for path in ("../outside", "/abs", "C:/abs", "missing"):
             with self.subTest(path=path):

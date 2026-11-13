@@ -206,7 +206,7 @@ param existingPrivateDnsZoneOmsOpsInsightsResourceId string?
 @description('Gap 2 — Resource ID of an existing `privatelink.ods.opinsights.azure.com` Private DNS Zone to reuse (ODS Log Analytics ingestion PE DNS).')
 param existingPrivateDnsZoneOdsOpsInsightsResourceId string?
 
-@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure.automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
+@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure-automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
 param existingPrivateDnsZoneAzureAutomationResourceId string?
 
 @description('Gap 2 — Resource ID of an existing `privatelink.applicationinsights.io` Private DNS Zone to reuse. Only consumed when `enablePrivateLogAnalytics=true` and AMPLS is created locally; otherwise this BYO ID is ignored.')
@@ -333,6 +333,9 @@ param deployGroundingWithBing bool = true
 
 @description('Deploy Azure AI Foundry for building and managing AI models.')
 param deployAiFoundry bool = true
+
+@description('Deploy local AI Foundry model deployments. Set to false when all inference routes through an external AI Gateway.')
+param deployModelDeployments bool = true
 
 @description('Associate Azure AI Foundry Agent Service with agentSubnetName. Subnet creation is independently controlled by deployAgentSubnet.')
 param deployAiFoundrySubnet bool = true
@@ -514,6 +517,12 @@ param existingPrivateDnsZoneDurableTaskResourceId string = ''
 
 @description('Grant the deployment executor Foundry Project Manager when Hosted prerequisites are selected. Defaults to true for compatible foundation callers. Set false when the executor already has required project authorization; this never disables the project managed identity registry pull grant.')
 param grantHostedAgentProjectManager bool = true
+
+@description('Opt-in: grant the AI Foundry project managed identity Reader on the effective Application Insights resource and Log Analytics Data Reader on the effective Log Analytics workspace for scheduled Foundry trace evaluations. Defaults to false.')
+param grantProjectTraceEvaluationReader bool = false
+
+@description('Strictly opt-in: grant the AI Foundry project managed identity Privileged Monitoring Data Reader with an ABAC v2.0 condition restricted to the Protected AppGenAIContent table on the effective Application Insights and Log Analytics resources. Requires grantProjectTraceEvaluationReader=true. Defaults to false.')
+param grantProjectProtectedTraceContentReader bool = false
 
 @description('Request the downstream Microsoft Foundry hosted-agent deployment handoff. Implies prepareHostedAgent behavior and requires hostedAgent.version to be an immutable OCI digest. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
@@ -1195,6 +1204,8 @@ var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containe
 var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
 var _hostedAgentImageReference = deployHostedAgent ? '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}' : ''
 var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
+var _logAnalyticsDataReaderRoleId = '3b03c2da-16b3-4a49-8834-0f8130efdd3b'
+var _privilegedMonitoringDataReaderRoleId = 'dbc9c667-e97f-4491-aee6-90b9cf960190'
 var _hostedAgentContainerRegistryPullRoleId = deployContainerRegistry || hostedAgentContainerRegistryRoleAssignmentMode == 'rbac'
   ? const.roles.AcrPull.guid
   : _containerRegistryRepositoryReaderRoleId
@@ -1254,8 +1265,9 @@ var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacy
 // natGateway unset). Wired into `subnets[jumpbox].natGatewayResourceId`
 // so both code paths (greenfield + useExistingVNet) attach the subnet
 // to the NAT GW.
-#disable-next-line BCP318
-var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.outputs.resourceId : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
+var _effectiveNatGatewayId  = _deployNatGateway
+  ? resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}${resourceToken}')
+  : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
 
 // ---------------------------------------------------------------------------
 // Observability reuse derivations (Gap 5, issue #58)
@@ -1322,10 +1334,9 @@ var _validatedAzureFirewallSku = azureFirewallSku == 'Basic' && enableFirewallDn
         : azureFirewallSku
 var _basicFirewallManagement = _localFirewall && deploymentMode == 'standalone' && _validatedAzureFirewallSku == 'Basic'
 var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
-#disable-next-line BCP318
 var _effectiveRouteTableId = _hasExistingRouteTable
   ? hubIntegrationExistingRouteTableResourceId!
-  : (_createRouteTable ? routeTable!.outputs.resourceId : '')
+  : (_createRouteTable ? resourceId(_networkResourceGroupName, 'Microsoft.Network/routeTables', '${const.abbrs.networking.routeTable}${resourceToken}') : '')
 var _createDefaultRoute    = _createRouteTable && (deployAzureFirewall || _hasExternalEgress)
 var _defaultRouteNextHopIp = deployAzureFirewall
   ? firewall.outputs.privateIp
@@ -1681,11 +1692,20 @@ var subnets = map(selectedSubnetDefinitions, subnet => {
   addressPrefix: subnet.addressPrefix
   delegation: subnet.delegation
   serviceEndpoints: subnet.serviceEndpoints
-  #disable-next-line BCP318
-  networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs ? bastionNsg!.outputs.id : (subnet.purpose == 'appGateway' && _publicIngressEnabled ? appGwNsg!.outputs.id : (subnet.purpose == 'aiGateway' && deployNsgs ? aiGatewayNsg!.outputs.id : ''))
+  networkSecurityGroupResourceId: subnet.purpose == 'bastion' && _deployBastion && deployNsgs
+    ? resourceId(_networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${resourceNames.vnetName}-${azureBastionSubnetName}')
+    : (subnet.purpose == 'appGateway' && _publicIngressEnabled
+      ? resourceId(_networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${resourceNames.vnetName}-${azureAppGatewaySubnetName}')
+      : (subnet.purpose == 'aiGateway' && deployNsgs
+        ? resourceId(useExistingVNet ? varExistingVnetSubscriptionId : subscription().subscriptionId, useExistingVNet ? varExistingVnetResourceGroupName : _networkResourceGroupName, 'Microsoft.Network/networkSecurityGroups', 'nsg-${useExistingVNet ? varExistingVnetName : resourceNames.vnetName}-${aiGatewaySubnetName}')
+        : ''))
   // GatewaySubnet and both new delegated reservations have no forced-tunnel UDR.
   routeTableResourceId: contains(['agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'], subnet.purpose) ? _effectiveRouteTableId : ''
-  natGatewayResourceId: subnet.purpose == 'jumpbox' ? _effectiveNatGatewayId : (subnet.purpose == 'acaEnvironment' && _postgreSqlBasic ? containerAppsPostgreSqlNat!.outputs.resourceId : '')
+  natGatewayResourceId: subnet.purpose == 'jumpbox'
+    ? _effectiveNatGatewayId
+    : (subnet.purpose == 'acaEnvironment' && _postgreSqlBasic
+      ? resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}aca-postgresql-${resourceToken}')
+      : '')
 })
 
 module networkLayoutValidation 'modules/validation/subnet-layout.bicep' = if (_acaVnetIntegration) {
@@ -1719,7 +1739,17 @@ module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIs
     useExistingVNet: useExistingVNet
     virtualNetworkResourceId: virtualNetworkResourceId
   }
-  dependsOn: [networkLayoutValidation, componentFlagValidation, postgreSqlValidation]
+  dependsOn: [
+    bastionNsg
+    appGwNsg
+    aiGatewayNsg
+    routeTable
+    natGateway
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    componentFlagValidation
+    postgreSqlValidation
+  ]
 }
 
 // Basic BYO needs only the fresh ACA subnet. Reuse the child template without
@@ -1736,9 +1766,13 @@ module containerAppsPostgreSqlSubnet 'modules/networking/subnet.bicep' = if (_po
       properties: { serviceName: 'Microsoft.App/environments' }
     }]
     serviceEndpoints: [{ service: 'Microsoft.AzureCosmosDB' }]
-    natGatewayId: containerAppsPostgreSqlNat!.outputs.resourceId
+    natGatewayId: resourceId(_networkResourceGroupName, 'Microsoft.Network/natGateways', '${const.abbrs.networking.natGateway}aca-postgresql-${resourceToken}')
   }
-  dependsOn: [networkLayoutValidation, postgreSqlValidation]
+  dependsOn: [
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    postgreSqlValidation
+  ]
 }
 
 // VNet
@@ -1754,7 +1788,16 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_a
     tags: _tags
     subnets: subnets
   }
-  dependsOn: [networkLayoutValidation, postgreSqlValidation]
+  dependsOn: [
+    bastionNsg
+    appGwNsg
+    aiGatewayNsg
+    routeTable
+    natGateway
+    containerAppsPostgreSqlNat
+    networkLayoutValidation
+    postgreSqlValidation
+  ]
 }
 
 // Gap 7 — Spoke→hub VNet peering.
@@ -2335,7 +2378,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${resourceNames.vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
     _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
     _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${resourceNames.vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
+    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure-automation.net', virtualNetworkLinkName: '${resourceNames.vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
   ) : []
 ) : []
 
@@ -2607,7 +2650,7 @@ var _dnsZoneAcrId             = !empty(existingPrivateDnsZoneAcrResourceId ?? ''
 var _dnsZoneAzureMonitorId    = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')    ? existingPrivateDnsZoneAzureMonitorResourceId!    : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
 var _dnsZoneOmsOpsInsightsId  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOmsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
 var _dnsZoneOdsOpsInsightsId  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOdsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
-var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
+var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure-automation.net')
 
 //AI Foundry Account User Managed Identity
 module aiFoundryUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
@@ -2792,7 +2835,7 @@ var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
   roleAssignments: []
 } : {}
 
-var _deploymentMetadataModels = !empty(modelDeploymentList) ? modelDeploymentList : [
+var _deploymentMetadataModels = deployModelDeployments ? (!empty(modelDeploymentList) ? modelDeploymentList : [
   {
     model: {
       format: 'OpenAI'
@@ -2817,7 +2860,7 @@ var _deploymentMetadataModels = !empty(modelDeploymentList) ? modelDeploymentLis
       capacity: 10
     }
   }
-]
+]) : []
 
 var aiFoundryAccountResourceId = aiFoundry!.outputs.accountResourceId
 
@@ -4085,6 +4128,36 @@ module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep'
   }
 }
 
+module traceEvaluationValidation 'modules/validation/trace-evaluation.bicep' = if (grantProjectTraceEvaluationReader || grantProjectProtectedTraceContentReader) {
+  name: 'traceEvaluationValidation'
+  params: {
+    grantProjectTraceEvaluationReader: grantProjectTraceEvaluationReader
+    grantProjectProtectedTraceContentReader: grantProjectProtectedTraceContentReader
+    deployAiFoundry: deployAiFoundry
+    deployAfProject: deployAfProject
+    hasEffectiveAppInsights: _hasEffectiveAI
+    hasEffectiveLogAnalytics: _hasEffectiveLaw
+    existingApplicationInsightsResourceId: existingApplicationInsightsResourceId ?? ''
+    existingLogAnalyticsWorkspaceResourceId: existingLogAnalyticsWorkspaceResourceId ?? ''
+  }
+}
+
+module assignProjectTraceEvaluationRoles 'modules/security/project-trace-evaluation-roles.bicep' = if (grantProjectTraceEvaluationReader && deployAiFoundry && deployAfProject && _hasEffectiveAI && _hasEffectiveLaw) {
+  name: 'assignProjectTraceEvaluationRoles'
+  params: {
+    appInsightsResourceId: _appInsightsResourceId
+    workspaceResourceId: _lawResourceId
+    principalId: aiFoundry!.outputs.aiProjectPrincipalId
+    readerRoleGuid: const.roles.Reader.guid
+    logAnalyticsDataReaderRoleGuid: _logAnalyticsDataReaderRoleId
+    privilegedMonitoringDataReaderRoleGuid: _privilegedMonitoringDataReaderRoleId
+    grantProtectedTraceContentReader: grantProjectProtectedTraceContentReader
+  }
+  dependsOn: [
+    traceEvaluationValidation
+  ]
+}
+
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> ContainerApp
 module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/security/cosmos-data-plane-role-assignment.bicep' = [
   for (app, i) in containerAppsList: if (_deployContainerApps && deployCosmosDb && contains(
@@ -4181,7 +4254,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
 
 // prepare the model deployment names for the app configuration store
 var _modelDeploymentNamesSettings = [
-  for modelDeployment in modelDeploymentList: {
+  for modelDeployment in (deployModelDeployments ? modelDeploymentList : []): {
     name: modelDeployment.canonical_name
     value: modelDeployment.name
     label: appConfigLabel
@@ -4210,7 +4283,7 @@ var _storageContainerNamesSettings = [
 ]
 
 var _modelDeploymentSettings = [
-  for modelDeployment in modelDeploymentList: { 
+  for modelDeployment in (deployModelDeployments ? modelDeploymentList : []): {
     canonical_name: modelDeployment.canonical_name 
     capacity: modelDeployment.sku.capacity          
     model: modelDeployment.model.name                  

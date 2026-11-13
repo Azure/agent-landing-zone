@@ -338,6 +338,11 @@ def validate_context(
     evaluated = aliases(document)
     resource_keys = {key for keys in _RESOURCE_ALIASES.values() for key in keys if key}
     resource_keys.update(_ALIAS_EQUIVALENTS)
+    resource_keys.update({"CHAT_DEPLOYMENT_NAME", "EMBEDDING_DEPLOYMENT_NAME"})
+    resource_keys.update(canonical for canonical, _, _ in _DEFAULT_MODELS)
+    for item in parameters.get("modelDeploymentList", []):
+        if isinstance(item, dict) and isinstance(item.get("canonical_name"), str) and item["canonical_name"]:
+            resource_keys.add(item["canonical_name"])
     for key in resource_keys - evaluated.keys():
         if environment.get(key):
             raise MetadataError(f"cache.{key}: Saved alias refers to a disabled resource. Refresh the selected environment.")
@@ -508,8 +513,12 @@ def verify_live(
             elif declaration.get("name") != row["name"]:
                 raise MetadataError("dataResources: Evaluated child conflicts with the original declaration.")
 
-    declared_rows("modelDeploymentList", document["modelDeployments"],
-                  document["resources"]["foundryAccount"]["status"] != "disabled")
+    declared_rows(
+        "modelDeploymentList",
+        document["modelDeployments"],
+        document["resources"]["foundryAccount"]["status"] != "disabled"
+        and parameters.get("deployModelDeployments", True) is True,
+    )
     declared_rows("containerAppsList", document["containerApps"],
                   parameters.get("deployContainerApps", True) is True and parameters.get("deployContainerEnv", True) is True)
     declared_rows("storageAccountContainersList", document["dataResources"]["storageContainers"],

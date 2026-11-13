@@ -99,6 +99,7 @@ def test_native_model_defaults_match_the_metadata_verifier():
     from config.deployment.metadata import _DEFAULT_MODELS
 
     bicep = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
+    assert "var _deploymentMetadataModels = deployModelDeployments ? (" in bicep
     fallback = re.search(
         r"var _deploymentMetadataModels = .*? : \[(.*?)^\]", bicep, re.M | re.S,
     )[1]
@@ -107,7 +108,7 @@ def test_native_model_defaults_match_the_metadata_verifier():
     )
     terraform = (ROOT / "infra" / "terraform" / "main.foundry.tf").read_text(encoding="utf-8")
     fallback = re.search(
-        r"services_model_deployments = concat\(var.modelDeploymentList, \[for deployment in "
+        r"services_model_deployments = var\.deployModelDeployments \? concat\(var\.modelDeploymentList, \[for deployment in "
         r"(\[.*?\]) : deployment if", terraform, re.S,
     )[1]
     terraform_models = hcl2.loads("locals { models = " + fallback + " }")["locals"][0]["models"]

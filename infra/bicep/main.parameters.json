@@ -68,9 +68,12 @@
     "aiFoundryCosmosDBAccountResourceId":  { "value": null },
     
     "deployAiFoundry":                      { "value": "true" },
+    "deployModelDeployments":               { "value": "${DEPLOY_MODEL_DEPLOYMENTS=true}" },
     "deployAAfAgentSvc":                    { "value": "${DEPLOY_AAF_AGENT_SVC=true}" },
     "prepareHostedAgent":                   { "value": false },
     "grantHostedAgentProjectManager":       { "value": "${GRANT_HOSTED_AGENT_PROJECT_MANAGER=true}" },
+    "grantProjectTraceEvaluationReader":    { "value": "${GRANT_PROJECT_TRACE_EVALUATION_READER=false}" },
+    "grantProjectProtectedTraceContentReader": { "value": "${GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER=false}" },
     "deployHostedAgent":                    { "value": false },
     "hostedAgent":                          { "value": {
       "name": "${HOSTED_AGENT_NAME=agent-app-orchestrator}",

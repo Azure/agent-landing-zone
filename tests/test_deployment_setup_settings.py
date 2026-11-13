@@ -43,17 +43,31 @@ def test_store_presence_does_not_select_publication(verified):
 
 @pytest.mark.parametrize("selected", [True, False])
 def test_foundry_selection_controls_reach_hooks_as_typed_strings(verified, selected):
-    verified.parameters.update(deployAiFoundry=selected, deployAfProject=selected)
+    verified.parameters.update(
+        deployAiFoundry=selected, deployModelDeployments=selected, deployAfProject=selected,
+    )
     settings = setup_settings.resolve_setup_settings(verified)
     assert settings["DEPLOY_AI_FOUNDRY"] == str(selected).lower()
+    assert settings["DEPLOY_MODEL_DEPLOYMENTS"] == str(selected).lower()
     assert settings["DEPLOY_AF_PROJECT"] == str(selected).lower()
 
 
 def test_verified_service_selections_supply_omitted_hook_controls(verified):
     settings = setup_settings.resolve_setup_settings(verified)
     assert settings["DEPLOY_AI_FOUNDRY"] == "true"
+    assert settings["DEPLOY_MODEL_DEPLOYMENTS"] == "true"
     assert settings["DEPLOY_AF_PROJECT"] == "true"
     assert settings["DEPLOY_SEARCH_SERVICE"] == "false"
+
+
+def test_external_gateway_mode_resolves_empty_models_with_disabled_flag(verified):
+    verified.document["modelDeployments"] = []
+    verified.parameters["deployModelDeployments"] = False
+    settings = setup_settings.resolve_setup_settings(verified)
+    assert settings["DEPLOY_AI_FOUNDRY"] == "true"
+    assert settings["DEPLOY_MODEL_DEPLOYMENTS"] == "false"
+    assert settings["MODEL_DEPLOYMENTS"] == []
+    assert "CHAT_DEPLOYMENT_NAME" not in settings
 
 
 def test_resource_preferences_cannot_override_destinations(verified):

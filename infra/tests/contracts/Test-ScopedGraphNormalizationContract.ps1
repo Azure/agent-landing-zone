@@ -37,7 +37,7 @@ try {
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
     $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
-    $selection = (ConvertTo-PreDeploymentMetadataGraph $actual).resources.aiFoundry.properties.parameters.aiModelDeployments
+    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))).resources.aiFoundry.properties.parameters.aiModelDeployments
     Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
     Assert-ScopedValue $embeddingRule.after `
         ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `
@@ -68,6 +68,17 @@ try {
         @{ Name = 'metadata wrong application default'; Change = { param($t) $t.parameters.applicationId.defaultValue = 'another-app' } },
         @{ Name = 'metadata application replaced by label'; Change = { param($t) $t.outputs.DEPLOYMENT_METADATA.value.context.applicationId = "[parameters('appConfigLabel')]" } },
         @{ Name = 'metadata model default drift'; Change = { param($t) $t.variables._deploymentMetadataModels = $t.variables._deploymentMetadataModels.Replace("'capacity', 10", "'capacity', 100") } },
+        @{ Name = 'model deployments default disabled'; Change = { param($t) $t.parameters.deployModelDeployments.defaultValue = $false } },
+        @{ Name = 'model deployments AppConfig canonical gate dropped'; Change = { param($t) ($t.variables.copy | Where-Object name -CEQ '_modelDeploymentNamesSettings').count = "[length(parameters('modelDeploymentList'))]" } },
+        @{ Name = 'model deployments AppConfig JSON gate dropped'; Change = { param($t) ($t.variables.copy | Where-Object name -CEQ '_modelDeploymentSettings').count = "[length(parameters('modelDeploymentList'))]" } },
+        @{ Name = 'AzureAutomation DNS zone dot typo restored'; Change = { param($t) $t.variables._dnsZoneAzureAutomationId = $t.variables._dnsZoneAzureAutomationId.Replace('privatelink.agentsvc.azure-automation.net', 'privatelink.agentsvc.azure.automation.net') } },
+        @{ Name = 'trace evaluation reader enabled by default'; Change = { param($t) $t.parameters.grantProjectTraceEvaluationReader.defaultValue = $true } },
+        @{ Name = 'protected trace content reader enabled by default'; Change = { param($t) $t.parameters.grantProjectProtectedTraceContentReader.defaultValue = $true } },
+        @{ Name = 'LogAnalyticsDataReader role GUID drift'; Change = { param($t) $t.variables._logAnalyticsDataReaderRoleId = '00000000-0000-0000-0000-000000000000' } },
+        @{ Name = 'PrivilegedMonitoringDataReader role GUID drift'; Change = { param($t) $t.variables._privilegedMonitoringDataReaderRoleId = '00000000-0000-0000-0000-000000000000' } },
+        @{ Name = 'protected trace ABAC table name widened'; Change = { param($t) $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition = $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition.Replace("'AppGenAIContent'", "'AppTraces'") } },
+        @{ Name = 'protected trace ABAC protectionLevel dropped'; Change = { param($t) $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition = "@Resource[Microsoft.OperationalInsights/workspaces/tables:name] StringEquals 'AppGenAIContent'" } },
+        @{ Name = 'AMPLS private endpoint attached AppInsights DNS zone'; Change = { param($t) $t.resources.privateEndpointPrivateLinkScope.properties.parameters.privateDnsZoneGroup = "[createObject('value', createObject('name', 'privateLinkDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'appinsightsARecord', 'privateDnsZoneResourceId', 'unexpected'))))]" } },
         @{ Name = 'metadata old policy echo restored'; Change = { param($t) $t.outputs.OBSERVABILITY_MIXED_WORKSPACES_ALLOWED = @{ type = 'bool'; value = $true } } },
         @{ Name = 'MCP vector capability default enabled'; Change = { param($t) $t.parameters.enableCosmosVectorSearch.defaultValue = $true } },
         @{ Name = 'MCP existing capabilities discarded'; Change = { param($t) $t.resources.cosmosDBAccount.properties.parameters.capabilities.value = @('EnableServerless', 'EnableNoSQLVectorSearch') } },
@@ -117,6 +128,12 @@ try {
         @{ Name = 'Cosmos ACA ACL subnet prerequisite lost'; Change = { param($t) $t.variables.subnetDefinitions[7].required = "[parameters('deployContainerEnv')]" } },
         @{ Name = 'unreviewed subnet definition injected'; Change = { param($t) $t.variables.subnetDefinitions += @{ purpose = 'unexpected'; create = $true } } },
         @{ Name = 'new VNet ownership projection drift'; Change = { param($t) $t.resources.virtualNetwork.properties.parameters.subnets.value = @() } },
+        @{ Name = 'subnet map reintroduced conditional module reference'; Change = { param($t) $t.variables.subnets = $t.variables.subnets.Replace("resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/networkSecurityGroups', format('nsg-{0}-{1}', variables('resourceNames').vnetName, parameters('azureBastionSubnetName')))", "reference('bastionNsg').outputs.id.value") } },
+        @{ Name = 'subnet aiGateway NSG lost cross-subscription scope'; Change = { param($t) $t.variables.subnets = $t.variables.subnets.Replace("if(parameters('useExistingVNet'), variables('varExistingVnetSubscriptionId'), subscription().subscriptionId), ", '') } },
+        @{ Name = 'BYO route table passthrough dropped'; Change = { param($t) $t.variables._effectiveRouteTableId = "[resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/routeTables', 'rt-drift')]" } },
+        @{ Name = 'BYO NAT gateway passthrough dropped'; Change = { param($t) $t.variables._effectiveNatGatewayId = "[resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/natGateways', 'ng-drift')]" } },
+        @{ Name = 'new VNet lost explicit conditional NSG dependency'; Change = { param($t) $t.resources.virtualNetwork.dependsOn = @($t.resources.virtualNetwork.dependsOn | Where-Object { $_ -cne 'bastionNsg' }) } },
+        @{ Name = 'BYO subnets lost explicit conditional NSG dependency'; Change = { param($t) $t.resources.virtualNetworkSubnets.dependsOn = @($t.resources.virtualNetworkSubnets.dependsOn | Where-Object { $_ -cne 'aiGatewayNsg' }) } },
         @{ Name = 'wrong Foundry scope'; Change = { param($t) $t.resources.aiFoundry.resourceGroup = 'wrong-group' } },
         @{ Name = 'wrong network scope'; Change = { param($t) $t.resources.virtualNetwork.resourceGroup = 'wrong-group' } },
         @{ Name = 'grounding Storage moved to app'; Change = { param($t) $t.resources.storageAccount.resourceGroup = '[resourceGroup().name]' } },
@@ -181,7 +198,10 @@ try {
             }
         }
     }
-    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-PrivateMonitoringTraceRbacProjection)) +
+        @(Get-SubnetDeltaPaths (Get-ModelDeploymentsOptionalProjection)) +
+        @(Get-SubnetDeltaPaths (Get-SubnetConditionalReferencesProjection)) +
+        @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
         @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection)) +
         @(Get-SubnetDeltaPaths $native) +
         @(Get-SubnetDeltaPaths (Get-KnowledgeToolboxProjection))

@@ -58,6 +58,39 @@ actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
 
+`PrivateMonitoringTraceRbacNormalization.ps1` checks the bounded AMPLS Azure
+Automation DNS hyphenation fix (`privatelink.agentsvc.azure-automation.net`)
+and opt-in Foundry trace-evaluation RBAC delta (`grantProjectTraceEvaluationReader`,
+`grantProjectProtectedTraceContentReader`) at the front of the normalization
+pipeline before restoring the pre-change representation so historical fixtures
+and downstream normalization digests remain untouched.
+`Test-PrivateMonitoringTraceRbacContract.ps1` verifies the AMPLS private
+endpoint DNS zone group exclusions, default-off trace grants, prerequisite
+validation guards, cross-subscription BYO observability scopes, and exact
+`AppGenAIContent` + `Protected` ABAC v2.0 condition.
+
+`ModelDeploymentsOptionalNormalization.ps1` checks the bounded optional local
+Foundry model deployment gate (`deployModelDeployments`, default `true`) at the
+front of the normalization pipeline before restoring the pre-change
+`_deploymentMetadataModels` and App Configuration loop representations, leaving
+downstream normalization digests and historical fixtures untouched.
+`Test-ExternalGatewayModelFreeContract.ps1` verifies that `deployModelDeployments = false`
+suppresses local Foundry model deployments, `DEPLOYMENT_METADATA.modelDeployments`,
+and App Configuration model keys even when `main.parameters.json` retains its
+default `modelDeploymentList`, while preserving the two native fallback models
+when `deployModelDeployments = true` and `modelDeploymentList = []`.
+
+`SubnetConditionalReferencesNormalization.ps1` checks the bounded deterministic
+subnet `resourceId(...)` and explicit network-module `dependsOn` delta at the
+front of the normalization pipeline before restoring the pre-change inlined
+subnet representation, leaving `PostgreSqlNormalization.ps1` digests and all
+historical fixtures untouched. `Test-SubnetConditionalReferencesContract.ps1`
+proves why conditional cross-resource-group 1-argument `reference(...)` inside
+`map(...)` fails ARM validation, asserts zero `reference(` calls in compiled
+subnet expressions, verifies exact scopes across single-RG, split network RG,
+cross-subscription `useExistingVNet`, and BYO route table / NAT gateway
+passthroughs, and rejects missing `dependsOn` edges.
+
 `PostgreSqlNormalization.ps1` is the bounded optional-PostgreSQL delta against
 the pre-feature graph, using Bicep 0.42.1. Both sides of changed fields are
 pinned; complete added AVM modules are protected by canonical digests instead

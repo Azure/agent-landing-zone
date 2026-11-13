@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment.composition import compose_parameters
+from config.deployment.composition import DeploymentTopologyError, compose_parameters
 from config.deployment.app_settings import substitute_values
 from config.deployment.provider import resolve_provider
 from config.deployment.resolution import resolve_parameters
@@ -67,6 +67,58 @@ def test_selected_application_id_survives_both_strict_provider_inputs(selection)
 def test_application_id_is_a_strict_string_input():
     with pytest.raises(ValueError):
         compose_inputs({"applicationId": 123}, ENVIRONMENT)
+
+
+@pytest.mark.parametrize("raw,expected", [(None, True), ("true", True), ("false", False)])
+def test_deploy_model_deployments_survives_both_provider_input_adapters(raw, expected):
+    environment = {**ENVIRONMENT}
+    if raw is not None:
+        environment["DEPLOY_MODEL_DEPLOYMENTS"] = raw
+    terraform = compose_inputs(values(), environment)
+    bicep = substitute_values(compose_parameters(source(), environment), environment)["parameters"]
+    assert terraform["deployModelDeployments"] is expected
+    assert bicep["deployModelDeployments"]["value"] == str(expected).lower()
+    seed = json.loads((ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8"))
+    assert seed["parameters"]["deployModelDeployments"] == {"value": "${DEPLOY_MODEL_DEPLOYMENTS=true}"}
+
+
+@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+def test_deploy_model_deployments_rejects_non_boolean_values(invalid):
+    with pytest.raises(ValueError, match="deployModelDeployments"):
+        compose_inputs(values(), {**ENVIRONMENT, "DEPLOY_MODEL_DEPLOYMENTS": invalid})
+
+
+@pytest.mark.parametrize(
+    "param_name,env_name",
+    [
+        ("grantProjectTraceEvaluationReader", "GRANT_PROJECT_TRACE_EVALUATION_READER"),
+        ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
+    ],
+)
+@pytest.mark.parametrize("raw,expected", [(None, False), ("false", False), ("true", True)])
+def test_trace_evaluation_rbac_flags_survive_both_provider_input_adapters(param_name, env_name, raw, expected):
+    environment = {**ENVIRONMENT}
+    if raw is not None:
+        environment[env_name] = raw
+    terraform = compose_inputs(values(), environment)
+    bicep = substitute_values(compose_parameters(source(), environment), environment)["parameters"]
+    assert terraform[param_name] is expected
+    assert bicep[param_name]["value"] == str(expected).lower()
+    seed = json.loads((ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8"))
+    assert seed["parameters"][param_name] == {"value": f"${{{env_name}=false}}"}
+
+
+@pytest.mark.parametrize(
+    "param_name,env_name",
+    [
+        ("grantProjectTraceEvaluationReader", "GRANT_PROJECT_TRACE_EVALUATION_READER"),
+        ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
+    ],
+)
+@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+def test_trace_evaluation_rbac_flags_reject_non_boolean_values(param_name, env_name, invalid):
+    with pytest.raises(ValueError, match=param_name):
+        compose_inputs(values(), {**ENVIRONMENT, env_name: invalid})
 
 
 def test_embedding_defaults_match_tracked_bicep_seed():
@@ -251,7 +303,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 242
+    assert len(declarations) == 245
     original = values()
     for name, kind in declarations:
         if name in original:
@@ -547,3 +599,131 @@ def test_existing_vnet_context_and_tenant_aliases():
     environment["TENANT_ID"] = foreign
     with pytest.raises(ValueError, match="conflict"):
         compose_inputs(values(), environment)
+
+
+@pytest.mark.parametrize("profiles,expected_profile", [
+    (
+        [
+            {"name": "Consumption", "workloadProfileType": "Consumption"},
+            {"workloadProfileType": "D4", "name": "main", "minimumCount": 0, "maximumCount": 1},
+        ],
+        "main",
+    ),
+    ([{"name": "Consumption", "workloadProfileType": "Consumption"}], "Consumption"),
+    ([], "Consumption"),
+    (
+        [{"name": "dedicated", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 3}],
+        "dedicated",
+    ),
+])
+@pytest.mark.parametrize("via_env", [False, True])
+def test_bundled_workload_profile_resolution_matches_bicep_and_terraform(
+    profiles, expected_profile, via_env,
+):
+    template = source()
+    environment = {
+        **ENVIRONMENT,
+        "DEPLOY_INGESTION_CONTAINER_APP": "true",
+        "DEPLOY_AGENT_APP_MCP": "true",
+        "MCP_TOOLSETS": '["nl2sql"]',
+    }
+    if via_env:
+        environment["WORKLOAD_PROFILES"] = json.dumps(profiles)
+    else:
+        template["parameters"]["workloadProfiles"]["value"] = profiles
+    bicep = compose_parameters(template, environment)["parameters"]
+    terraform = compose_inputs(
+        {key: entry["value"] for key, entry in template["parameters"].items()},
+        environment,
+    )
+    assert bicep["workloadProfiles"]["value"] == terraform["workloadProfiles"] == profiles
+    assert bicep["containerAppsList"]["value"] == terraform["containerAppsList"]
+    assert {app["service_name"] for app in terraform["containerAppsList"]} == {
+        "orchestrator", "frontend", "dataingest", "mcp",
+    }
+    assert {app["profile_name"] for app in terraform["containerAppsList"]} == {expected_profile}
+
+
+def test_explicit_per_app_workload_profiles_are_preserved_when_valid():
+    template = source()
+    template["parameters"]["workloadProfiles"]["value"] = [
+        {"name": "dedicated-d4", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 2},
+        {"name": "dedicated-d8", "workloadProfileType": "D8", "minimumCount": 1, "maximumCount": 2},
+    ]
+    apps = template["parameters"]["containerAppsList"]["value"]
+    for app in apps:
+        app["profile_name"] = "dedicated-d8" if app["service_name"] == "orchestrator" else "dedicated-d4"
+    bicep = compose_parameters(template, ENVIRONMENT)["parameters"]
+    terraform = compose_inputs(
+        {key: entry["value"] for key, entry in template["parameters"].items()},
+        ENVIRONMENT,
+    )
+    assert bicep["containerAppsList"]["value"] == terraform["containerAppsList"]
+    by_service = {app["service_name"]: app["profile_name"] for app in terraform["containerAppsList"]}
+    assert by_service == {"orchestrator": "dedicated-d8", "frontend": "dedicated-d4"}
+
+
+@pytest.mark.parametrize("profiles,app_override", [
+    (
+        [{"name": "Consumption", "workloadProfileType": "Consumption"}],
+        {"service_name": "frontend", "profile_name": "nonexistent-profile"},
+    ),
+    (
+        [],
+        {"service_name": "orchestrator", "profile_name": "dedicated"},
+    ),
+    (
+        [
+            {"name": "dedicated-d4", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 2},
+            {"name": "dedicated-d8", "workloadProfileType": "D8", "minimumCount": 1, "maximumCount": 2},
+        ],
+        None,
+    ),
+    (
+        [{"name": "Consumption", "workloadProfileType": "Consumption"}],
+        {"service_name": "worker", "profile_name": "main", "extra": True},
+    ),
+])
+def test_invalid_or_ambiguous_app_workload_profile_fails_early(profiles, app_override):
+    template = source()
+    template["parameters"]["workloadProfiles"]["value"] = profiles
+    if app_override and app_override.get("extra"):
+        template["parameters"]["containerAppsList"]["value"].append({
+            "name": None, "external": False, "service_name": "worker",
+            "profile_name": app_override["profile_name"], "min_replicas": 1, "max_replicas": 1,
+            "canonical_name": "WORKER_APP", "roles": ["AcrPull"],
+        })
+    elif app_override:
+        for app in template["parameters"]["containerAppsList"]["value"]:
+            if app["service_name"] == app_override["service_name"]:
+                app["profile_name"] = app_override["profile_name"]
+    with pytest.raises(DeploymentTopologyError):
+        compose_parameters(template, ENVIRONMENT)
+    with pytest.raises(DeploymentTopologyError):
+        compose_inputs(
+            {key: entry["value"] for key, entry in template["parameters"].items()},
+            ENVIRONMENT,
+        )
+
+
+@pytest.mark.parametrize("bad_env", [
+    "",
+    "not-json",
+    "{}",
+    "123",
+    '["not-an-object"]',
+    '[{"name": ""}]',
+    '[{"name": "main"}]',
+    '[{"name": " main ", "workloadProfileType": "D4"}]',
+    '[{"name": "main", "workloadProfileType": "D4"}, {"name": "MAIN", "workloadProfileType": "D8"}]',
+    '[{"name": "main", "workloadProfileType": "D4", "minimumCount": true}]',
+    '[{"name": "main", "workloadProfileType": "D4", "minimumCount": -1}]',
+    '[{"name": "main", "workloadProfileType": "D4", "minimumCount": 3, "maximumCount": 1}]',
+])
+def test_malformed_workload_profiles_fail_with_topology_error(bad_env):
+    environment = {**ENVIRONMENT, "WORKLOAD_PROFILES": bad_env}
+    with pytest.raises(DeploymentTopologyError):
+        compose_parameters(source(), environment)
+    with pytest.raises(DeploymentTopologyError):
+        compose_inputs(values(), environment)
+

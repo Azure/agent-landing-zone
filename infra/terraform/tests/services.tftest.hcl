@@ -820,3 +820,127 @@ run "additional_cosmos_endpoint_cannot_compete_with_foundation_owner" {
   }
   expect_failures = [terraform_data.services_contract]
 }
+
+run "external_ai_gateway_suppresses_local_models_and_canonical_keys" {
+  command = plan
+  variables {
+    deployModelDeployments = false
+  }
+  assert {
+    condition = (
+      length(var.modelDeploymentList) == 2 &&
+      length(azapi_resource.model_deployment) == 0 &&
+      length(azapi_resource.foundry_account) == 1 &&
+      length(azapi_resource.foundry_project) == 1 &&
+      length(azapi_resource.application_search) == 1 &&
+      length(azapi_resource.knowledge_base_connection) == 1 &&
+      length(azapi_resource.account_connection) == 2 &&
+      azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.contentType == "application/json" &&
+      azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.value == "[]" &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["CHAT_DEPLOYMENT_NAME", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["EMBEDDING_DEPLOYMENT_NAME", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["GPT_MODEL", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["EMBEDDING_MODEL", "agent-lz"]))
+    )
+    error_message = "Disabling local model deployments must create zero model children, publish MODEL_DEPLOYMENTS as [], omit canonical model keys, and retain Foundry/Search connections."
+  }
+}
+
+run "empty_model_list_with_deploy_enabled_provisions_native_fallbacks" {
+  command = plan
+  variables {
+    deployModelDeployments = true
+    modelDeploymentList    = []
+  }
+  assert {
+    condition = (
+      toset(keys(azapi_resource.model_deployment)) == toset(["gpt-5-nano", "text-embedding-3-large"]) &&
+      azapi_resource.foundation_setting[jsonencode(["GPT_MODEL", "agent-lz"])].body.properties.value == "gpt-5-nano" &&
+      azapi_resource.foundation_setting[jsonencode(["EMBEDDING_MODEL", "agent-lz"])].body.properties.value == "text-embedding-3-large" &&
+      length(jsondecode(azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.value)) == 2
+    )
+    error_message = "Enabling local model deployments with an empty modelDeploymentList must retain the two native fallback models."
+  }
+}
+
+run "trace_evaluation_permissions_default_off" {
+  command = plan
+  assert {
+    condition = (
+      !var.grantProjectTraceEvaluationReader &&
+      !var.grantProjectProtectedTraceContentReader &&
+      !contains(keys(local.foundation_rbac_assignments), "cross:project_trace_eval_app_insights_reader") &&
+      !contains(keys(local.foundation_rbac_assignments), "cross:project_trace_eval_law_data_reader") &&
+      !contains(keys(local.foundation_rbac_assignments), "cross:project_protected_trace_app_insights_reader") &&
+      !contains(keys(local.foundation_rbac_assignments), "cross:project_protected_trace_law_reader")
+    )
+    error_message = "Scheduled Foundry trace evaluation and protected trace content RBAC must remain disabled by default."
+  }
+}
+
+run "trace_evaluation_and_protected_abac_managed_observability" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader       = true
+    grantProjectProtectedTraceContentReader = true
+    deployLogAnalytics                      = true
+    deployAppInsights                       = true
+  }
+  assert {
+    condition = (
+      contains(keys(azurerm_role_assignment.foundation), "cross:project_trace_eval_app_insights_reader") &&
+      contains(keys(azurerm_role_assignment.foundation), "cross:project_trace_eval_law_data_reader") &&
+      contains(keys(azurerm_role_assignment.foundation), "cross:project_protected_trace_app_insights_reader") &&
+      contains(keys(azurerm_role_assignment.foundation), "cross:project_protected_trace_law_reader") &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_app_insights_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7" &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_law_data_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.Authorization/roleDefinitions/3b03c2da-16b3-4a49-8834-0f8130efdd3b" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.Authorization/roleDefinitions/dbc9c667-e97f-4491-aee6-90b9cf960190" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_law_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000001/providers/Microsoft.Authorization/roleDefinitions/dbc9c667-e97f-4491-aee6-90b9cf960190" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_law_reader"].condition_version == "2.0"
+    )
+    error_message = "Managed observability must provision all four opt-in trace evaluation and protected ABAC role assignments in the workload subscription."
+  }
+}
+
+run "trace_evaluation_and_protected_abac_cross_subscription_byo_parity" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader           = true
+    grantProjectProtectedTraceContentReader     = true
+    deployLogAnalytics                          = false
+    deployAppInsights                           = false
+    existingLogAnalyticsWorkspaceResourceId     = "/subscriptions/00000000-0000-0000-0000-000000000098/resourceGroups/rg-central-law/providers/Microsoft.OperationalInsights/workspaces/law-central"
+    existingApplicationInsightsResourceId       = "/subscriptions/00000000-0000-0000-0000-000000000099/resourceGroups/rg-central-obs/providers/Microsoft.Insights/components/appi-central"
+    existingApplicationInsightsConnectionString = "InstrumentationKey=00000000-0000-0000-0000-000000000005;IngestionEndpoint=https://eastus.in.applicationinsights.azure.com/"
+  }
+  override_data {
+    target = data.azapi_resource.existing_app_insights[0]
+    values = {
+      output = {
+        properties = {
+          WorkspaceResourceId = "/subscriptions/00000000-0000-0000-0000-000000000098/resourceGroups/rg-central-law/providers/Microsoft.OperationalInsights/workspaces/law-central"
+        }
+      }
+    }
+  }
+  assert {
+    condition = (
+      local.foundation_rbac_assignments["cross:project_trace_eval_app_insights_reader"].scope == var.existingApplicationInsightsResourceId &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_app_insights_reader"].principal_type == "ServicePrincipal" &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_app_insights_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000099/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7" &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_app_insights_reader"].condition == null &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_law_data_reader"].scope == var.existingLogAnalyticsWorkspaceResourceId &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_law_data_reader"].principal_type == "ServicePrincipal" &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_law_data_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000098/providers/Microsoft.Authorization/roleDefinitions/3b03c2da-16b3-4a49-8834-0f8130efdd3b" &&
+      local.foundation_rbac_assignments["cross:project_trace_eval_law_data_reader"].condition == null &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000099/providers/Microsoft.Authorization/roleDefinitions/dbc9c667-e97f-4491-aee6-90b9cf960190" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].condition_version == "2.0" &&
+      strcontains(local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].condition, "@Resource[Microsoft.OperationalInsights/workspaces/tables:name] StringEquals 'AppGenAIContent'") &&
+      strcontains(local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].condition, "@Resource[Microsoft.OperationalInsights/workspaces/tables:protectionLevel] StringEquals 'Protected'") &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_law_reader"].role_definition_id == "/subscriptions/00000000-0000-0000-0000-000000000098/providers/Microsoft.Authorization/roleDefinitions/dbc9c667-e97f-4491-aee6-90b9cf960190" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_law_reader"].condition_version == "2.0" &&
+      local.foundation_rbac_assignments["cross:project_protected_trace_law_reader"].condition == local.foundation_rbac_assignments["cross:project_protected_trace_app_insights_reader"].condition
+    )
+    error_message = "Opt-in trace evaluation and protected AppGenAIContent ABAC grants must honor foreign BYO observability subscriptions and exact v2.0 table predicates."
+  }
+}

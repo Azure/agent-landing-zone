@@ -10,7 +10,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from config.deployment.app_settings import merge_app_configuration_settings, substitute_values
 from config.deployment.existing_images import apply_existing_images, discover_existing_images
@@ -187,6 +187,110 @@ def _setting(name: str, value: str) -> dict[str, str]:
 
 
 CUSTOM_CONTAINER_APP_ROLES = ["AcrPull"]
+WORKLOAD_PROFILES_ENV = "WORKLOAD_PROFILES"
+BUNDLED_CONTAINER_APP_SERVICES = frozenset({"orchestrator", "frontend", "dataingest"})
+DEFAULT_WORKLOAD_PROFILES: tuple[dict[str, object], ...] = (
+    {"name": "Consumption", "workloadProfileType": "Consumption"},
+    {"workloadProfileType": "D4", "name": "main", "minimumCount": 0, "maximumCount": 1},
+)
+
+
+def _validate_workload_profiles(
+    value: object, *, source_name: str,
+) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise DeploymentTopologyError(f"{source_name} must be an array of workload profile objects.")
+    seen_names: set[str] = set()
+    validated: list[dict[str, object]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise DeploymentTopologyError(
+                f"{source_name}[{index}] must be an object with 'name' and 'workloadProfileType'."
+            )
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip() or name != name.strip():
+            raise DeploymentTopologyError(
+                f"{source_name}[{index}].name must be a non-empty, untrimmed string."
+            )
+        profile_type = item.get("workloadProfileType")
+        if not isinstance(profile_type, str) or not profile_type.strip() or profile_type != profile_type.strip():
+            raise DeploymentTopologyError(
+                f"{source_name}[{index}].workloadProfileType must be a non-empty, untrimmed string."
+            )
+        folded = name.casefold()
+        if folded in seen_names:
+            raise DeploymentTopologyError(
+                f"{source_name} contains duplicate workload profile name '{name}'."
+            )
+        seen_names.add(folded)
+        min_count = item.get("minimumCount")
+        max_count = item.get("maximumCount")
+        for field, count in (("minimumCount", min_count), ("maximumCount", max_count)):
+            if count is not None and (type(count) is not int or count < 0):
+                raise DeploymentTopologyError(
+                    f"{source_name}[{index}].{field} must be a non-negative integer when specified."
+                )
+        if min_count is not None and max_count is not None and max_count < min_count:
+            raise DeploymentTopologyError(
+                f"{source_name}[{index}].maximumCount ({max_count}) must be >= minimumCount ({min_count})."
+            )
+        validated.append(copy.deepcopy(item))
+    return validated
+
+
+def resolve_workload_profiles(
+    source: Mapping[str, object], environment: Mapping[str, str],
+) -> tuple[list[dict[str, object]], bool]:
+    """Return effective workloadProfiles and whether parameters must emit an override."""
+    if WORKLOAD_PROFILES_ENV in environment:
+        raw_env = environment[WORKLOAD_PROFILES_ENV]
+        if not isinstance(raw_env, str):
+            raise DeploymentTopologyError(f"{WORKLOAD_PROFILES_ENV} must be a JSON array string.")
+        try:
+            parsed = json.loads(raw_env)
+        except ValueError:
+            raise DeploymentTopologyError(
+                f"{WORKLOAD_PROFILES_ENV} must be valid JSON encoding an array of workload profile objects."
+            ) from None
+        return _validate_workload_profiles(parsed, source_name=WORKLOAD_PROFILES_ENV), True
+    if "workloadProfiles" in source:
+        raw_source = substitute_values(source["workloadProfiles"], environment)
+        emit = False
+        if isinstance(raw_source, str):
+            try:
+                raw_source = json.loads(raw_source)
+            except ValueError:
+                raise DeploymentTopologyError(
+                    "workloadProfiles must be valid JSON encoding an array of workload profile objects."
+                ) from None
+            emit = True
+        return _validate_workload_profiles(raw_source, source_name="workloadProfiles"), emit
+    return copy.deepcopy(list(DEFAULT_WORKLOAD_PROFILES)), False
+
+
+def allowed_workload_profiles(workload_profiles: Sequence[Mapping[str, object]]) -> set[str]:
+    """Return valid Container App profile_name values for effective workloadProfiles."""
+    if not workload_profiles:
+        return {"Consumption"}
+    return {str(profile["name"]) for profile in workload_profiles}
+
+
+def resolve_default_workload_profile(workload_profiles: Sequence[Mapping[str, object]]) -> str:
+    """Resolve the deterministic default profile when 'main' is present or omitted."""
+    names = [str(profile["name"]) for profile in workload_profiles]
+    if "main" in names:
+        return "main"
+    if not names or "Consumption" in names:
+        return "Consumption"
+    if len(names) == 1:
+        return names[0]
+    available = ", ".join(repr(name) for name in names)
+    raise DeploymentTopologyError(
+        f"Cannot infer a default Container Apps workload profile from workloadProfiles "
+        f"({available}) because neither 'main' nor 'Consumption' is declared and multiple "
+        "profiles are present. Declare a 'main' or 'Consumption' profile in workloadProfiles, "
+        "or set an explicit profile_name on every Container App."
+    )
 
 
 def requires_hosted_foundation(
@@ -247,6 +351,7 @@ def resolve_cosmos_selection(environment: Mapping[str, str]) -> bool:
 def custom_container_apps(
     environment: Mapping[str, str], existing_apps: list[object], *,
     hosted_orchestration: bool,
+    workload_profiles: Sequence[Mapping[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Custom definitions contribute explicit entries to the bundled application."""
     from config.appdefinition.loader import (
@@ -260,17 +365,25 @@ def custom_container_apps(
         return []
     taken = {app.get("service_name") for app in existing_apps if isinstance(app, dict)}
     entries: list[dict[str, object]] = []
+    default_profile: str | None = None
     for component in effective_components(definition, hosted_orchestration=hosted_orchestration):
         if component.get("kind") != KIND_CONTAINER_APP:
             continue
         service = component_service_name(definition, component)
         if not service or service in taken:
             continue
+        if default_profile is None:
+            profiles = (
+                workload_profiles
+                if workload_profiles is not None
+                else resolve_workload_profiles({}, environment)[0]
+            )
+            default_profile = resolve_default_workload_profile(profiles)
         taken.add(service)
         resources = component.get("resources") or {}
         entries.append({
             "name": None, "external": component.get("ingress", "internal") == "external",
-            "service_name": service, "profile_name": "main", "min_replicas": 1,
+            "service_name": service, "profile_name": default_profile, "min_replicas": 1,
             "max_replicas": 1, "cpu": str(float(resources.get("cpu", 0.5))),
             "memory": str(resources.get("memory", "1.0Gi")),
             "canonical_name": re.sub(r"[^A-Z0-9]", "_", service.upper()) + "_APP",
@@ -349,6 +462,11 @@ def _resolve_application_overrides(
         if is_truthy(environment.get("NETWORK_ISOLATION")):
             parameters["deployAcrTaskAgentPool"] = True
 
+    effective_profiles, emit_workload_profiles = resolve_workload_profiles(source, environment)
+    if emit_workload_profiles:
+        parameters["workloadProfiles"] = effective_profiles
+    allowed_profiles = allowed_workload_profiles(effective_profiles)
+
     apps = copy.deepcopy(source.get("containerAppsList"))
     if not isinstance(apps, list):
         raise ValueError("containerAppsList must contain an array value.")
@@ -360,16 +478,36 @@ def _resolve_application_overrides(
     if deploy_mcp:
         apps.append({
             "name": None, "external": True, "service_name": "mcp",
-            "profile_name": "main", "min_replicas": 1, "max_replicas": 3,
+            "profile_name": resolve_default_workload_profile(effective_profiles),
+            "min_replicas": 1, "max_replicas": 3,
             "cpu": "0.5", "memory": "1.0Gi", "canonical_name": "MCP_APP",
             "dapr": {"enabled": False}, "roles": ["AcrPull", "AppConfigurationDataReader"],
         })
-    apps.extend(custom_container_apps(environment, apps, hosted_orchestration=hosted))
+    apps.extend(custom_container_apps(
+        environment, apps, hosted_orchestration=hosted, workload_profiles=effective_profiles,
+    ))
     for item in apps:
-        if bundled and item.get("service_name") in {"orchestrator", "frontend", "dataingest"}:
+        raw_profile = item.get("profile_name")
+        service_name = item.get("service_name", "<unknown>")
+        if raw_profile is None:
+            item["profile_name"] = resolve_default_workload_profile(effective_profiles)
+        elif not isinstance(raw_profile, str) or not raw_profile.strip() or raw_profile != raw_profile.strip():
+            raise DeploymentTopologyError(
+                f"Container App '{service_name}' requires a non-empty, untrimmed string profile_name."
+            )
+        elif raw_profile not in allowed_profiles:
+            if bundled and service_name in BUNDLED_CONTAINER_APP_SERVICES and raw_profile == "main":
+                item["profile_name"] = resolve_default_workload_profile(effective_profiles)
+            else:
+                available = ", ".join(repr(name) for name in sorted(allowed_profiles))
+                raise DeploymentTopologyError(
+                    f"Container App '{service_name}' selects profile_name '{raw_profile}', "
+                    f"which is not in effective workloadProfiles ({available})."
+                )
+        if bundled and service_name in BUNDLED_CONTAINER_APP_SERVICES:
             item["roles"] = [role for role in item.get("roles", [])
                              if role not in {"CosmosDBBuiltInDataContributor", "KeyVaultSecretsUser"}]
-        if bundled and item.get("service_name") == "orchestrator":
+        if bundled and service_name == "orchestrator":
             item["external"] = False
             item["disable_ingress"] = True
             item["dapr"] = {"enabled": False}
