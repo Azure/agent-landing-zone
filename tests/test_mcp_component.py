@@ -9,7 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from config.deployment import appconfig, mcp, mcp_config
-from config.deployment.composition import compose_parameters
+from config.deployment.composition import DeploymentTopologyError, compose_parameters
 from config.deployment.app_settings import substitute_values
 from config.deployment.resolution import resolve_parameters
 
@@ -737,3 +737,48 @@ def test_custom_application_owns_toolsets_without_selecting_reference_resources(
         runtime = appconfig.build_settings(env)
     assert json.loads(runtime["MCP_TOOLSETS"]) == ["nl2sql"]
     assert [call.args[1] for call in discover.call_args_list] == ["ca-test-web"]
+
+
+@pytest.mark.parametrize("profiles,expected_profile", [
+    (
+        [
+            {"name": "Consumption", "workloadProfileType": "Consumption"},
+            {"name": "main", "workloadProfileType": "D4", "minimumCount": 0, "maximumCount": 1},
+        ],
+        "main",
+    ),
+    ([{"name": "Consumption", "workloadProfileType": "Consumption"}], "Consumption"),
+    ([], "Consumption"),
+    (
+        [{"name": "dedicated", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 3}],
+        "dedicated",
+    ),
+])
+@pytest.mark.parametrize("via_env", [False, True])
+def test_mcp_resolves_effective_workload_profile_in_both_providers(
+    profiles, expected_profile, via_env,
+):
+    source = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
+    env = environment()
+    if via_env:
+        env["WORKLOAD_PROFILES"] = json.dumps(profiles)
+    else:
+        source["parameters"]["workloadProfiles"]["value"] = profiles
+    bicep = compose_parameters(source, env)["parameters"]
+    plain = substitute_values({key: entry["value"] for key, entry in source["parameters"].items()}, env)
+    terraform = resolve_parameters(plain, env)
+    assert bicep["workloadProfiles"]["value"] == terraform["workloadProfiles"] == profiles
+    assert bicep["containerAppsList"]["value"] == terraform["containerAppsList"]
+    mcp_app = next(app for app in terraform["containerAppsList"] if app["service_name"] == "mcp")
+    assert mcp_app["profile_name"] == expected_profile
+
+
+def test_mcp_rejects_ambiguous_multi_dedicated_profiles_without_main_or_consumption():
+    env = environment(WORKLOAD_PROFILES=json.dumps([
+        {"name": "d4", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 2},
+        {"name": "d8", "workloadProfileType": "D8", "minimumCount": 1, "maximumCount": 2},
+    ]))
+    source = json.loads((ROOT / "main.parameters.json").read_text(encoding="utf-8"))
+    with pytest.raises(DeploymentTopologyError, match="workloadProfiles"):
+        compose_parameters(source, env)
+

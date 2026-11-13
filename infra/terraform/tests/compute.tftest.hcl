@@ -619,6 +619,59 @@ run "invalid_profile_rejected" {
   expect_failures = [terraform_data.compute_contract]
 }
 
+run "consumption_only_workload_profiles_accept_resolved_consumption_apps" {
+  command = plan
+  variables {
+    workloadProfiles = []
+    containerAppsList = [{
+      service_name = "worker", canonical_name = "CUSTOM_WORKER", external = false
+      profile_name = "Consumption", min_replicas = 0, max_replicas = 1, roles = []
+    }]
+  }
+  assert {
+    condition = (
+      length(azapi_resource.container_environment["this"].body.properties.workloadProfiles) == 0 &&
+      azurerm_container_app.shell["worker"].workload_profile_name == "Consumption"
+    )
+    error_message = "Consumption-only workloadProfiles must accept Container Apps bound to Consumption."
+  }
+}
+
+run "single_dedicated_workload_profile_without_main_accepted" {
+  command = plan
+  variables {
+    workloadProfiles = [
+      { name = "dedicated", workloadProfileType = "D4", minimumCount = 1, maximumCount = 3 }
+    ]
+    containerAppsList = [{
+      service_name = "worker", canonical_name = "CUSTOM_WORKER", external = false
+      profile_name = "dedicated", min_replicas = 1, max_replicas = 3, roles = []
+    }]
+  }
+  assert {
+    condition = (
+      length(azapi_resource.container_environment["this"].body.properties.workloadProfiles) == 1 &&
+      azapi_resource.container_environment["this"].body.properties.workloadProfiles[0].name == "dedicated" &&
+      azurerm_container_app.shell["worker"].workload_profile_name == "dedicated"
+    )
+    error_message = "Custom dedicated workloadProfiles omitting main must bind Container Apps to the declared profile."
+  }
+}
+
+run "omitted_main_profile_rejected_by_compute_contract" {
+  command = plan
+  variables {
+    workloadProfiles = [
+      { name = "Consumption", workloadProfileType = "Consumption" }
+    ]
+    containerAppsList = [{
+      service_name = "worker", canonical_name = "CUSTOM_WORKER", external = false
+      profile_name = "main", min_replicas = 0, max_replicas = 1, roles = []
+    }]
+  }
+  expect_failures = [terraform_data.compute_contract]
+}
+
 run "negative_pool_count_rejected" {
   command = plan
   variables {
