@@ -58,6 +58,17 @@ actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
 
+`SubnetConditionalReferencesNormalization.ps1` checks the bounded deterministic
+subnet `resourceId(...)` and explicit network-module `dependsOn` delta at the
+front of the normalization pipeline before restoring the pre-change inlined
+subnet representation, leaving `PostgreSqlNormalization.ps1` digests and all
+historical fixtures untouched. `Test-SubnetConditionalReferencesContract.ps1`
+proves why conditional cross-resource-group 1-argument `reference(...)` inside
+`map(...)` fails ARM validation, asserts zero `reference(` calls in compiled
+subnet expressions, verifies exact scopes across single-RG, split network RG,
+cross-subscription `useExistingVNet`, and BYO route table / NAT gateway
+passthroughs, and rejects missing `dependsOn` edges.
+
 `PostgreSqlNormalization.ps1` is the bounded optional-PostgreSQL delta against
 the pre-feature graph, using Bicep 0.42.1. Both sides of changed fields are
 pinned; complete added AVM modules are protected by canonical digests instead

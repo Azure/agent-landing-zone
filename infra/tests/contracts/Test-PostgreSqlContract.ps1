@@ -69,7 +69,11 @@ try {
     Assert ($pg.properties.template.parameters.administratorLoginPassword.defaultValue -eq $null) 'AVM password stays nullable.'
     Assert ($null -eq $pg.properties.parameters.lock) 'Caller never owns the independent lock.'
     Assert ($pg.properties.template.parameters.lock.nullable -eq $true -and $null -eq $pg.properties.template.parameters.lock.defaultValue) 'AVM cannot create a lock by default.'
-    Contains $t.resources.virtualNetwork.properties.parameters.subnets.value @('containerAppsPostgreSqlNat', 'acaEnvironment', 'natGatewayResourceId') 'Dedicated NAT is associated to ACA subnet.'
+    Assert ($t.resources.virtualNetwork.properties.parameters.subnets.value -ceq "[variables('subnets')]") 'New VNet consumes deterministic subnets variable.'
+    Assert ($t.resources.virtualNetworkSubnets.properties.parameters.subnets.value -ceq "[variables('subnets')]") 'BYO subnets consume deterministic subnets variable.'
+    Contains $t.variables.subnets @('_postgreSqlBasic', 'acaEnvironment', 'natGatewayResourceId', 'Microsoft.Network/natGateways', 'aca-postgresql-') 'Dedicated NAT is associated to ACA subnet.'
+    Contains ($t.resources.virtualNetwork.dependsOn | ConvertTo-Json) @('containerAppsPostgreSqlNat') 'New VNet waits for dedicated PostgreSQL NAT.'
+    Contains ($t.resources.virtualNetworkSubnets.dependsOn | ConvertTo-Json) @('containerAppsPostgreSqlNat') 'BYO subnets wait for dedicated PostgreSQL NAT.'
     Assert ($t.resources.natGateway.properties.parameters.name.value -cnotmatch 'aca-postgresql') 'Jumpbox NAT naming is unchanged.'
     Contains ($t.resources.containerEnv.dependsOn | ConvertTo-Json) @('virtualNetwork') 'ACA waits for VNet/subnet association.'
     Contains ($pg.dependsOn | ConvertTo-Json) @('containerAppsPostgreSqlNat') 'Server/firewall waits for NAT IP.'
@@ -88,15 +92,17 @@ try {
         Assert ($seed.postgreSqlAllowedIpRanges.value -is [array] -and $seed.postgreSqlAllowedIpRanges.value.Count -eq 0) 'Typed operator ranges.'
     }
     $actual = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-    $before = ConvertTo-PrePostgreSqlGraph $actual
+    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph $actual
+    $before = ConvertTo-DeterministicSubnetPrePostgreSqlGraph (ConvertTo-PrePostgreSqlGraph $preSubnet)
     Assert ((Get-PostgreSqlDigest 'Enabled') -cne (Get-PostgreSqlDigest 'enabled')) 'Digest caching must not swallow case-only mutations.'
     [IO.File]::WriteAllText($beforeFile, (ConvertTo-Json -InputObject $before -Depth 100 -Compress))
     & python (Join-Path $PSScriptRoot 'postgresql_disabled_ast.py') $compiled $beforeFile
     Assert ($LASTEXITCODE -eq 0) 'Disabled preexisting graph equivalence failed.'
     # Every deploying field accepted by the inverse gets a rejection mutation.
     # Original fingerprints additionally reject untouched/unrelated drift.
+    $preSubnetJson = ConvertTo-Json -InputObject $preSubnet -Depth 100 -Compress
     foreach ($rule in Get-PostgreSqlDelta) {
-        $changed = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+        $changed = $preSubnetJson | ConvertFrom-Json -AsHashtable -Depth 100
         $parts = $rule.path.TrimStart('/').Split('/')
         $parent = $changed
         foreach ($part in $parts[0..($parts.Length - 2)]) {

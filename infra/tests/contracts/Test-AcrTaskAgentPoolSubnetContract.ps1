@@ -276,6 +276,7 @@ try {
     # Check the real build definition, including its independent ownership flag.
     # The common projection supplies routing/NSGs, not per-consumer fallbacks.
     $subnetExpression = [string]$subnets.properties.parameters.subnets.value
+    $sharedSubnetsMap = [string]$subnetGraph.variables.subnets
     $buildDefinitions = @($subnetGraph.variables.subnetDefinitions | Where-Object purpose -CEQ 'devopsBuildAgents')
     Test-Equal 'Exactly one build subnet definition' $buildDefinitions.Count 1
     Test-Set 'Build subnet definition property surface' $buildDefinitions[0].PSObject.Properties.Name @('purpose', 'create', 'required', 'name', 'addressPrefix', 'delegation', 'serviceEndpoints')
@@ -294,8 +295,12 @@ try {
         $subnetGraph.variables._deployAcrTaskAgentPool "[and(and(parameters('deployContainerRegistry'), variables('_networkIsolation')), parameters('deployAcrTaskAgentPool'))]"
     Test-Equal 'New and BYO paths share the exact subnet resource projection' `
         $subnetExpression $subnetGraph.resources.virtualNetwork.properties.parameters.subnets.value
+    Test-Equal 'New and BYO paths consume the shared deterministic subnets variable' `
+        $subnetExpression "[variables('subnets')]"
     Test-Equal 'Build subnet retains actual route-table selection in the common projection' `
-        $subnetExpression.Contains("'routeTableResourceId', if(contains(createArray('agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'), lambdaVariables('subnet').purpose), if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), reference('routeTable').outputs.resourceId.value, '')), '')") $true
+        $sharedSubnetsMap.Contains("'routeTableResourceId', if(contains(createArray('agent', 'pe', 'jumpbox', 'acaEnvironment', 'devopsBuildAgents', 'applicationPe'), lambdaVariables('subnet').purpose), variables('_effectiveRouteTableId'), '')") $true
+    Test-Equal 'Effective route-table selection preserves BYO passthrough and deterministic managed ID' `
+        ([string]$subnetGraph.variables._effectiveRouteTableId) "[if(variables('_hasExistingRouteTable'), parameters('hubIntegrationExistingRouteTableResourceId'), if(variables('_createRouteTable'), resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/routeTables', format('{0}{1}', variables('_1.abbrs').networking.routeTable, parameters('resourceToken'))), ''))]"
 
     $children = @($subnets.properties.template.resources)
     Test-Equal 'Subnet orchestrator retains exactly three child deployment declarations' $children.Count 3
@@ -338,7 +343,7 @@ try {
         @($bastionDefinitions.Count, $bastionDefinitions[0].create, $bastionDefinitions[0].name, $bastionDefinitions[0].delegation) `
         @(1, "[parameters('deployAzureBastionSubnet')]", "[parameters('azureBastionSubnetName')]", '')
     Test-Equal '#168 enabled Bastion retains its dedicated NSG binding in the common projection' `
-        $subnetExpression.Contains("'networkSecurityGroupResourceId', if(and(and(equals(lambdaVariables('subnet').purpose, 'bastion'), variables('_deployBastion')), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value,") $true
+        $sharedSubnetsMap.Contains("'networkSecurityGroupResourceId', if(and(and(equals(lambdaVariables('subnet').purpose, 'bastion'), variables('_deployBastion')), parameters('deployNsgs')), resourceId(variables('_networkResourceGroupName'), 'Microsoft.Network/networkSecurityGroups', format('nsg-{0}-{1}', variables('resourceNames').vnetName, parameters('azureBastionSubnetName'))),") $true
     if ($subnetChild.properties.parameters.networkSecurityGroupId -ceq $selection) {
         foreach ($case in @(
             @{ Name = 'Bastion disabled'; Subnet = 'AzureBastionSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
