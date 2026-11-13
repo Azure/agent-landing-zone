@@ -1,9 +1,24 @@
 """Minimal Foundry hosted agent for Agent Landing Zone.
 
-Serves the responses protocol on port 8088 and answers every request with a
-short message that names the Foundry project endpoint it found in the platform
-outputs contract (AGENTLZ_PLATFORM_OUTPUTS, label agent-lz). Replace
-``answer`` with your agent logic.
+Serves the Responses protocol on port 8088 and answers every request with a
+greeting that names the Foundry project endpoint injected by the platform
+(``FOUNDRY_PROJECT_ENDPOINT``, with ``AZURE_AI_PROJECT_ENDPOINT`` as a local
+fallback). Reading the platform-injected environment directly keeps startup
+dependency-free and allows the sample to deploy whether Azure App Configuration
+is enabled or disabled (``appRuntimeConfigurationMode = "none"`` /
+``deployAppConfig = false``).
+
+Production graduation requirements beyond this minimal smoke sample:
+1. Use ``azure-ai-agentserver-responses`` so the hosted server implements the
+   full Responses lifecycle and persisted ``GET /responses/{id}`` lookups.
+   Synthetic ``resp_<uuid>`` identifiers returned by a raw HTTP handler are not
+   persisted for ``GET /responses/{id}``.
+2. Emit GenAI OpenTelemetry ``invoke_agent`` spans (bundled automatically by
+   ``azure-ai-agentserver-responses`` when ``APPLICATIONINSIGHTS_CONNECTION_STRING``
+   is platform-injected) so Microsoft Foundry Traces and scheduled trace
+   evaluations can discover and score agent interactions. Do not declare
+   ``FOUNDRY_*``, ``AGENT_*``, or ``APPLICATIONINSIGHTS_CONNECTION_STRING`` in
+   ``azure.yaml`` because Foundry reserves those names and rejects overrides.
 """
 
 from __future__ import annotations
@@ -13,31 +28,24 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from azure.appconfiguration import AzureAppConfigurationClient
-from azure.identity import DefaultAzureCredential
-
-LABEL = "agent-lz"
-OUTPUTS_KEY = "AGENTLZ_PLATFORM_OUTPUTS"
 LOGGER = logging.getLogger("sample-agent")
 
 
-def platform_outputs() -> dict[str, object]:
-    endpoint = os.environ["APP_CONFIG_ENDPOINT"]
-    client = AzureAppConfigurationClient(endpoint, DefaultAzureCredential())
-    setting = client.get_configuration_setting(key=OUTPUTS_KEY, label=LABEL)
-    return json.loads(setting.value or "{}")
+def project_endpoint(environment: Mapping[str, str] | None = None) -> str:
+    """Resolve the Foundry project endpoint without requiring App Configuration."""
+    env = os.environ if environment is None else environment
+    for key in ("FOUNDRY_PROJECT_ENDPOINT", "AZURE_AI_PROJECT_ENDPOINT"):
+        value = (env.get(key) or "").strip()
+        if value:
+            return value
+    return "unknown"
 
 
-def answer() -> str:
-    try:
-        foundry = platform_outputs().get("foundry") or {}
-        project = foundry.get("projectEndpoint", "unknown") if isinstance(foundry, dict) else "unknown"
-    except Exception:
-        LOGGER.exception("Could not read platform outputs.")
-        project = "unavailable"
-    return f"Hello! Sample agent running on project {project}."
+def answer(environment: Mapping[str, str] | None = None) -> str:
+    return f"Hello! Sample agent running on project {project_endpoint(environment)}."
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,7 +68,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length") or 0)
-        self.rfile.read(length)
+        if length > 0:
+            self.rfile.read(length)
         self._send(
             200,
             {

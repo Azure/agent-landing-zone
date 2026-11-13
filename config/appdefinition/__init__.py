@@ -30,7 +30,7 @@ from .loader import (
     resolve_definition_path,
 )
 from .profiles import PROFILES, SELECTABLE_PROFILES, RoleAssignment, expand_profiles, role_names
-from .validator import collect_issues, validate_definition
+from .validator import collect_issues, is_reserved_hosted_agent_env, validate_definition
 
 __all__ = [
     "APP_ID_ENV",
@@ -56,6 +56,7 @@ __all__ = [
     "effective_components",
     "env_file_path",
     "expand_profiles",
+    "is_reserved_hosted_agent_env",
     "load_definition",
     "load_selected_definition",
     "resolve_definition_path",

@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 # Custom hosted-agent project for Agent Landing Zone. The service name matches
-# the component name in app-definition.json. Lifecycle hooks are not allowed;
-# the landing zone pins the image by digest and runs the smoke test.
+# the component name in app-definition.json. Lifecycle hooks are not allowed.
+# The landing zone pins the image by digest and runs the smoke test.
 name: sample-hosted
 services:
   agent:
@@ -21,7 +21,9 @@ services:
     protocols:
       - protocol: responses
         version: "2.0.0"
+    # Foundry Hosted Agents automatically inject FOUNDRY_* (including
+    # FOUNDRY_PROJECT_ENDPOINT), AGENT_*, and APPLICATIONINSIGHTS_CONNECTION_STRING,
+    # and reject overrides of those reserved names at publish time.
     env:
-      APP_CONFIG_ENDPOINT: ${APP_CONFIG_ENDPOINT}
       OTEL_EXPERIMENTAL_RESOURCE_DETECTORS: ""
       APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL: "true"
