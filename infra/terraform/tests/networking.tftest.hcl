@@ -153,6 +153,15 @@ run "isolated_basic_has_required_subnets_and_dedicated_application_pe" {
     error_message = "Creating the AppInsights zone is not the same as attaching it to the AMPLS endpoint."
   }
   assert {
+    condition = (
+      local.network_dns_specs.AzureAutomation.name == "privatelink.agentsvc.azure-automation.net" &&
+      local.network_managed_dns["AzureAutomation"].name == "privatelink.agentsvc.azure-automation.net" &&
+      contains(keys(module.network_private_dns), "AzureAutomation") &&
+      toset(local.network_endpoint_specs.ampls.zones) == toset(["AzureMonitor", "OmsOpsInsights", "OdsOpsInsights", "AzureAutomation"])
+    )
+    error_message = "AMPLS DNS must provision hyphenated privatelink.agentsvc.azure-automation.net and attach only the four azuremonitor zones."
+  }
+  assert {
     condition     = toset(keys(local.network_foundry_private_endpoints)) == toset(["foundry", "foundrySearch", "foundryStorage", "foundryCosmos", "foundryKeyVault"])
     error_message = "Foundry connectivity must have its own known-key endpoint resource collection."
   }

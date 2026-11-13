@@ -347,6 +347,8 @@ function Test-BooleanParameterValues {
         deployAiGatewaySubnet      = 'DEPLOY_AI_GATEWAY_SUBNET'
         deployAiFoundrySubnet      = 'DEPLOY_AI_FOUNDRY_SUBNET'
         deployModelDeployments     = 'DEPLOY_MODEL_DEPLOYMENTS'
+        grantProjectTraceEvaluationReader = 'GRANT_PROJECT_TRACE_EVALUATION_READER'
+        grantProjectProtectedTraceContentReader = 'GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER'
         aiFoundryDisableLocalAuth  = 'AI_FOUNDRY_DISABLE_LOCAL_AUTH'
     }
 
@@ -496,6 +498,8 @@ function Test-Topology {
             -Hint "Either also set EXISTING_LOG_ANALYTICS_WORKSPACE_RESOURCE_ID to the LAW that backs your App Insights, or set ALLOW_MIXED_OBSERVABILITY_WORKSPACES=true if the split is intentional."
     }
 
+    Test-TraceEvaluationConfiguration -P $P
+
     # Network isolation without any access path
     $netIso = ConvertTo-Bool $P['networkIsolation']
     $useExistingVNet = ConvertTo-Bool $P['useExistingVNet']
@@ -605,6 +609,51 @@ function Test-ExistingHostedOperatorAccess {
             } else {
                 'Existing scoped operator project read and agent read/write permissions verified; no Project Manager assignment requested.'
             })
+    }
+}
+
+function Test-TraceEvaluationConfiguration {
+    param([hashtable]$P)
+
+    $grantTraceEval = Resolve-DeployFlag -P $P -Key 'grantProjectTraceEvaluationReader' -Default $false
+    $grantProtectedTrace = Resolve-DeployFlag -P $P -Key 'grantProjectProtectedTraceContentReader' -Default $false
+    if (-not ($grantTraceEval -or $grantProtectedTrace)) { return }
+
+    if ($grantProtectedTrace -and -not $grantTraceEval) {
+        Add-Finding -Severity FAIL -Code 'TRACE_EVAL_BASE_READER_REQUIRED' `
+            -Message 'grantProjectProtectedTraceContentReader=true requires grantProjectTraceEvaluationReader=true.' `
+            -Hint 'Set GRANT_PROJECT_TRACE_EVALUATION_READER=true when enabling GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER, or set GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER=false.'
+    }
+
+    $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
+    $deployAfProject = Resolve-DeployFlag -P $P -Key 'deployAfProject' -Default $true
+    if (-not ($deployAiFoundry -and $deployAfProject)) {
+        Add-Finding -Severity FAIL -Code 'TRACE_EVAL_FOUNDRY_PROJECT_REQUIRED' `
+            -Message 'Scheduled Foundry trace evaluation permissions require deployAiFoundry=true and deployAfProject=true.' `
+            -Hint 'Enable the AI Foundry account and project, or set GRANT_PROJECT_TRACE_EVALUATION_READER=false and GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER=false.'
+    }
+
+    $existingLawId = (Get-StringValue $P['existingLogAnalyticsWorkspaceResourceId']).Trim()
+    $existingAppInsightsId = (Get-StringValue $P['existingApplicationInsightsResourceId']).Trim()
+    $hasExistingLaw = -not [string]::IsNullOrEmpty($existingLawId)
+    $hasExistingAppI = -not [string]::IsNullOrEmpty($existingAppInsightsId)
+    $createLaw = (Resolve-DeployFlag -P $P -Key 'deployLogAnalytics' -Default $true) -and -not $hasExistingLaw
+    $createAppI = (Resolve-DeployFlag -P $P -Key 'deployAppInsights' -Default $true) -and -not $hasExistingAppI -and ($createLaw -or $hasExistingLaw)
+    if (-not (($hasExistingLaw -or $createLaw) -and ($hasExistingAppI -or $createAppI))) {
+        Add-Finding -Severity FAIL -Code 'TRACE_EVAL_OBSERVABILITY_REQUIRED' `
+            -Message 'Scheduled Foundry trace evaluation permissions require effective Application Insights and Log Analytics resources.' `
+            -Hint 'Enable DEPLOY_LOG_ANALYTICS and DEPLOY_APP_INSIGHTS (or supply existing observability resource IDs), or disable trace evaluation role grants.'
+    }
+
+    if ($hasExistingLaw -and $existingLawId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.OperationalInsights/workspaces/[^/]+$') {
+        Add-Finding -Severity FAIL -Code 'TRACE_EVAL_OBSERVABILITY_ID_INVALID' `
+            -Message "existingLogAnalyticsWorkspaceResourceId '$existingLawId' is not a valid Log Analytics workspace ARM resource ID." `
+            -Hint 'Provide /subscriptions/<subId>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<name>.'
+    }
+    if ($hasExistingAppI -and $existingAppInsightsId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Insights/components/[^/]+$') {
+        Add-Finding -Severity FAIL -Code 'TRACE_EVAL_OBSERVABILITY_ID_INVALID' `
+            -Message "existingApplicationInsightsResourceId '$existingAppInsightsId' is not a valid Application Insights ARM resource ID." `
+            -Hint 'Provide /subscriptions/<subId>/resourceGroups/<rg>/providers/Microsoft.Insights/components/<name>.'
     }
 }
 
@@ -1337,7 +1386,7 @@ function Test-AzureResources {
         'existingPrivateDnsZoneAzureMonitorResourceId'    = 'privatelink.monitor.azure.com'
         'existingPrivateDnsZoneOmsOpsInsightsResourceId'  = 'privatelink.oms.opinsights.azure.com'
         'existingPrivateDnsZoneOdsOpsInsightsResourceId'  = 'privatelink.ods.opinsights.azure.com'
-        'existingPrivateDnsZoneAzureAutomationResourceId' = 'privatelink.agentsvc.azure.automation.net'
+        'existingPrivateDnsZoneAzureAutomationResourceId' = 'privatelink.agentsvc.azure-automation.net'
         'existingPrivateDnsZoneAppInsightsResourceId'     = 'privatelink.applicationinsights.io'
     }
     foreach ($entry in $expectedZoneName.GetEnumerator()) {

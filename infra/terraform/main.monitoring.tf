@@ -112,12 +112,20 @@ locals {
   effective_observability = {
     create_law          = local.services_create_law
     create_app_insights = local.services_create_ai
-    law_id              = local.services_existing_law != "" ? local.services_existing_law : (local.services_create_law ? module.log_analytics[0].resource_id : "")
-    app_insights_id     = local.services_existing_ai != "" ? local.services_existing_ai : (local.services_create_ai ? azapi_resource.app_insights[0].id : "")
-    connection_string   = local.services_existing_ai != "" ? (var.existingApplicationInsightsConnectionString == null ? "" : var.existingApplicationInsightsConnectionString) : (local.services_create_ai ? azapi_resource.app_insights[0].output.properties.ConnectionString : "")
-    instrumentation_key = local.services_existing_ai != "" ? try(split("=", split(";", var.existingApplicationInsightsConnectionString)[0])[1], "") : (local.services_create_ai ? azapi_resource.app_insights[0].output.properties.InstrumentationKey : "")
-    ampls               = local.services_ampls
-    ampls_id            = local.services_ampls ? terraform_data.monitor_scope_ready[0].output.id : ""
+    has_law             = local.services_create_law || local.services_existing_law != ""
+    has_app_insights    = local.services_create_ai || local.services_existing_ai != ""
+    valid_existing_ids = (
+      (local.services_existing_ai == "" || can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Insights/components/[^/]+$", local.services_existing_ai))) &&
+      (local.services_existing_law == "" || can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.OperationalInsights/workspaces/[^/]+$", local.services_existing_law)))
+    )
+    law_subscription_id          = local.services_existing_law != "" ? try(split("/", local.services_existing_law)[2], local.deployment_context.subscription_id) : local.deployment_context.subscription_id
+    app_insights_subscription_id = local.services_existing_ai != "" ? try(split("/", local.services_existing_ai)[2], local.deployment_context.subscription_id) : local.deployment_context.subscription_id
+    law_id                       = local.services_existing_law != "" ? local.services_existing_law : (local.services_create_law ? module.log_analytics[0].resource_id : "")
+    app_insights_id              = local.services_existing_ai != "" ? local.services_existing_ai : (local.services_create_ai ? azapi_resource.app_insights[0].id : "")
+    connection_string            = local.services_existing_ai != "" ? (var.existingApplicationInsightsConnectionString == null ? "" : var.existingApplicationInsightsConnectionString) : (local.services_create_ai ? azapi_resource.app_insights[0].output.properties.ConnectionString : "")
+    instrumentation_key          = local.services_existing_ai != "" ? try(split("=", split(";", var.existingApplicationInsightsConnectionString)[0])[1], "") : (local.services_create_ai ? azapi_resource.app_insights[0].output.properties.InstrumentationKey : "")
+    ampls                        = local.services_ampls
+    ampls_id                     = local.services_ampls ? terraform_data.monitor_scope_ready[0].output.id : ""
     # Resource IDs of scope memberships are an explicit PE readiness dependency.
     ampls_scoped_resource_ids = [for resource in azapi_resource.monitor_scoped_resource : resource.id]
   }

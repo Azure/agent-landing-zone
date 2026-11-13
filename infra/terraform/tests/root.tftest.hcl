@@ -567,3 +567,39 @@ run "invalid_fractional_pool_count" {
   }
   expect_failures = [var.acrTaskAgentPoolCount]
 }
+
+run "reject_protected_trace_without_base_trace_reader" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader       = false
+    grantProjectProtectedTraceContentReader = true
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_without_foundry_project" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader = true
+    deployAfProject                   = false
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_without_effective_observability" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader = true
+    deployAppInsights                 = false
+  }
+  expect_failures = [terraform_data.root_contract]
+}
+
+run "reject_trace_reader_with_malformed_byo_law_id" {
+  command = plan
+  variables {
+    grantProjectTraceEvaluationReader       = true
+    existingLogAnalyticsWorkspaceResourceId = "not-a-valid-arm-id"
+  }
+  expect_failures = [terraform_data.root_contract]
+}
