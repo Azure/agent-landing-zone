@@ -1,6 +1,87 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.0] - 2026-11-13
+
+### Added
+
+- Support explicit model-free / external AI Gateway deployments via
+  `deployModelDeployments` (`DEPLOY_MODEL_DEPLOYMENTS=false`, default `true`)
+  across Bicep, Terraform, `DEPLOYMENT_METADATA`, regional model quota
+  preflight and `config.aifoundry.setup`, skipping local model deployments and
+  RAI deployment association while preserving Foundry account, project,
+  connections and Azure AI Search.
+- Add strictly opt-in Foundry project managed identity RBAC for scheduled trace
+  evaluations via `grantProjectTraceEvaluationReader`
+  (`GRANT_PROJECT_TRACE_EVALUATION_READER=false`) and ABAC-scoped
+  `grantProjectProtectedTraceContentReader`
+  (`GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER=false`, restricted to
+  `AppGenAIContent` with `protectionLevel == 'Protected'`) on effective
+  Application Insights and Log Analytics scopes across Bicep, Terraform and
+  preflight validation.
+
+### Changed
+
+- Resolve and validate Container Apps `profile_name` dynamically from the
+  effective foundation `workloadProfiles` / `WORKLOAD_PROFILES` (`"main"`,
+  `"Consumption"` or a single custom dedicated profile) across Bicep and
+  Terraform instead of hardcoding `"main"`, while preserving explicit per-app
+  profile selections.
+- Reject reserved Foundry Hosted Agent environment variables (`FOUNDRY_*`,
+  `AGENT_*` and `APPLICATIONINSIGHTS_CONNECTION_STRING`) during
+  `app-definition` validation and update `samples/custom-app/hosted` to operate
+  directly from `FOUNDRY_PROJECT_ENDPOINT` without `APP_CONFIG_ENDPOINT`.
+
+### Fixed
+
+- Replace conditional cross-resource-group network module output references in
+  `infra/bicep/main.bicep` (`var subnets` and `containerAppsPostgreSqlSubnet`)
+  with deterministic `resourceId(...)` expressions and explicit `dependsOn`
+  edges on both `virtualNetwork` and `virtualNetworkSubnets`, preventing
+  `DeploymentOutputEvaluationFailed` when optional network resources are
+  disabled while preserving BYO and cross-subscription resource IDs.
+- Fix the Azure Monitor Private Link Scope private DNS zone name from
+  `privatelink.agentsvc.azure.automation.net` to
+  `privatelink.agentsvc.azure-automation.net` across Bicep, Terraform and
+  preflight checks while keeping `privatelink.applicationinsights.io` excluded
+  from the AMPLS DNS zone group.
+- Strip immutable `properties.template.revisionSuffix` before Container Apps ARM
+  `PUT` updates in `config.deployment.native_deploy` so redeployments do not
+  fail with `ContainerAppInvalidRevisionSuffix`.
+
+### Migration
+
+- `DEPLOY_MODEL_DEPLOYMENTS` defaults to `true` and both trace-evaluation RBAC
+  parameters default to `false`, preserving existing deployment behavior unless
+  opted in.
+- Existing isolated environments that provisioned the legacy
+  `privatelink.agentsvc.azure.automation.net` DNS zone should re-run
+  provisioning with the same infrastructure provider so
+  `privatelink.agentsvc.azure-automation.net` is created and linked. Remove any
+  reserved `FOUNDRY_*`, `AGENT_*` or `APPLICATIONINSIGHTS_CONNECTION_STRING`
+  variables from custom hosted agent definitions before running preflight or
+  deployment hooks.
+- For rollback, restore `v7.4.0` and re-run provisioning with the same
+  infrastructure provider before running its deployment hooks. Runtime
+  component pins are unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Stabilized feature CI run `43476587473` and offline validation suites passed
+  Bicep build, lint and offline contracts, Terraform contracts (158 tests) on
+  Linux and Windows and deployment and hook contracts on Linux and Windows.
+  Bicep retains 64 outputs and Terraform retains 69 outputs.
+- The release gate validates the actual loaded `app-definition.json`, exact
+  manifest component pins and incorporated-foundation component review. Runtime
+  pins, infrastructure provenance, provider lock and module pins are unchanged.
+- No live Azure deployment or deployed provider-parity validation was performed.
 
 ## [v7.4.0] - 2026-11-13
 
