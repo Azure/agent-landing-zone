@@ -408,45 +408,40 @@ def discover(environment: Mapping[str, str], *, run: RunAzure = run_az) -> Acces
         instance.agent_name, instance.agent_version,
     )
     group = resource_group_for(environment, "application")
-    config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io")
-    store_name = urlsplit(config_endpoint).hostname.split(".")[0]
+    centralized = environment.get("APP_RUNTIME_CONFIGURATION_MODE", "appConfig") == "appConfig"
+    config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io") if centralized else ""
     prefix = f"/subscriptions/{sub}/resourceGroups/{group}/providers/"
-    store_id = prefix + f"Microsoft.AppConfiguration/configurationStores/{store_name}"
-    store = _object(run(["appconfig", "show", "--name", store_name, "--resource-group", group, "--subscription", sub]))
-    if not _same(store.get("id"), store_id) or _endpoint(store.get("endpoint"), ".azconfig.io") != config_endpoint:
-        raise AccessError("App Configuration endpoint/ARM scope mismatch.")
-    configured_foundry = _config_value(run, config_endpoint, "AZURE_RESOURCE_GROUP")
-    if not _same(_config_value(run, config_endpoint, "SUBSCRIPTION_ID"), sub) or not _same(configured_foundry, foundry_group):
-        raise AccessError("Configuration store belongs to a different deployment scope.")
-    configured_app = _setting(run, config_endpoint, "AZURE_APP_RESOURCE_GROUP")
-    configured_group = (
-        _string(configured_app.get("value")) if configured_app else configured_foundry
-    )
-    if not _same(configured_group, group):
-        raise AccessError("Configuration store belongs to a different application destination.")
-    model_name = _config_value(run, config_endpoint, "AI_FOUNDRY_ACCOUNT_NAME")
-    if not re.fullmatch(NAME, model_name):
-        raise AccessError("Invalid configured model account name.")
-    model_id = f"/subscriptions/{sub}/resourceGroups/{foundry_group}/providers/Microsoft.CognitiveServices/accounts/{model_name}"
+    grants = []
+    if centralized:
+        store_name = urlsplit(config_endpoint).hostname.split(".")[0]
+        store_id = prefix + f"Microsoft.AppConfiguration/configurationStores/{store_name}"
+        store = _object(run(["appconfig", "show", "--name", store_name, "--resource-group", group, "--subscription", sub]))
+        if not _same(store.get("id"), store_id) or _endpoint(store.get("endpoint"), ".azconfig.io") != config_endpoint:
+            raise AccessError("App Configuration endpoint/ARM scope mismatch.")
+        grants.append(Grant(Role.CONFIG, store_id))
+    model_id = _string(environment.get("AI_FOUNDRY_ACCOUNT_RESOURCE_ID"))
+    _bound_scope(model_id, RESOURCE_PATHS[Role.MODEL], sub, foundry_group)
     model = _account_metadata(run, model_id, sub, foundry_group)
     if not _same(model.get("id"), model_id) or model.get("kind") not in {"AIServices", "OpenAI"}:
         raise AccessError("Configured model account identity/type mismatch.")
-    grants = [Grant(Role.CONFIG, store_id), Grant(Role.MODEL, model_id)]
+    grants.append(Grant(Role.MODEL, model_id))
     search = _search_transport_grant(
         environment, run=run, config_endpoint=config_endpoint,
         subscription=sub, foundry_group=foundry_group,
     )
     if search is not None:
         grants.append(search)
-    audit = _setting(run, config_endpoint, "AUDIT_HMAC_KEY")
+    audit = (
+        _setting(run, config_endpoint, "AUDIT_HMAC_KEY") if centralized else
+        {"contentType": KV_REFERENCE, "value": json.dumps({"uri": environment["AUDIT_HMAC_KEY_URI"]})}
+        if environment.get("AUDIT_HMAC_KEY_URI") else None
+    )
     if audit is not None:
         content_type = audit.get("contentType")
         if not isinstance(content_type, str) or content_type.split(";", 1)[0].lower() != KV_REFERENCE:
             raise AccessError("AUDIT_HMAC_KEY must be a Key Vault reference, never plaintext; value omitted.")
         reference = _object(_json(audit.get("value")))
-        vault_endpoint = _endpoint(_config_value(run, config_endpoint, "KEY_VAULT_URI"), ".vault.azure.net")
-        if environment.get("KEY_VAULT_URI") and _endpoint(environment["KEY_VAULT_URI"], ".vault.azure.net") != vault_endpoint:
-            raise AccessError("Configured vault binding conflicts with the deployment environment.")
+        vault_endpoint = _endpoint(environment.get("KEY_VAULT_URI"), ".vault.azure.net")
         uri = _endpoint(reference.get("uri"), ".vault.azure.net", r"/secrets/[A-Za-z0-9-]{1,127}(?:/[A-Za-z0-9-]{1,127})?")
         if urlsplit(uri).hostname != urlsplit(vault_endpoint).hostname:
             raise AccessError("Audit reference points outside the configured vault.")
@@ -478,15 +473,14 @@ def _search_transport_grant(
     A metadata/model-only deployment without that setting needs no Search grant.
     No inferred subscription/RG scope or arbitrary endpoint can authorize a grant.
     """
-    backend_row = _setting(run, config_endpoint, "RETRIEVAL_BACKEND")
-    if backend_row is None:
-        if (environment.get("RETRIEVAL_BACKEND") or "").strip():
-            raise AccessError("Required App Configuration key RETRIEVAL_BACKEND (agent-lz) is missing.")
+    backend = environment.get("RETRIEVAL_BACKEND", "").strip()
+    if not backend:
         return None
-    backend = _consistent(environment, ("RETRIEVAL_BACKEND",), backend_row.get("value"))
     if backend not in SEARCH_BACKENDS:
         raise AccessError("Configured retrieval backend has no supported Search transport contract.")
-    auth_row = _setting(run, config_endpoint, "HOSTED_AGENT_AUTH_MODE")
+    auth_row = _setting(run, config_endpoint, "HOSTED_AGENT_AUTH_MODE") if config_endpoint else {
+        "value": environment.get("HOSTED_AGENT_AUTH_MODE", "user_delegated"),
+    }
     if auth_row is None and environment.get("HOSTED_AGENT_AUTH_MODE") == "service_identity":
         raise AccessError("Publish HOSTED_AGENT_AUTH_MODE (agent-lz) before planning service_identity access.")
     configured_auth = _consistent(
@@ -497,22 +491,21 @@ def _search_transport_grant(
         hosted_auth_mode({"HOSTED_AGENT_AUTH_MODE": configured_auth})
     except ValueError as error:
         raise AccessError(str(error)) from None
-    mode_row = _setting(run, config_endpoint, "RETRIEVAL_AUTH_MODE")
+    mode_row = _setting(run, config_endpoint, "RETRIEVAL_AUTH_MODE") if config_endpoint else {
+        "value": environment.get("RETRIEVAL_AUTH_MODE", "user_delegated"),
+    }
     if mode_row is not None:
         try:
             validate_auth_mode({"RETRIEVAL_AUTH_MODE": mode_row.get("value")})
         except ValueError:
             raise AccessError("Configured RETRIEVAL_AUTH_MODE has no implemented native Search route.") from None
-    scope = _consistent(
-        environment, ("SEARCH_SERVICE_RESOURCE_ID",),
-        _config_value(run, config_endpoint, "SEARCH_SERVICE_RESOURCE_ID"),
-    )
+    scope = _string(environment.get("SEARCH_SERVICE_RESOURCE_ID"))
     _bound_scope(scope, RESOURCE_PATHS[Role.SEARCH], subscription, foundry_group)
     name = scope.rsplit("/", 1)[1]
-    configured_name = _config_value(run, config_endpoint, "SEARCH_SERVICE_NAME")
+    configured_name = _string(environment.get("SEARCH_SERVICE_NAME"))
     endpoint = _endpoint(_consistent(
         environment, ("SEARCH_SERVICE_QUERY_ENDPOINT", "SEARCH_SERVICE_ENDPOINT"),
-        _config_value(run, config_endpoint, "SEARCH_SERVICE_QUERY_ENDPOINT"),
+        environment.get("SEARCH_SERVICE_QUERY_ENDPOINT"),
     ), ".search.windows.net")
     if not _same(configured_name, name) or endpoint != f"https://{name.lower()}.search.windows.net":
         raise AccessError("Search endpoint/name does not map to the exact provisioned Search resource.")
@@ -537,21 +530,21 @@ def _toolbox_grant(
 ) -> Grant:
     scope = _consistent(
         environment, ("AZURE_AI_PROJECT_RESOURCE_ID",),
-        _config_value(run, config_endpoint, "AI_FOUNDRY_PROJECT_RESOURCE_ID"),
+        environment.get("AI_FOUNDRY_PROJECT_RESOURCE_ID"),
     )
     _bound_scope(scope, RESOURCE_PATHS[Role.TOOLBOX], subscription, foundry_group)
     match = _scope_match(scope, PROJECT_PATH)
     endpoint = _consistent(
         environment, ("AZURE_AI_PROJECT_ENDPOINT",),
-        _config_value(run, config_endpoint, "AI_FOUNDRY_PROJECT_ENDPOINT"),
+        environment.get("AI_FOUNDRY_PROJECT_ENDPOINT"),
     ).rstrip("/")
     if endpoint != f"https://{match[3].lower()}.services.ai.azure.com/api/projects/{match[4]}":
         raise AccessError("Managed Toolbox project endpoint/resource scope mismatch.")
-    name = _config_value(run, config_endpoint, "KNOWLEDGE_BASE_NAME")
+    name = _string(environment.get("KNOWLEDGE_BASE_NAME"))
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise AccessError("Managed Toolbox requires a valid knowledge base name.")
     toolbox = _consistent(
-        environment, ("TOOLBOX_ENDPOINT",), _config_value(run, config_endpoint, "TOOLBOX_ENDPOINT"),
+        environment, ("TOOLBOX_ENDPOINT",), environment.get("TOOLBOX_ENDPOINT"),
     )
     if toolbox != f"{endpoint}/toolboxes/{name}/mcp?api-version=v1":
         raise AccessError("Managed Toolbox endpoint must match the configured project and knowledge base.")
@@ -661,6 +654,9 @@ def main(argv: list[str] | None = None, *, environment: Mapping[str, str] | None
         env = os.environ if environment is None else environment
         if args.azd_env:
             env = load_azd_environment(env)
+        if resolve_mode(env).value == "hosted":
+            from config.deployment.setup_settings import load_setup_environment
+            env = load_setup_environment(env)
         plan = discover(env, run=run)
         if args.apply:
             apply(plan, run=run)

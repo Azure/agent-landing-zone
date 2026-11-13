@@ -27,6 +27,8 @@ ENV = {
     "AZURE_SUBSCRIPTION_ID": SUB, "AZURE_RESOURCE_GROUP": "test-group",
     "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT, "AZURE_AI_PROJECT_ENDPOINT": ENDPOINT,
     "APP_CONFIG_ENDPOINT": "https://test-store.azconfig.io",
+    "AI_FOUNDRY_ACCOUNT_RESOURCE_ID": MODEL,
+    "KEY_VAULT_URI": "https://test-vault.vault.azure.net/",
 }
 
 
@@ -128,6 +130,9 @@ class HostedAccessTests(unittest.TestCase):
     def setUp(self):
         self.azure = AzureFixture()
         self.sleep = Mock()
+        boundary = patch("config.deployment.setup_settings.load_setup_environment", side_effect=dict)
+        boundary.start()
+        self.addCleanup(boundary.stop)
 
     def discover(self, env=None):
         return access.discover(ENV if env is None else env, run=self.azure)
@@ -176,6 +181,7 @@ class HostedAccessTests(unittest.TestCase):
                     "AZURE_APP_RESOURCE_GROUP": "test-group",
                     "AZURE_NETWORK_RESOURCE_GROUP": "network-group",
                     "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT.replace("test-group", group),
+                    "AI_FOUNDRY_ACCOUNT_RESOURCE_ID": MODEL.replace("test-group", group),
                 }
                 for old_id in (PROJECT, ACCOUNT, MODEL):
                     new_id = old_id.replace("test-group", group)
@@ -196,7 +202,7 @@ class HostedAccessTests(unittest.TestCase):
                     )).validate()
                 self.fails_discovery({**environment, "AZURE_AI_PROJECT_RESOURCE_ID": PROJECT})
                 self.azure.settings["AZURE_APP_RESOURCE_GROUP"]["value"] = "wrong-group"
-                self.fails_discovery(environment)
+                self.assertEqual("test-group", self.discover(environment).resource_group)
 
     def test_custom_instance_discovery_is_read_only_and_validates_actual_name(self):
         self.azure.live["name"] = self.azure.version["name"] = "sample-hosted-agent"
@@ -443,12 +449,16 @@ class HostedAccessTests(unittest.TestCase):
             f"https://management.azure.com{ACCOUNT}?api-version=2025-06-01",
         ])
 
-    def test_configured_deployment_scope_mismatch(self):
+    def test_runtime_store_cannot_redirect_deployment_scope(self):
         for key in ("SUBSCRIPTION_ID", "AZURE_RESOURCE_GROUP"):
             with self.subTest(key=key):
                 self.azure = AzureFixture()
                 self.azure.settings[key]["value"] = OTHER
-                self.fails_discovery()
+                self.assertEqual(MODEL, self.discover().grants[1].scope)
+                self.assertFalse(any(
+                    args[:3] == ["appconfig", "kv", "list"] and args[args.index("--key") + 1] == key
+                    for args in self.azure.calls
+                ))
 
     def test_wrong_appconfig_key_or_label(self):
         for key in ("key", "label"):

@@ -76,8 +76,10 @@ class RuntimeIntent:
     application_names: frozenset[str]
 
 
-def resolve_intent(parameter_source: Path, environment: Mapping[str, str]) -> RuntimeIntent:
-    """Resolve the same typed declaration/application intent, without provisioning."""
+def resolve_declared_parameters(
+    parameter_source: Path, environment: Mapping[str, str],
+) -> dict[str, object]:
+    """Resolve original typed declarations without state, store or Azure access."""
     if not environment or any(
         not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
         or not isinstance(value, str) or "\0" in value
@@ -116,11 +118,21 @@ def resolve_intent(parameter_source: Path, environment: Mapping[str, str]) -> Ru
         declared = native.get(name)
         if declared and declared.casefold() != selected.casefold():
             raise ValueError("Declared runtime source conflicts with the selected resource-group binding.")
-    label = native.get("appConfigLabel", "agent-lz")
+    return resolve_parameters(native, environment)
+
+
+def resolve_intent(parameter_source: Path, environment: Mapping[str, str]) -> RuntimeIntent:
+    """Resolve the same typed declaration/application intent, without provisioning."""
+    resolved = resolve_declared_parameters(parameter_source, environment)
+    document = json.loads(parameter_source.read_text(encoding="utf-8-sig"))
+    explicit_values = _substitute(
+        document["parameters"].get("additionalAppConfigurationSettings", {"value": []})["value"],
+        environment,
+    )
+    label = resolved.get("appConfigLabel", "agent-lz")
     if not isinstance(label, str):
         raise ValueError("appConfigLabel must be a string.")
-    explicit = normalize_settings(native.get("additionalAppConfigurationSettings", []), label)
-    resolved = resolve_parameters(native, environment)
+    explicit = normalize_settings(explicit_values, label)
     effective = normalize_settings(resolved.get("additionalAppConfigurationSettings", []), label)
     canonical = frozenset(
         item["canonical_name"]

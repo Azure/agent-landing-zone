@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Mapping
 from config.deployment.resource_groups import resource_group_for
+from config.deployment.setup_settings import load_setup_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,6 +19,9 @@ def configure_service_registry(
     Normal azd builds retain their own registry setup. External prebuilt images
     are not implicitly granted access or rebound to the platform registry.
     """
+    if not image:
+        return
+    environment = load_setup_settings(environment)
     server = (
         environment.get("AZURE_CONTAINER_REGISTRY_ENDPOINT")
         or environment.get("CONTAINER_REGISTRY_LOGIN_SERVER") or ""
@@ -46,11 +51,26 @@ def configure_service_registry(
     if len(apps) != 1:
         raise RuntimeError(f"Expected exactly one Container App tagged azd-service-name={service}; found {len(apps)}.")
     app = apps[0]
+    mappings = environment.get("CONTAINER_APPS", [])
+    if isinstance(mappings, str):
+        mappings = json.loads(mappings)
+    mapped = next((entry for entry in mappings if entry["name"] == app.name), None)
+    if mapped is None:
+        raise RuntimeError(f"Container App tagged for {service} conflicts with verified app mappings.")
     identity = app.identity
     assigned = getattr(identity, "user_assigned_identities", None) or {}
     system = bool(getattr(identity, "principal_id", None))
     if len(assigned) + int(system) != 1:
         raise RuntimeError(f"Container App {app.name} must have exactly one existing managed identity for registry access.")
+    expected = mapped.get("identity")
+    if expected:
+        attached = identity
+        if expected["kind"] == "userAssigned":
+            if expected["resourceId"] not in assigned:
+                raise RuntimeError(f"Container App {app.name} registry identity conflicts with verified mapping.")
+            attached = assigned[expected["resourceId"]]
+        if getattr(attached, "principal_id", None) != expected["principalId"]:
+            raise RuntimeError(f"Container App {app.name} principal conflicts with verified mapping.")
     _, success, detail = update_single_container_app(
         subscription, group, app.name, server, "true" if assigned else "false", credential,
         preserve_other_registries=True,

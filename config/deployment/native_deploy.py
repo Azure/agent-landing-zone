@@ -200,13 +200,21 @@ def prepare_container_apps(root: Path, environment: Mapping[str, str], *, run: R
     command = shlex.split(environment.get("CONTAINER_APPS_WORKER_STARTUP_COMMAND", "python -m native.durable"))
     if not command or any("uvicorn" in part or "hosted_entrypoint" in part for part in command):
         raise ValueError("Container Apps requires the confirmed standalone Durable Extension worker command.")
-    _persist(root, environment, settings, run)
     group = resource_group_for(environment, "application")
-    token = required(environment, "RESOURCE_TOKEN")
     subscription = required(environment, "AZURE_SUBSCRIPTION_ID")
+    apps = json.loads(environment.get("CONTAINER_APPS", "[]"))
+    if not isinstance(apps, list):
+        raise ValueError("Verified native Container Apps mapping is required.")
+    names = {}
+    for service in ("frontend", "orchestrator"):
+        selected = [row for row in apps if isinstance(row, dict) and row.get("service_name") == service]
+        if len(selected) != 1 or not selected[0].get("name"):
+            raise ValueError("Native deployment requires exact verified frontend and orchestrator mappings.")
+        names[service] = selected[0]["name"]
+    _persist(root, environment, settings, run)
     for service in ("frontend", "orchestrator"):
         args = [
-            resolve_az_command(), "containerapp", "show", "--name", f"ca-{token}-{service}",
+            resolve_az_command(), "containerapp", "show", "--name", names[service],
             "--resource-group", group, "--subscription", subscription,
             "--output", "json",
         ]
@@ -225,7 +233,7 @@ def prepare_container_apps(root: Path, environment: Mapping[str, str], *, run: R
             path = Path(directory) / "application.yaml"
             path.write_text(yaml.safe_dump(response), encoding="utf-8")
             _run([
-                resolve_az_command(), "containerapp", "update", "--name", f"ca-{token}-{service}",
+                resolve_az_command(), "containerapp", "update", "--name", names[service],
                 "--resource-group", group, "--subscription", subscription, "--yaml", str(path),
             ], cwd=root, run=run)
     return settings
@@ -247,19 +255,22 @@ def main(argv: list[str] | None = None) -> int:
             validate_component_source(args.validate_component_source, args.component, os.environ)
             settings = {}
         elif args.settings:
-            settings = runtime_settings(os.environ)
+            from config.deployment.setup_settings import load_setup_environment
+            settings = runtime_settings(load_setup_environment(os.environ, project_root=root))
         elif args.deploy:
             from config.deployment.composition import is_bundled_application
+            from config.deployment.setup_settings import load_setup_environment
             if not is_bundled_application(os.environ):
                 LOGGER.info("Custom definition selected; bundled native publication/worker is not selected.")
                 print("{}")
                 return 0
-            check_stage(os.environ, "pre-deploy")
-            grant_container_features(os.environ)
-            app = resolve_application(os.environ)
+            environment = load_setup_environment(os.environ, project_root=root)
+            check_stage(environment, "pre-deploy")
+            grant_container_features(environment)
+            app = resolve_application(environment)
             settings = (
-                deploy_hosted(root, os.environ) if app.host == "hosted"
-                else prepare_container_apps(root, os.environ)
+                deploy_hosted(root, environment) if app.host == "hosted"
+                else prepare_container_apps(root, environment)
             )
         else:
             raise ValueError("Select --deploy or --settings.")

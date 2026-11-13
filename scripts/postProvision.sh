@@ -47,6 +47,12 @@ is_truthy() {
   echo "Resource-group destination binding failed; configuration has not started." >&2
   exit 1
 }
+# BEGIN deployment metadata verification
+(cd "$PROJECT_ROOT" && python3 -m config.deployment.metadata --check --environment "${AZURE_ENV_NAME:-}" --project-root "$PROJECT_ROOT") || {
+  metadata_exit=$?
+  exit "$metadata_exit"
+}
+# END deployment metadata verification
 # BEGIN PostgreSQL protection
 (cd "$PROJECT_ROOT" && python3 -m config.deployment.postgresql protect --azure-dir "$PROJECT_ROOT/.azure") || {
   echo "PostgreSQL protection failed; discovery will not be published." >&2
@@ -84,22 +90,16 @@ fi
 ###############################################################################
 # Check required environment variable
 ###############################################################################
-echo "📋 Current environment variables:"
-for v in APP_CONFIG_ENDPOINT ; do
-  printf "  %s=%s\n" "$v" "${!v:-<unset>}"
-done
-
-if [[ -z "${APP_CONFIG_ENDPOINT:-}" ]]; then
-  echo "❗️ APP_CONFIG_ENDPOINT environment variable must be set before running this script."
-  exit 1
-fi
-
+# BEGIN runtime configuration publication
+if [[ "${APP_RUNTIME_CONFIGURATION_MODE:-appConfig}" == "appConfig" ]]; then
 echo "⚙️ Publishing Agent Landing Zone deployment-mode configuration…"
 (
   cd "$PROJECT_ROOT"
   python3 -m config.deployment.appconfig
 )
 echo "✅ Deployment-mode configuration published."
+fi
+# END runtime configuration publication
 
 ###############################################################################
 # Setup Python environment
@@ -130,10 +130,12 @@ echo "🔐 Assigning capability-profile roles to component identities…"
   exit 1
 }
 echo "📤 Publishing platform outputs (AGENTLZ_PLATFORM_OUTPUTS)…"
+if [[ "${APP_RUNTIME_CONFIGURATION_MODE:-appConfig}" == "appConfig" ]]; then
 (cd "$PROJECT_ROOT" && python -m config.deployment.outputs) || {
   echo "Failed to publish platform outputs to App Configuration." >&2
   exit 1
 }
+fi
 
 ###############################################################################
 # 1) Governance and audit configuration
@@ -150,7 +152,7 @@ echo
 echo "📑 AI Foundry Setup…"
 {
   echo "🚀 Running config.aifoundry.aifoundry_setup…"
-  python -m config.aifoundry.setup
+  python -m config.aifoundry.setup || exit $?
   echo "✅ AI Foundry setup script finished."
 } || {
   echo "❗️ Error during AI Foundry setup." >&2
@@ -164,7 +166,7 @@ echo
 echo "🔍 ContainerApp setup…"
 {
   echo "🚀 Running config.containerapps.setup…"
-  python -m config.containerapps.setup
+  python -m config.containerapps.setup || exit $?
   echo "✅ Container Apps setup script finished."
 } || {
   echo "❗️ Error during Container Apps setup." >&2
@@ -174,17 +176,14 @@ echo "🔍 ContainerApp setup…"
 ###############################################################################
 # 5) AI Search Setup
 ###############################################################################
-echo
-echo "🔍 AI Search setup…"
-{
-  echo "🚀 Running config.search.setup…"
-  python -m config.search.setup || exit $?
-  python -m config.aifoundry.toolbox || exit $?
-  echo "✅ Search setup script finished."
-} || {
-  echo "❗️ Error during Search setup." >&2
-  exit 1
+# BEGIN selected Search setup
+# Use the same typed selection as PowerShell; never infer readiness/selection
+# from a missing endpoint or silently skip a selected service's prerequisites.
+python -c "import runpy; from config.deployment.setup_settings import load_setup_settings; s = load_setup_settings(); search = s['DEPLOY_SOFTWARE'] == 'true' and s['DEPLOY_SEARCH_SERVICE'] == 'true'; operations = [('config.search.setup', search), ('config.aifoundry.toolbox', search and s['DEPLOY_AF_PROJECT'] == 'true' and s['RETRIEVAL_BACKEND'] == 'foundry_iq')]; [runpy.run_module(module, run_name='__main__') for module, selected in operations if selected]" || {
+  setup_exit=$?
+  exit "$setup_exit"
 }
+# END selected Search setup
 
 ###############################################################################
 # 6) Administrative panel Cosmos RBAC (issue #611, ADR-0004)
@@ -193,7 +192,7 @@ echo
 echo "🔐 Administrative panel Cosmos RBAC…"
 {
   echo "🚀 Running config.panel.setup…"
-  python -m config.panel.setup
+  python -m config.panel.setup || exit $?
   echo "✅ Native frontend metadata Cosmos RBAC finished (no-op when metadata is not required)."
 } || {
   echo "❗️ Error during native frontend metadata Cosmos RBAC setup." >&2

@@ -2,62 +2,62 @@
 # types because azd 1.37.1 cannot import Terraform's untyped "dynamic" null.
 locals {
   foundation_metadata = {
-    TENANT_ID                              = tostring(local.deployment_context.tenant_id)
-    SUBSCRIPTION_ID                        = tostring(local.deployment_context.subscription_id)
-    AZURE_RESOURCE_GROUP                   = tostring(local.deployment_context.foundry_rg)
-    AZURE_APP_RESOURCE_GROUP               = tostring(local.deployment_context.application_rg)
-    AZURE_NETWORK_RESOURCE_GROUP           = tostring(local.deployment_context.network_rg)
-    LOCATION                               = tostring(local.effective_locations.main)
-    ENVIRONMENT_NAME                       = tostring(var.environmentName)
-    DEPLOYMENT_NAME                        = tostring(local.deployment_context.deployment_name)
-    RESOURCE_TOKEN                         = tostring(local.resource_token)
-    RELEASE                                = tostring(local.manifest.tag)
-    NETWORK_ISOLATION                      = tobool(local.effective_flags.network_isolation)
-    USE_UAI                                = tobool(local.effective_flags.use_uai)
-    USE_CAPP_API_KEY                       = tobool(local.effective_flags.use_capp_api_key)
-    APP_RUNTIME_CONFIGURATION_MODE         = tostring(var.appRuntimeConfigurationMode)
-    DEPLOY_APP_CONFIG                      = tobool(var.deployAppConfig)
-    DEPLOY_SOFTWARE                        = tobool(var.deploySoftware)
-    DEPLOY_KEY_VAULT                       = tobool(var.deployKeyVault)
-    DEPLOY_LOG_ANALYTICS                   = tobool(var.deployLogAnalytics)
-    DEPLOY_APP_INSIGHTS                    = tobool(var.deployAppInsights)
-    DEPLOY_SEARCH_SERVICE                  = tobool(var.deploySearchService)
-    DEPLOY_SPEECH_SERVICE                  = tobool(var.deploySpeechService)
-    DEPLOY_STORAGE_ACCOUNT                 = tobool(var.deployStorageAccount)
-    DEPLOY_COSMOS_DB                       = tobool(var.deployCosmosDb)
-    DEPLOY_CONTAINER_APPS                  = tobool(var.deployContainerApps)
-    DEPLOY_CONTAINER_REGISTRY              = tobool(var.deployContainerRegistry)
-    DEPLOY_CONTAINER_ENV                   = tobool(var.deployContainerEnv)
-    DEPLOY_VM_KEY_VAULT                    = tobool(var.deployVmKeyVault)
-    ACR_TASK_AGENT_POOL                    = tostring(local.effective_flags.acr_pool ? var.acrTaskAgentPoolName : "")
-    APP_CONFIG_ENDPOINT                    = tostring(var.deployAppConfig ? local.data_context.app_config.endpoint : "")
-    KEY_VAULT_URI                          = tostring(var.deployKeyVault ? local.data_context.key_vault.uri : "")
-    RETRIEVAL_BACKEND                      = tostring(var.retrievalBackend)
-    FOUNDRY_IQ_PATTERN                     = tostring(var.foundryIqPattern)
-    KNOWLEDGE_BASE_NAME                    = tostring(var.retrievalBackend == "foundry_iq" ? var.knowledgeBaseName : "")
-    KNOWLEDGE_BASE_ENDPOINT                = tostring(var.retrievalBackend == "foundry_iq" && var.deploySearchService ? local.data_context.search.endpoint : "")
-    KNOWLEDGE_BASE_CONNECTION_ID           = tostring(var.retrievalBackend == "foundry_iq" && var.deployAiFoundry && var.deploySearchService ? local.foundry_context.knowledge_base_connection_id : "")
-    FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME       = tostring(var.retrievalBackend == "foundry_iq" ? var.foundryIqKnowledgeSourceName : "")
-    FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND       = tostring(coalesce(var.foundryIqKnowledgeSourceKind, var.foundryIqPattern == "searchIndex" ? "searchIndex" : "azureBlob"))
-    AZURE_SPEECH_RESOURCE_ID               = tostring(var.deploySpeechService ? local.data_context.speech.id : "")
-    AZURE_SPEECH_ENDPOINT                  = tostring(var.deploySpeechService ? local.data_context.speech.endpoint : "")
-    AZURE_SPEECH_REGION                    = tostring(var.deploySpeechService ? local.data_context.speech.location : "")
-    AZURE_SPEECH_RESOURCE_NAME             = tostring(var.deploySpeechService ? local.data_context.speech.name : "")
-    PUBLIC_INGRESS_ENABLED                 = tobool(local.effective_flags.public_ingress)
-    PUBLIC_INGRESS_PUBLIC_IP               = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.public_ip : "")
-    PUBLIC_INGRESS_PUBLIC_IP_RESOURCE_ID   = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.public_ip_resource_id : "")
-    PUBLIC_INGRESS_GATEWAY_RESOURCE_ID     = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.gateway_resource_id : "")
-    PUBLIC_INGRESS_NSG_RESOURCE_ID         = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.nsg_resource_id : "")
-    PUBLIC_INGRESS_WAF_POLICY_RESOURCE_ID  = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.waf_policy_resource_id : "")
-    PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID   = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.identity_principal_id : "")
-    PUBLIC_INGRESS_LIVE                    = tobool(local.effective_flags.public_ingress ? local.network_ingress_context.live_mode : false)
-    APP_GATEWAY_SUBNET_RESOURCE_ID         = tostring(var.networkIsolation ? local.subnet_ids.appGateway : "")
-    VNET_RESOURCE_ID                       = tostring(local.network_context.vnet_id)
-    KEY_VAULT_RESOURCE_ID                  = tostring(var.deployKeyVault ? local.data_context.key_vault.id : "")
-    KEY_VAULT_NAME                         = tostring(var.deployKeyVault ? local.data_context.key_vault.name : "")
-    LOG_ANALYTICS_RESOURCE_ID              = tostring(local.effective_observability.law_id)
-    APP_INSIGHTS_RESOURCE_ID               = tostring(local.effective_observability.app_insights_id)
-    OBSERVABILITY_MIXED_WORKSPACES_ALLOWED = tobool(var.allowMixedObservabilityWorkspaces)
+    DEPLOYMENT_METADATA                   = local.deployment_metadata
+    TENANT_ID                             = tostring(local.deployment_context.tenant_id)
+    SUBSCRIPTION_ID                       = tostring(local.deployment_context.subscription_id)
+    AZURE_RESOURCE_GROUP                  = tostring(local.deployment_context.foundry_rg)
+    AZURE_APP_RESOURCE_GROUP              = tostring(local.deployment_context.application_rg)
+    AZURE_NETWORK_RESOURCE_GROUP          = tostring(local.deployment_context.network_rg)
+    LOCATION                              = tostring(local.effective_locations.main)
+    ENVIRONMENT_NAME                      = tostring(var.environmentName)
+    DEPLOYMENT_NAME                       = tostring(local.deployment_context.deployment_name)
+    RESOURCE_TOKEN                        = tostring(local.resource_token)
+    RELEASE                               = tostring(local.manifest.tag)
+    NETWORK_ISOLATION                     = tobool(local.effective_flags.network_isolation)
+    USE_UAI                               = tobool(local.effective_flags.use_uai)
+    USE_CAPP_API_KEY                      = tobool(local.effective_flags.use_capp_api_key)
+    APP_RUNTIME_CONFIGURATION_MODE        = tostring(var.appRuntimeConfigurationMode)
+    DEPLOY_APP_CONFIG                     = tobool(var.deployAppConfig)
+    DEPLOY_SOFTWARE                       = tobool(var.deploySoftware)
+    DEPLOY_KEY_VAULT                      = tobool(var.deployKeyVault)
+    DEPLOY_LOG_ANALYTICS                  = tobool(var.deployLogAnalytics)
+    DEPLOY_APP_INSIGHTS                   = tobool(var.deployAppInsights)
+    DEPLOY_SEARCH_SERVICE                 = tobool(var.deploySearchService)
+    DEPLOY_SPEECH_SERVICE                 = tobool(var.deploySpeechService)
+    DEPLOY_STORAGE_ACCOUNT                = tobool(var.deployStorageAccount)
+    DEPLOY_COSMOS_DB                      = tobool(var.deployCosmosDb)
+    DEPLOY_CONTAINER_APPS                 = tobool(var.deployContainerApps)
+    DEPLOY_CONTAINER_REGISTRY             = tobool(var.deployContainerRegistry)
+    DEPLOY_CONTAINER_ENV                  = tobool(var.deployContainerEnv)
+    DEPLOY_VM_KEY_VAULT                   = tobool(var.deployVmKeyVault)
+    ACR_TASK_AGENT_POOL                   = tostring(local.effective_flags.acr_pool ? var.acrTaskAgentPoolName : "")
+    APP_CONFIG_ENDPOINT                   = tostring(var.deployAppConfig ? local.data_context.app_config.endpoint : "")
+    KEY_VAULT_URI                         = tostring(var.deployKeyVault ? local.data_context.key_vault.uri : "")
+    RETRIEVAL_BACKEND                     = tostring(var.retrievalBackend)
+    FOUNDRY_IQ_PATTERN                    = tostring(var.foundryIqPattern)
+    KNOWLEDGE_BASE_NAME                   = tostring(var.retrievalBackend == "foundry_iq" ? var.knowledgeBaseName : "")
+    KNOWLEDGE_BASE_ENDPOINT               = tostring(var.retrievalBackend == "foundry_iq" && var.deploySearchService ? local.data_context.search.endpoint : "")
+    KNOWLEDGE_BASE_CONNECTION_ID          = tostring(var.retrievalBackend == "foundry_iq" && var.deployAiFoundry && var.deploySearchService ? local.foundry_context.knowledge_base_connection_id : "")
+    FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME      = tostring(var.retrievalBackend == "foundry_iq" ? var.foundryIqKnowledgeSourceName : "")
+    FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND      = tostring(coalesce(var.foundryIqKnowledgeSourceKind, var.foundryIqPattern == "searchIndex" ? "searchIndex" : "azureBlob"))
+    AZURE_SPEECH_RESOURCE_ID              = tostring(var.deploySpeechService ? local.data_context.speech.id : "")
+    AZURE_SPEECH_ENDPOINT                 = tostring(var.deploySpeechService ? local.data_context.speech.endpoint : "")
+    AZURE_SPEECH_REGION                   = tostring(var.deploySpeechService ? local.data_context.speech.location : "")
+    AZURE_SPEECH_RESOURCE_NAME            = tostring(var.deploySpeechService ? local.data_context.speech.name : "")
+    PUBLIC_INGRESS_ENABLED                = tobool(local.effective_flags.public_ingress)
+    PUBLIC_INGRESS_PUBLIC_IP              = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.public_ip : "")
+    PUBLIC_INGRESS_PUBLIC_IP_RESOURCE_ID  = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.public_ip_resource_id : "")
+    PUBLIC_INGRESS_GATEWAY_RESOURCE_ID    = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.gateway_resource_id : "")
+    PUBLIC_INGRESS_NSG_RESOURCE_ID        = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.nsg_resource_id : "")
+    PUBLIC_INGRESS_WAF_POLICY_RESOURCE_ID = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.waf_policy_resource_id : "")
+    PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID  = tostring(local.effective_flags.public_ingress ? local.network_ingress_context.identity_principal_id : "")
+    PUBLIC_INGRESS_LIVE                   = tobool(local.effective_flags.public_ingress ? local.network_ingress_context.live_mode : false)
+    APP_GATEWAY_SUBNET_RESOURCE_ID        = tostring(var.networkIsolation ? local.subnet_ids.appGateway : "")
+    VNET_RESOURCE_ID                      = tostring(local.network_context.vnet_id)
+    KEY_VAULT_RESOURCE_ID                 = tostring(var.deployKeyVault ? local.data_context.key_vault.id : "")
+    KEY_VAULT_NAME                        = tostring(var.deployKeyVault ? local.data_context.key_vault.name : "")
+    LOG_ANALYTICS_RESOURCE_ID             = tostring(local.effective_observability.law_id)
+    APP_INSIGHTS_RESOURCE_ID              = tostring(local.effective_observability.app_insights_id)
     CONTAINER_APP_INTERNAL_FQDN = tostring(
       local.effective_flags.container_apps && length(var.containerAppsList) > 0 ?
       try(local.compute_context.apps[var.containerAppsList[var.publicIngress.backendAppIndex].service_name].fqdn, "") : ""
@@ -107,6 +107,183 @@ locals {
       }
     }
   }
+}
+
+locals {
+  deployment_metadata = {
+    schemaVersion = 1
+    context = {
+      environmentName = var.environmentName
+      provider        = "terraform"
+      tenantId        = local.deployment_context.tenant_id
+      subscriptionId  = local.deployment_context.subscription_id
+      deploymentName  = local.deployment_context.deployment_name
+      resourceGroups = {
+        foundry     = local.deployment_context.foundry_rg
+        application = local.deployment_context.application_rg
+        network     = local.deployment_context.network_rg
+      }
+      applicationId            = var.applicationId
+      runtimeConfigurationMode = var.appRuntimeConfigurationMode
+    }
+    resources = local.deployment_resource_descriptors
+    modelDeployments = [for model in local.services_model_deployments : {
+      canonicalName = model.canonical_name
+      resourceId    = azapi_resource.model_deployment[model.name].id
+      name          = azapi_resource.model_deployment[model.name].name
+      model = {
+        format  = model.model.format
+        name    = model.model.name
+        version = model.model.version
+      }
+      apiVersion = try(coalesce(model.apiVersion, "2025-01-01-preview"), "2025-01-01-preview")
+      endpoint   = "https://${local.foundry_context.account_name}.openai.azure.com/"
+    } if var.deployAiFoundry]
+    containerApps = [for app in var.containerAppsList : {
+      canonicalName = app.canonical_name
+      serviceName   = app.service_name
+      resourceId    = local.compute_context.apps[app.service_name].id
+      name          = local.compute_context.apps[app.service_name].name
+      fqdn          = local.compute_context.apps[app.service_name].fqdn == "" ? null : local.compute_context.apps[app.service_name].fqdn
+      identity = {
+        kind        = var.useUAI ? "userAssigned" : "systemAssigned"
+        principalId = local.compute_context.app_identities[app.service_name].principal_id
+        clientId    = var.useUAI ? local.compute_context.app_identities[app.service_name].client_id : null
+        resourceId  = var.useUAI ? local.compute_context.app_identities[app.service_name].resource_id : null
+      }
+    } if local.effective_flags.container_apps]
+    dataResources = {
+      storageContainers = [for container in var.storageAccountContainersList : {
+        canonicalName = container.canonical_name
+        resourceId    = azapi_resource.solution_blob_container[container.name].id
+        name          = azapi_resource.solution_blob_container[container.name].name
+      } if var.deployStorageAccount]
+      cosmosDatabases = [for database in azapi_resource.application_database : {
+        canonicalName = "DATABASE_NAME"
+        resourceId    = database.id
+        name          = database.name
+      }]
+      cosmosContainers = [for container in var.databaseContainersList : {
+        canonicalName = container.canonical_name
+        resourceId    = azapi_resource.application_container[container.name].id
+        name          = azapi_resource.application_container[container.name].name
+      } if var.deployCosmosDb]
+    }
+  }
+
+  # Deliberately enumerate public leaves. Never export provider response bags,
+  # effective_observability (which also carries credentials), or runtime settings.
+  deployment_resource_descriptors = {
+    foundryAccount = {
+      status = var.deployAiFoundry ? "managed" : "disabled"
+      resource = var.deployAiFoundry ? {
+        resourceId = local.foundry_context.account_id
+        name       = local.foundry_context.account_name
+        endpoint   = local.foundry_context.account_endpoint
+      } : null
+    }
+    foundryProject = {
+      status = local.services_project ? "managed" : "disabled"
+      resource = local.services_project ? {
+        resourceId = local.foundry_context.project_id
+        name       = local.foundry_context.project_name
+        endpoint   = local.foundry_context.project_endpoint
+      } : null
+    }
+    registry = {
+      status = var.deployContainerRegistry ? "managed" : (local.effective_flags.hosted_prerequisites ? "referenced" : "disabled")
+      resource = var.deployContainerRegistry || local.effective_flags.hosted_prerequisites ? {
+        resourceId = local.hosted_registry.resource_id
+        name       = basename(local.hosted_registry.resource_id)
+        endpoint   = "https://${local.hosted_registry.endpoint}"
+      } : null
+    }
+    appConfig = {
+      status = var.deployAppConfig ? "managed" : "disabled"
+      resource = var.deployAppConfig ? {
+        resourceId = local.data_context.app_config.id
+        name       = local.data_context.app_config.name
+        endpoint   = local.data_context.app_config.endpoint
+      } : null
+    }
+    keyVault = {
+      status = var.deployKeyVault ? "managed" : "disabled"
+      resource = var.deployKeyVault ? {
+        resourceId = local.data_context.key_vault.id
+        name       = local.data_context.key_vault.name
+        endpoint   = local.data_context.key_vault.uri
+      } : null
+    }
+    storage = {
+      status = var.deployStorageAccount ? "managed" : "disabled"
+      resource = var.deployStorageAccount ? {
+        resourceId = local.data_context.storage.id
+        name       = local.data_context.storage.name
+        endpoint   = local.data_context.storage.blob_endpoint
+      } : null
+    }
+    search = {
+      status = var.deploySearchService ? "managed" : "disabled"
+      resource = var.deploySearchService ? {
+        resourceId = local.data_context.search.id
+        name       = local.data_context.search.name
+        endpoint   = local.data_context.search.endpoint
+      } : null
+    }
+    cosmos = {
+      status = var.deployCosmosDb ? "managed" : "disabled"
+      resource = var.deployCosmosDb ? {
+        resourceId = local.data_context.cosmos.id
+        name       = local.data_context.cosmos.name
+        endpoint   = local.data_context.cosmos.endpoint
+      } : null
+    }
+    containerEnvironment = {
+      status = var.deployContainerEnv ? "managed" : "disabled"
+      resource = var.deployContainerEnv ? {
+        resourceId = local.compute_context.environment_id
+        name       = local.compute_context.environment_name
+        endpoint   = null
+      } : null
+    }
+    network = {
+      status = local.network_context.vnet_id == "" ? "disabled" : (var.useExistingVNet ? "referenced" : "managed")
+      resource = local.network_context.vnet_id != "" ? {
+        resourceId = local.network_context.vnet_id
+        name       = local.network_context.vnet_name
+        endpoint   = null
+      } : null
+    }
+    speech = {
+      status = var.deploySpeechService ? "managed" : "disabled"
+      resource = var.deploySpeechService ? {
+        resourceId = local.data_context.speech.id
+        name       = local.data_context.speech.name
+        endpoint   = local.data_context.speech.endpoint
+      } : null
+    }
+    logAnalytics = {
+      status = local.effective_observability.law_id == "" ? "disabled" : (local.effective_observability.create_law ? "managed" : "referenced")
+      resource = local.effective_observability.law_id != "" ? {
+        resourceId = local.effective_observability.law_id
+        name       = basename(local.effective_observability.law_id)
+        endpoint   = null
+      } : null
+    }
+    appInsights = {
+      status = local.effective_observability.app_insights_id == "" ? "disabled" : (local.effective_observability.create_app_insights ? "managed" : "referenced")
+      resource = local.effective_observability.app_insights_id != "" ? {
+        resourceId = local.effective_observability.app_insights_id
+        name       = basename(local.effective_observability.app_insights_id)
+        endpoint   = null
+      } : null
+    }
+  }
+}
+
+output "DEPLOYMENT_METADATA" {
+  value     = local.deployment_metadata
+  sensitive = false
 }
 
 output "TENANT_ID" {
@@ -273,9 +450,6 @@ output "LOG_ANALYTICS_RESOURCE_ID" {
 }
 output "APP_INSIGHTS_RESOURCE_ID" {
   value = local.foundation_metadata.APP_INSIGHTS_RESOURCE_ID
-}
-output "OBSERVABILITY_MIXED_WORKSPACES_ALLOWED" {
-  value = local.foundation_metadata.OBSERVABILITY_MIXED_WORKSPACES_ALLOWED
 }
 output "CONTAINER_APP_INTERNAL_FQDN" {
   value = local.foundation_metadata.CONTAINER_APP_INTERNAL_FQDN

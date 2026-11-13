@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from config.panel import setup
+from config.deployment import setup_settings
 
 
 class PanelPublishedDatabaseTests(unittest.TestCase):
@@ -15,20 +16,23 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
             "RESOURCE_TOKEN": "testtoken",
             "AZURE_SUBSCRIPTION_ID": "test-subscription",
             "APP_CONFIG_ENDPOINT": "https://test-store.azconfig.io",
+            "DATABASE_ACCOUNT_NAME": "test-account",
+            "DATABASE_NAME": "test-database",
+            "FRONTEND_APP_NAME": "mapped-frontend",
         }
+        loader = patch.object(setup_settings, "load_setup_settings", side_effect=lambda env: dict(env))
+        loader.start()
+        self.addCleanup(loader.stop)
 
     def test_published_account_and_database_are_used_for_container_scopes(self):
         with (
-            patch.object(setup, "_run_az", side_effect=["test-account", "test-database"]) as az,
-            patch.object(setup, "resolve_container_app_principal_id", return_value="ui"),
+            patch.object(setup, "_run_az") as az,
+            patch.object(setup, "resolve_container_app_principal_id", return_value="ui") as principal,
             patch.object(setup, "ensure_cosmos_sql_role_assignment", return_value=True) as assign,
         ):
             self.assertEqual(setup.configure_panel_rbac(self.environment), 1)
-        self.assertEqual([call.args[0][call.args[0].index("--key") + 1] for call in az.call_args_list],
-                         ["DATABASE_ACCOUNT_NAME", "DATABASE_NAME"])
-        for call in az.call_args_list:
-            self.assertIn(setup.LABEL, call.args[0])
-            self.assertIn("login", call.args[0])
+        az.assert_not_called()
+        principal.assert_called_once_with("test-group", "mapped-frontend")
         for call in assign.call_args_list:
             self.assertEqual(call.args[0], "test-account")
             self.assertIn("/dbs/test-database/colls/", call.args[-1])
@@ -46,6 +50,7 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
         az.assert_not_called()
 
     def test_empty_published_value_fails_before_any_role_change(self):
+        self.environment.pop("DATABASE_ACCOUNT_NAME")
         with (
             patch.object(setup, "_run_az", return_value=""),
             patch.object(setup, "ensure_cosmos_sql_role_assignment") as assign,
@@ -56,7 +61,7 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
 
     def test_config_failure_propagates_without_role_changes(self):
         with (
-            patch.object(setup, "_run_az", side_effect=setup.PanelRbacError("read failed")),
+            patch.object(setup_settings, "load_setup_settings", side_effect=setup.PanelRbacError("read failed")),
             patch.object(setup, "ensure_cosmos_sql_role_assignment") as assign,
             self.assertRaises(setup.PanelRbacError),
         ):

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import subprocess
 import shutil
 import os
@@ -230,8 +230,10 @@ def test_private_native_metadata_grant_is_frontend_only_and_container_scoped():
     env = {
         **environment(), "ENABLE_PRIVATE_ATTACHMENTS": "true",
         "DATABASE_ACCOUNT_NAME": "ui-account", "DATABASE_NAME": "ui-db",
+        "FRONTEND_APP_NAME": "ca-test-frontend",
     }
-    with patch.object(setup, "resolve_container_app_principal_id", return_value="ui-principal") as principal, \
+    with patch("config.deployment.setup_settings.load_setup_settings", return_value=env), \
+         patch.object(setup, "resolve_container_app_principal_id", return_value="ui-principal") as principal, \
          patch.object(setup, "ensure_cosmos_sql_role_assignment", return_value=True) as grant:
         assert setup.configure_panel_rbac(env) == 1
     principal.assert_called_once_with("rg-test", "ca-test-frontend")
@@ -325,8 +327,10 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
 @pytest.mark.parametrize("startup_command", [None, "python -m native.durable"])
 def test_ca_preparation_preserves_container_environment_and_sets_official_command(tmp_path, startup_command):
     updates = []
+    selected_names = []
     def run(args, **kwargs):
         if "show" in args:
+            selected_names.append(args[args.index("--name") + 1])
             service = args[args.index("--name") + 1].rsplit("-", 1)[1]
             doc = {"properties": {"template": {"containers": [{
                 "name": service, "env": [{"name": "UNRELATED", "value": "kept"}],
@@ -336,10 +340,15 @@ def test_ca_preparation_preserves_container_environment_and_sets_official_comman
             updates.append(yaml.safe_load(Path(args[args.index("--yaml") + 1]).read_text()))
         return subprocess.CompletedProcess(args, 0, "", "")
     env = environment("container_apps", "both")
+    env["CONTAINER_APPS"] = json.dumps([
+        {"service_name": service, "name": "custom-" + service}
+        for service in ("frontend", "orchestrator")
+    ])
     if startup_command is not None:
         env["CONTAINER_APPS_WORKER_STARTUP_COMMAND"] = startup_command
     native_deploy.prepare_container_apps(tmp_path, env, run=run)
     assert len(updates) == 2
+    assert selected_names == ["custom-frontend", "custom-orchestrator"]
     worker = updates[1]["properties"]["template"]["containers"][0]
     assert worker["command"] == ["python", "-m", "native.durable"]
     assert worker["args"] == []
@@ -348,7 +357,10 @@ def test_ca_preparation_preserves_container_environment_and_sets_official_comman
 
 
 def test_actual_secret_consumers_get_exact_secret_scopes_and_empty_gets_none():
-    env = {**environment(), "KEY_VAULT_URI": "https://test.vault.azure.net/"}
+    env = {
+        **environment(), "KEY_VAULT_URI": "https://test.vault.azure.net/",
+        "KEY_VAULT_RESOURCE_ID": f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.KeyVault/vaults/test",
+    }
     calls = []
     def run(args, **kwargs):
         calls.append(args)
@@ -361,6 +373,26 @@ def test_actual_secret_consumers_get_exact_secret_scopes_and_empty_gets_none():
     assert all(c[c.index("--role")+1] == "4633458b-17de-408a-b874-0445c86b69e6" for c in writes)
     with pytest.raises(ValueError):
         native_access.tool_secret_names({"NATIVE_TOOL_SECRET_NAMES": '["../outside"]'})
+
+
+def test_store_free_audit_reference_is_live_bound_without_reading_secret_values():
+    uri = "https://test.vault.azure.net/secrets/AUDIT-HMAC-KEY"
+    env = {
+        "APP_RUNTIME_CONFIGURATION_MODE": "containerEnv",
+        "KEY_VAULT_URI": "https://test.vault.azure.net/",
+        "AUDIT_HMAC_KEY_URI": uri, "AUDIT_EVENTS_ENABLED": "true",
+    }
+    run = Mock(return_value=uri + "/version")
+    assert native_access.secret_names(env, ("AUDIT_HMAC_KEY",), run=run) == ("AUDIT-HMAC-KEY",)
+    run.assert_called_once_with(["keyvault", "secret", "show", "--id", uri, "--query", "id"])
+    run.reset_mock()
+    assert native_access.secret_names(
+        {**env, "AUDIT_EVENTS_ENABLED": "false"}, ("AUDIT_HMAC_KEY",), run=run,
+    ) == ()
+    run.assert_not_called()
+    run.return_value = "https://another.vault.azure.net/secrets/AUDIT-HMAC-KEY/version"
+    with pytest.raises(ValueError, match="live configured vault"):
+        native_access.secret_names(env, ("AUDIT_HMAC_KEY",), run=run)
 
 
 def test_native_component_source_gate_preserves_pins_and_blocks_old_images_before_build(tmp_path):

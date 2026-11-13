@@ -53,7 +53,7 @@ _GROUPS: dict[InputKind, str] = {
         postgreSqlAdministratorPrincipalName postgreSqlAdministratorPrincipalType
         existingPrivateDnsZonePostgreSqlResourceId
         location cosmosLocation searchServiceLocation speechServiceLocation
-        principalId principalType appConfigLabel deploymentMode privateEndpointLocation
+        principalId principalType appConfigLabel applicationId deploymentMode privateEndpointLocation
         privateEndpointResourceGroupName existingVnetResourceId agentSubnetName peSubnetName
         applicationPeSubnetName applicationPeSubnetPrefix gatewaySubnetName azureBastionSubnetName
         azureFirewallSubnetName azureFirewallSku azureFirewallManagementSubnetName

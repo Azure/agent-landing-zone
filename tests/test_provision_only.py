@@ -72,7 +72,7 @@ def test_unknown_kind_and_duplicates_fail_closed():
 
 @pytest.mark.parametrize(
     "environment",
-    [{}, {"AZURE_RESOURCE_GROUP": "rg"}, {"APP_CONFIG_ENDPOINT": "https://a.azconfig.io"}],
+    [{}, {"AZURE_RESOURCE_GROUP": " "}, {"APP_CONFIG_ENDPOINT": "https://a.azconfig.io"}],
 )
 def test_guard_fails_before_any_azure_call(environment):
     with mock.patch("subprocess.run") as run, pytest.raises(
@@ -107,6 +107,10 @@ def test_guard_passes_when_foundation_exists():
     outputs.require_foundation(
         {"AZURE_RESOURCE_GROUP": "rg", "APP_CONFIG_ENDPOINT": "https://a.azconfig.io"}
     )
+
+
+def test_guard_does_not_require_a_runtime_configuration_store():
+    outputs.require_foundation({"AZURE_RESOURCE_GROUP": "rg"})
 
 
 @pytest.mark.parametrize("script", ["preDeploy.ps1", "preDeploy.sh"])

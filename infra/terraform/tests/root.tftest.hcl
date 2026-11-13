@@ -41,6 +41,36 @@ run "product_defaults" {
 
   assert {
     condition = (
+      output.DEPLOYMENT_METADATA.schemaVersion == 1 &&
+      output.DEPLOYMENT_METADATA.context.provider == "terraform" &&
+      output.DEPLOYMENT_METADATA.context.environmentName == "contract" &&
+      output.DEPLOYMENT_METADATA.context.applicationId == "agent-lz-default" &&
+      length(output.DEPLOYMENT_METADATA.resources) == 13 &&
+      length(output.DEPLOYMENT_METADATA.modelDeployments) == length(local.services_model_deployments) &&
+      length(output.DEPLOYMENT_METADATA.containerApps) == length(var.containerAppsList) &&
+      output.DEPLOYMENT_METADATA.resources.cosmos.status == "disabled" &&
+      output.DEPLOYMENT_METADATA.resources.cosmos.resource == null &&
+      output.DEPLOYMENT_METADATA.resources.foundryAccount.resource.endpoint == "https://${local.resource_names.aiFoundryAccountName}.cognitiveservices.azure.com/" &&
+      output.DEPLOYMENT_METADATA.resources.foundryProject.resource.endpoint == "https://${local.resource_names.aiFoundryAccountName}.services.ai.azure.com/api/projects/${local.resource_names.aiFoundryProjectName}" &&
+      alltrue([for app in output.DEPLOYMENT_METADATA.containerApps :
+        app.identity.kind == "systemAssigned" && app.identity.clientId == null && app.identity.resourceId == null
+      ]) &&
+      alltrue([for index, model in output.DEPLOYMENT_METADATA.modelDeployments :
+        model.canonicalName == local.services_model_deployments[index].canonical_name &&
+        model.model.format == local.services_model_deployments[index].model.format &&
+        model.model.name == local.services_model_deployments[index].model.name &&
+        model.model.version == local.services_model_deployments[index].model.version &&
+        model.apiVersion == coalesce(try(local.services_model_deployments[index].apiVersion, null), "2025-01-01-preview")
+      ]) &&
+      length(output.DEPLOYMENT_METADATA.dataResources.storageContainers) == length(var.storageAccountContainersList) &&
+      length(output.DEPLOYMENT_METADATA.dataResources.cosmosDatabases) == 0 &&
+      !issensitive(output.DEPLOYMENT_METADATA)
+    )
+    error_message = "Dedicated metadata must enumerate the selected non-secret foundation independently of hosted deployment."
+  }
+
+  assert {
+    condition = (
       var.appConfigLabel == "agent-lz" && !var.networkIsolation && !var.deployCosmosDb &&
       !var.deployGroundingWithBing && !var.useZoneRedundancy &&
       var.vmSize == "Standard_D2s_v3" && !var.foundryIqFilterAddOnEnabled &&
@@ -97,6 +127,25 @@ run "product_defaults" {
       output.PUBLIC_INGRESS_LIVE == false
     )
     error_message = "The complete output contract must distinguish prepared/deployed/disabled contexts."
+  }
+}
+
+run "empty_model_list_metadata_uses_native_defaults" {
+  command = plan
+
+  variables {
+    modelDeploymentList = []
+  }
+
+  assert {
+    condition = (
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.canonicalName] == ["GPT_MODEL", "EMBEDDING_MODEL"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.model.name] == ["gpt-5-nano", "text-embedding-3-large"] &&
+      [for model in output.DEPLOYMENT_METADATA.modelDeployments : model.model.version] == ["2025-08-07", "1"] &&
+      alltrue([for model in output.DEPLOYMENT_METADATA.modelDeployments : model.apiVersion == "2025-01-01-preview"])
+    )
+    error_message = "Empty declared model lists must expose the actual native fallback models and default API versions."
   }
 }
 
@@ -198,6 +247,18 @@ run "disabled_services_have_typed_empty_scalars" {
     deployContainerEnv      = false
     deployContainerRegistry = false
     retrievalBackend        = "ai_search"
+  }
+  assert {
+    condition = (
+      alltrue([for slot in values(output.DEPLOYMENT_METADATA.resources) : slot.status == "disabled" && slot.resource == null]) &&
+      length(output.DEPLOYMENT_METADATA.modelDeployments) == 0 &&
+      length(output.DEPLOYMENT_METADATA.containerApps) == 0 &&
+      alltrue([for children in values(output.DEPLOYMENT_METADATA.dataResources) : length(children) == 0]) &&
+      jsondecode(jsonencode(output.DEPLOYMENT_METADATA)).context.provider == "terraform" &&
+      length(jsonencode(output.DEPLOYMENT_METADATA)) < 65536 &&
+      !issensitive(output.DEPLOYMENT_METADATA)
+    )
+    error_message = "Disabled resources must serialize as null slots and empty child arrays without secrets."
   }
   assert {
     condition = alltrue([
@@ -335,6 +396,9 @@ run "hosted_preparation_is_not_deployment" {
   }
   assert {
     condition = (
+      length(output.DEPLOYMENT_METADATA.containerApps) == 0 &&
+      output.DEPLOYMENT_METADATA.resources.foundryProject.status == "managed" &&
+      output.DEPLOYMENT_METADATA.resources.registry.status == "managed" &&
       output.HOSTED_AGENT_PREPARED && !output.DEPLOY_HOSTED_AGENT &&
       output.HOSTED_AGENT_DEPLOYMENT.agent == null &&
       output.HOSTED_AGENT_DEPLOYMENT.foundry != null &&
@@ -342,6 +406,53 @@ run "hosted_preparation_is_not_deployment" {
       !output.HOSTED_AGENT_DEPLOYMENT.privateBuild.required
     )
     error_message = "Preparation must expose foundation context without inventing a deployed hosted version."
+  }
+}
+
+run "metadata_external_bindings_without_software" {
+  command = plan
+  variables {
+    applicationId                               = "custom-contract-app"
+    deploySoftware                              = false
+    deployAppConfig                             = false
+    appRuntimeConfigurationMode                 = "none"
+    prepareHostedAgent                          = true
+    deployContainerApps                         = false
+    deployContainerRegistry                     = false
+    deployLogAnalytics                          = false
+    deployAppInsights                           = false
+    hostedAgentContainerRegistryResourceId      = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-external/providers/Microsoft.ContainerRegistry/registries/externalcontract"
+    hostedAgentContainerRegistryEndpoint        = "externalcontract.azurecr.io"
+    existingLogAnalyticsWorkspaceResourceId     = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-external/providers/Microsoft.OperationalInsights/workspaces/shared"
+    existingApplicationInsightsResourceId       = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-external/providers/Microsoft.Insights/components/shared"
+    existingApplicationInsightsConnectionString = "InstrumentationKey=00000000-0000-0000-0000-000000000099"
+  }
+  override_data {
+    target = data.azapi_resource.existing_app_insights[0]
+    values = {
+      output = {
+        properties = {
+          WorkspaceResourceId = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-external/providers/Microsoft.OperationalInsights/workspaces/shared"
+        }
+      }
+    }
+  }
+  assert {
+    condition = (
+      output.DEPLOYMENT_METADATA.resources.registry.status == "referenced" &&
+      output.DEPLOYMENT_METADATA.context.applicationId == "custom-contract-app" &&
+      output.DEPLOYMENT_METADATA.resources.registry.resource.resourceId == var.hostedAgentContainerRegistryResourceId &&
+      output.DEPLOYMENT_METADATA.resources.registry.resource.endpoint == "https://externalcontract.azurecr.io" &&
+      output.DEPLOYMENT_METADATA.resources.logAnalytics.status == "referenced" &&
+      output.DEPLOYMENT_METADATA.resources.appInsights.status == "referenced" &&
+      output.DEPLOYMENT_METADATA.resources.appInsights.resource.resourceId == var.existingApplicationInsightsResourceId &&
+      output.DEPLOYMENT_METADATA.resources.appInsights.resource.endpoint == null &&
+      output.DEPLOYMENT_METADATA.resources.appConfig.status == "disabled" &&
+      output.DEPLOYMENT_METADATA.resources.appConfig.resource == null &&
+      !issensitive(output.DEPLOYMENT_METADATA) &&
+      !output.HOSTED_AGENT_DEPLOYMENT.enabled
+    )
+    error_message = "Selected external bindings remain referenced with no store/software and no sensitive connection-string propagation."
   }
 }
 

@@ -189,7 +189,11 @@ class IngestionPermissionTests(unittest.TestCase):
                      patch.object(setup, "AzureCliCredential"), \
                      patch.object(setup, "ManagedIdentityCredential"), \
                      patch.object(setup, "AzureAppConfigurationClient", return_value=client), \
-                     patch.object(setup, "load_appconfig_settings", return_value=context):
+                     patch.object(setup, "load_setup_settings", return_value={
+                         **context, "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
+                         "APP_CONFIG_ENDPOINT": "https://config.azconfig.io",
+                     }), \
+                     patch.object(setup, "load_appconfig_settings", return_value={}):
                     if value != "[]":
                         with self.assertRaisesRegex(ValueError, PERMISSION_KEY):
                             setup.prepare_context_and_render(setup.TEMPLATE_NAME, str(TEMPLATE_DIR))

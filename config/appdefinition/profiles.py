@@ -107,12 +107,16 @@ class UnknownProfileError(ValueError):
     """Raised when a profile name is not in the catalog."""
 
 
-def expand_profiles(profiles: Iterable[str]) -> tuple[RoleAssignment, ...]:
+def expand_profiles(
+    profiles: Iterable[str], *, runtime_mode: str = "appConfig",
+) -> tuple[RoleAssignment, ...]:
     """Return the de-duplicated role assignments for ``base`` plus ``profiles``.
 
     Order is stable: catalog order of the profiles, then role order within
     each profile.
     """
+    if runtime_mode not in {"appConfig", "containerEnv", "none"}:
+        raise ValueError("APP_RUNTIME_CONFIGURATION_MODE must be appConfig, containerEnv or none.")
     requested = {BASE_PROFILE, *profiles}
     unknown = sorted(requested - PROFILES.keys())
     if unknown:
@@ -126,6 +130,8 @@ def expand_profiles(profiles: Iterable[str]) -> tuple[RoleAssignment, ...]:
         if name not in requested:
             continue
         for assignment in profile.roles:
+            if assignment.scope == SCOPE_APP_CONFIG and runtime_mode != "appConfig":
+                continue
             if assignment not in assignments:
                 assignments.append(assignment)
     return tuple(assignments)

@@ -34,6 +34,8 @@ if sys.argv[1] == "-c" and sys.argv[3:] == ["--validate-smoke"]:
     raise AssertionError("Smoke CLI must exit")
 from tests.test_hosted_access import AzureFixture, ENV, SECRET
 from config.deployment import hosted_access as access
+from config.deployment import setup_settings
+setup_settings.load_setup_environment = dict
 
 def event(value):
     with open(os.environ["FAKE_TRACE"], "a", encoding="utf-8") as stream:

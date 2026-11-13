@@ -181,9 +181,9 @@ def test_capabilities_are_read_from_the_exact_account_and_preserved():
     command.assert_called_once_with(["resource", "show", "--ids", ACCOUNT])
 
 
-def test_account_binding_can_come_from_existing_foundation_appconfig():
+def test_missing_first_provision_account_does_not_read_runtime_store():
     with (
-        patch.object(mcp, "stored", return_value=ACCOUNT),
+        patch.object(mcp, "stored", side_effect=AssertionError("store discovery")),
         patch.object(
             mcp,
             "command",
@@ -195,7 +195,7 @@ def test_account_binding_can_come_from_existing_foundation_appconfig():
         ) as command,
     ):
         assert "EnableNoSQLVectorSearch" in mcp.capture_capabilities(environment())
-    command.assert_called_once_with(["resource", "show", "--ids", ACCOUNT])
+    command.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -331,10 +331,14 @@ def test_existing_api_is_resolved_by_exact_object_not_display_name():
 
 
 def test_server_gets_only_two_reader_containers_models_and_declared_secrets():
-    env = environment(MCP_SQL_SECRET_NAMES='["approved-sql-password"]')
     model = f"/subscriptions/{SUB}/resourceGroups/rg-test/providers/Microsoft.CognitiveServices/accounts/test"
+    env = environment(
+        MCP_SQL_SECRET_NAMES='["approved-sql-password"]',
+        COSMOS_DB_ACCOUNT_RESOURCE_ID=ACCOUNT, DATABASE_NAME="catalog",
+        AI_FOUNDRY_ACCOUNT_RESOURCE_ID=model,
+    )
     with (
-        patch.object(mcp, "_config_value", side_effect=[ACCOUNT, "catalog", model]),
+        patch.object(mcp, "_config_value", side_effect=AssertionError("store discovery")),
         patch.object(mcp, "ensure_cosmos_sql_role_assignment") as grant,
         patch.object(mcp, "_ensure_rbac") as rbac,
         patch.object(mcp, "grant_secrets") as secrets,
@@ -351,6 +355,26 @@ def test_server_gets_only_two_reader_containers_models_and_declared_secrets():
     )
     assert all(call.args[2] == model for call in rbac.call_args_list)
     secrets.assert_called_once_with(env, PRINCIPAL, ("approved-sql-password",))
+
+
+def test_mcp_server_and_caller_use_custom_evaluated_app_bindings():
+    rows = [
+        {"service_name": "mcp", "name": "custom-tool-server",
+         "identity": {"principalId": PRINCIPAL, "clientId": CLIENT}},
+        {"service_name": "orchestrator", "name": "custom-worker",
+         "identity": {"principalId": OBJECT}},
+    ]
+    env = environment(CONTAINER_APPS=json.dumps(rows))
+    with patch.object(mcp, "_container_app", return_value={
+        "fqdn": "custom.example", "uaiPrincipalId": PRINCIPAL, "uaiClientId": CLIENT,
+    }) as read:
+        binding = mcp.server_binding(env)
+    assert binding["MCP_APP_NAME"] == "custom-tool-server"
+    assert read.call_args.args == ("rg-test", "custom-tool-server")
+    assert read.call_args.kwargs["identity_client_id"] == CLIENT
+    assert mcp.caller_principals(env) == [OBJECT]
+    with pytest.raises(ValueError, match="verified app"):
+        mcp.server_binding(environment())
 
 
 def test_both_hosted_publications_use_actual_distinct_principals():
@@ -546,11 +570,11 @@ def test_activation_cli_reads_fresh_selected_publication_bindings(monkeypatch):
     monkeypatch.setattr("sys.argv", ["mcp", "--activate"])
     with (
         patch.object(mcp, "find_repo_root", return_value=ROOT),
-        patch.object(mcp, "selected_environment", return_value=env) as selected,
+        patch.object(mcp, "load_setup_environment", return_value=env) as selected,
         patch.object(mcp, "activate") as activate,
     ):
         assert mcp.main() == 0
-    selected.assert_called_once_with(ROOT, "test")
+    assert selected.call_args.kwargs == {"project_root": ROOT}
     activate.assert_called_once_with(ROOT, env)
 
 
@@ -666,7 +690,7 @@ def test_custom_vector_application_never_inherits_reference_mcp_catalog():
     assert set(captured) == {"COSMOS_ACCOUNT_CAPABILITIES"}
     assert "EnableNoSQLVectorSearch" in json.loads(captured["COSMOS_ACCOUNT_CAPABILITIES"])
     command.assert_not_called()
-    stored.assert_called_once_with(env, "COSMOS_DB_ACCOUNT_RESOURCE_ID")
+    stored.assert_not_called()
     persist.assert_called_once()
 
 

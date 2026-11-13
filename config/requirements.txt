@@ -25,3 +25,7 @@ jsonschema==4.26.0
 # application definitions
 
 PyYAML==6.0.3
+
+# native Terraform metadata declaration inspection
+
+python-hcl2==7.3.1
