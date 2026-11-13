@@ -21,7 +21,7 @@ _GROUPS: dict[InputKind, str] = {
         deployAzureFirewallManagementSubnet
         deployAppGatewaySubnet deployJumpboxSubnet deployAcaEnvironmentSubnet
         deployDevopsBuildAgentsSubnet deployPowerPlatformSubnet deployAiGatewaySubnet
-        deployGroundingWithBing deployAiFoundry deployAiFoundrySubnet deployAppConfig
+        deployGroundingWithBing deployAiFoundry deployModelDeployments deployAiFoundrySubnet deployAppConfig
         deployKeyVault deployVmKeyVault deployLogAnalytics enablePrivateLogAnalytics
         deployAppInsights allowMixedObservabilityWorkspaces hubIntegrationCreateHubPeering
         hubIntegrationPeeringAllowGatewayTransit hubIntegrationPeeringUseRemoteGateways

@@ -291,28 +291,35 @@ def main() -> None:
             raise ValueError("Foundry account name and ARM ID conflict.")
     logging.info(f"Loaded: subscriptionId={subscription_id}, resourceGroupName={resource_group}")
     logging.info(f"Loaded: aiFoundryAccountName={account_name}")
-    # Determine deployment name from list
-    raw_list = settings["MODEL_DEPLOYMENTS"]
+    # Determine deployment name from list when local model deployments are enabled
+    deploy_model_deployments = (
+        str(settings.get("DEPLOY_MODEL_DEPLOYMENTS", "true")).strip().lower() != "false"
+    )
+    raw_list = settings["MODEL_DEPLOYMENTS"] if deploy_model_deployments else settings.get("MODEL_DEPLOYMENTS", [])
     try:
         deployments = json.loads(raw_list) if isinstance(raw_list, str) else raw_list
     except json.JSONDecodeError as e:
         logging.error("MODEL_DEPLOYMENTS is not valid JSON: %s", e)
         sys.exit(1)
-    deployment_name: Optional[str] = None
-    for canonical_name in (CANONICAL_DEPLOYMENT_NAME, "GPT_MODEL"):
-        for item in deployments:
-            if item.get("canonical_name") == canonical_name:
-                deployment_name = item.get("name")
-                break
-        if deployment_name:
-            break
-    if not deployment_name:
-        logging.error(
-            "No deployment with canonical_name '%s' or 'GPT_MODEL' found in MODEL_DEPLOYMENTS",
-            CANONICAL_DEPLOYMENT_NAME
-        )
+    if not isinstance(deployments, list):
+        logging.error("MODEL_DEPLOYMENTS must be a JSON array")
         sys.exit(1)
-    logging.info(f"Selected deployment: {deployment_name} (canonical_name={canonical_name})")
+    deployment_name: Optional[str] = None
+    if deploy_model_deployments:
+        for canonical_name in (CANONICAL_DEPLOYMENT_NAME, "GPT_MODEL"):
+            for item in deployments:
+                if item.get("canonical_name") == canonical_name:
+                    deployment_name = item.get("name")
+                    break
+            if deployment_name:
+                break
+        if not deployment_name:
+            logging.error(
+                "No deployment with canonical_name '%s' or 'GPT_MODEL' found in MODEL_DEPLOYMENTS",
+                CANONICAL_DEPLOYMENT_NAME
+            )
+            sys.exit(1)
+        logging.info(f"Selected deployment: {deployment_name} (canonical_name={canonical_name})")
     client = CognitiveServicesManagementClient(cred, subscription_id)
     if not settings.get("KEY_VAULT_URI"):
         account = client.accounts.get(resource_group, account_name)
@@ -337,8 +344,15 @@ def main() -> None:
         }
     )
     p_name = configure_policy(client, resource_group, account_name, pol_def, bl_name, POLICY_NAME)
-    # Associate policy to deployment
-    associate_policy_to_deployment(client, resource_group, account_name, deployment_name, p_name)
+    # Associate policy to deployment when local model deployments are enabled
+    if deployment_name:
+        associate_policy_to_deployment(client, resource_group, account_name, deployment_name, p_name)
+    else:
+        logging.info(
+            "Local model deployments are disabled (DEPLOY_MODEL_DEPLOYMENTS=false). "
+            "Skipping RAI policy association to a local deployment while account-level "
+            "RAI blocklist and policy remain configured."
+        )
     # Store API key in Key Vault
     logging.info("🔑 Adding AI Foundry Account API Key to Key Vault …")
     key_vault_uri = settings.get("KEY_VAULT_URI")
@@ -349,7 +363,10 @@ def main() -> None:
         key_vault_uri,
         SECRET_NAME
     )
-    logging.info("✅ RAI blocklist, policy, and deployment association complete.")
+    if deployment_name:
+        logging.info("✅ RAI blocklist, policy, and deployment association complete.")
+    else:
+        logging.info("✅ Account-level RAI blocklist and policy configuration complete.")
     if secret_stored:
         logging.info("✅ Evaluation API-key injection complete.")
 

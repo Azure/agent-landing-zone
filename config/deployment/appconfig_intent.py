@@ -134,9 +134,14 @@ def resolve_intent(parameter_source: Path, environment: Mapping[str, str]) -> Ru
         raise ValueError("appConfigLabel must be a string.")
     explicit = normalize_settings(explicit_values, label)
     effective = normalize_settings(resolved.get("additionalAppConfigurationSettings", []), label)
+    canonical_collections = (
+        *(("modelDeploymentList",) if resolved.get("deployModelDeployments", True) is not False else ()),
+        "databaseContainersList",
+        "storageAccountContainersList",
+    )
     canonical = frozenset(
         item["canonical_name"]
-        for name in ("modelDeploymentList", "databaseContainersList", "storageAccountContainersList")
+        for name in canonical_collections
         for item in resolved.get(name, []) if isinstance(item, dict) and item.get("canonical_name")
     )
     applications = frozenset(

@@ -154,7 +154,7 @@ try {
     # Keep every original disabled/default subnet assertion. The exact bounded
     # inverse rejects unreviewed changes; Test-PostgreSqlContract independently
     # proves disabled AST equivalence in both modes and the enabled PG gates.
-    $t = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreSubnetConditionalReferencesGraph $t)
+    $t = ConvertTo-PrePostgreSqlGraph (ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph $t))
     $rootParameters = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MainFile))) 'main.parameters.json'
     $bindings = (Get-Content -LiteralPath $rootParameters -Raw | ConvertFrom-Json -AsHashtable -Depth 100).parameters
     Assert-LayoutShape $t $bindings

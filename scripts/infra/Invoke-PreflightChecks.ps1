@@ -346,6 +346,7 @@ function Test-BooleanParameterValues {
         deployPowerPlatformSubnet  = 'DEPLOY_POWER_PLATFORM_SUBNET'
         deployAiGatewaySubnet      = 'DEPLOY_AI_GATEWAY_SUBNET'
         deployAiFoundrySubnet      = 'DEPLOY_AI_FOUNDRY_SUBNET'
+        deployModelDeployments     = 'DEPLOY_MODEL_DEPLOYMENTS'
         aiFoundryDisableLocalAuth  = 'AI_FOUNDRY_DISABLE_LOCAL_AUTH'
     }
 
@@ -1771,9 +1772,15 @@ function Test-VmSku {
 
 function Test-ModelQuota {
     param(
-        [Parameter(Mandatory)] $ModelDeployments,
-        [Parameter(Mandatory)] [string]$Location
+        [AllowNull()][AllowEmptyCollection()] $ModelDeployments = @(),
+        [Parameter(Mandatory)] [string]$Location,
+        [bool]$DeployModelDeployments = $true
     )
+    if (-not $DeployModelDeployments) {
+        Add-Finding -Severity INFO -Code 'MODEL_DEPLOYMENTS_DISABLED' `
+            -Message 'Local AI Foundry model deployments are disabled (deployModelDeployments=false). Skipping regional model quota checks.'
+        return
+    }
     if ([string]::IsNullOrWhiteSpace($Location)) { return }
     $deployments = @($ModelDeployments | Where-Object { $_ -ne $null })
     if ($deployments.Count -eq 0) { return }
@@ -2168,9 +2175,16 @@ function Test-RegionalReadiness {
 
     # Model quota
     if ($deployAiFoundry) {
-        $models = $P['modelDeploymentList']
-        if ($models) {
-            Test-ModelQuota -ModelDeployments $models -Location $aiFoundryLocation
+        $deployModelDeployments = Resolve-DeployFlag -P $P -Key 'deployModelDeployments' -Default $true
+        if (-not $deployModelDeployments) {
+            Add-Finding -Severity INFO -Code 'MODEL_DEPLOYMENTS_DISABLED' `
+                -Message 'Local AI Foundry model deployments are disabled (deployModelDeployments=false). Skipping regional model quota checks.'
+        }
+        else {
+            $models = $P['modelDeploymentList']
+            if ($models) {
+                Test-ModelQuota -ModelDeployments $models -Location $aiFoundryLocation
+            }
         }
     }
 

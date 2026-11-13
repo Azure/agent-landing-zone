@@ -820,3 +820,45 @@ run "additional_cosmos_endpoint_cannot_compete_with_foundation_owner" {
   }
   expect_failures = [terraform_data.services_contract]
 }
+
+run "external_ai_gateway_suppresses_local_models_and_canonical_keys" {
+  command = plan
+  variables {
+    deployModelDeployments = false
+  }
+  assert {
+    condition = (
+      length(var.modelDeploymentList) == 2 &&
+      length(azapi_resource.model_deployment) == 0 &&
+      length(azapi_resource.foundry_account) == 1 &&
+      length(azapi_resource.foundry_project) == 1 &&
+      length(azapi_resource.application_search) == 1 &&
+      length(azapi_resource.knowledge_base_connection) == 1 &&
+      length(azapi_resource.account_connection) == 2 &&
+      azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.contentType == "application/json" &&
+      azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.value == "[]" &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["CHAT_DEPLOYMENT_NAME", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["EMBEDDING_DEPLOYMENT_NAME", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["GPT_MODEL", "agent-lz"])) &&
+      !contains(keys(azapi_resource.foundation_setting), jsonencode(["EMBEDDING_MODEL", "agent-lz"]))
+    )
+    error_message = "Disabling local model deployments must create zero model children, publish MODEL_DEPLOYMENTS as [], omit canonical model keys, and retain Foundry/Search connections."
+  }
+}
+
+run "empty_model_list_with_deploy_enabled_provisions_native_fallbacks" {
+  command = plan
+  variables {
+    deployModelDeployments = true
+    modelDeploymentList    = []
+  }
+  assert {
+    condition = (
+      toset(keys(azapi_resource.model_deployment)) == toset(["gpt-5-nano", "text-embedding-3-large"]) &&
+      azapi_resource.foundation_setting[jsonencode(["GPT_MODEL", "agent-lz"])].body.properties.value == "gpt-5-nano" &&
+      azapi_resource.foundation_setting[jsonencode(["EMBEDDING_MODEL", "agent-lz"])].body.properties.value == "text-embedding-3-large" &&
+      length(jsondecode(azapi_resource.foundation_setting[jsonencode(["MODEL_DEPLOYMENTS", "agent-lz"])].body.properties.value)) == 2
+    )
+    error_message = "Enabling local model deployments with an empty modelDeploymentList must retain the two native fallback models."
+  }
+}

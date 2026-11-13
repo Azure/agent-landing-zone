@@ -111,6 +111,7 @@
     "aiFoundryCosmosDBAccountResourceId":  { "value": null },
     
     "deployAiFoundry":                      { "value": "true" },
+    "deployModelDeployments":               { "value": "${DEPLOY_MODEL_DEPLOYMENTS=true}" },
     "deployAAfAgentSvc":                    { "value": "${DEPLOY_AAF_AGENT_SVC=true}" },
     "prepareHostedAgent":                   { "value": false },
     "deployDurableTaskScheduler":           { "value": false },

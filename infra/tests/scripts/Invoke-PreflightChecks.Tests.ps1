@@ -1319,6 +1319,51 @@ foreach ($case in @(
 }
 
 # --------------------------------------------------------------------------
+Write-Host 'External AI Gateway mode: deployModelDeployments validation and quota skip' -ForegroundColor Cyan
+foreach ($validModelFlag in @($true, $false, 'true', 'false')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployModelDeployments = $validModelFlag }
+    Assert-True "deployModelDeployments '$validModelFlag' is accepted" (Test-FindingAbsent 'BOOL_VALUE_INVALID')
+}
+foreach ($invalidModelFlag in @('yes', '1', '')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployModelDeployments = $invalidModelFlag }
+    Assert-True "deployModelDeployments '$invalidModelFlag' is rejected" (Test-FindingPresent 'BOOL_VALUE_INVALID')
+}
+$script:ModelQuotaCalled = $false
+$originalTestModelQuota = ${function:Test-ModelQuota}
+try {
+    function Test-ModelQuota {
+        param($ModelDeployments, $Location, $DeployModelDeployments)
+        $script:ModelQuotaCalled = $true
+    }
+    Reset-Findings
+    Test-RegionalReadiness -P @{
+        location               = 'westus3'
+        deployAiFoundry        = $true
+        deployModelDeployments = $false
+        deploySearchService    = $false
+        deployAAfAgentSvc      = $false
+        deployJumpbox          = $false
+        modelDeploymentList    = @(
+            [pscustomobject]@{
+                name  = 'chat'
+                model = [pscustomobject]@{ format = 'OpenAI'; name = 'gpt-5-nano'; version = '2025-08-07' }
+                sku   = [pscustomobject]@{ name = 'GlobalStandard'; capacity = 100 }
+            }
+        )
+    }
+    Assert-True 'deployModelDeployments=false emits MODEL_DEPLOYMENTS_DISABLED INFO' (Test-FindingPresent 'MODEL_DEPLOYMENTS_DISABLED')
+    Assert-True 'deployModelDeployments=false skips Test-ModelQuota despite seed models' (-not $script:ModelQuotaCalled)
+    Assert-True 'deployModelDeployments=false raises zero FAIL/WARN findings' (
+        @($script:Findings | Where-Object { $_.Severity -in @('FAIL', 'WARN') }).Count -eq 0
+    )
+}
+finally {
+    ${function:Test-ModelQuota} = $originalTestModelQuota
+}
+
+# --------------------------------------------------------------------------
 Write-Host ''
 Write-Host ("Tests run: $script:TestsRun  Failures: $script:TestFailures") -ForegroundColor Cyan
 

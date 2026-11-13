@@ -495,6 +495,12 @@ variable "deployAiFoundry" {
   default  = true
   nullable = false
 }
+variable "deployModelDeployments" {
+  type        = bool
+  default     = true
+  nullable    = false
+  description = "Deploy local AI Foundry model deployments. Set to false when all inference routes through an external AI Gateway."
+}
 variable "deployAiFoundrySubnet" {
   type     = bool
   default  = true

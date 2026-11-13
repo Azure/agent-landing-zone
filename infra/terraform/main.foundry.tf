@@ -18,10 +18,10 @@ locals {
       vault   = { id = var.keyVaultResourceId, type = "Microsoft.KeyVault/vaults@2024-11-01" }
     } : key => value if local.services_agent_service && value.id != ""
   }
-  services_model_deployments = concat(var.modelDeploymentList, [for deployment in [
+  services_model_deployments = var.deployModelDeployments ? concat(var.modelDeploymentList, [for deployment in [
     { name = "gpt-5-nano", model = { format = "OpenAI", name = "gpt-5-nano", version = "2025-08-07" }, sku = { name = "GlobalStandard", capacity = 40 }, canonical_name = "GPT_MODEL" },
     { name = "text-embedding-3-large", model = { format = "OpenAI", name = "text-embedding-3-large", version = "1" }, sku = { name = "GlobalStandard", capacity = 10 }, canonical_name = "EMBEDDING_MODEL" }
-  ] : deployment if length(var.modelDeploymentList) == 0])
+  ] : deployment if length(var.modelDeploymentList) == 0]) : []
 }
 
 # Read-only BYO references, including cross-subscription IDs. No associated
@@ -196,7 +196,7 @@ resource "terraform_data" "foundry_model_contract" {
   input = var.modelDeploymentList
   lifecycle {
     precondition {
-      condition = !var.deployAiFoundry || alltrue([
+      condition = !var.deployAiFoundry || !var.deployModelDeployments || alltrue([
         for deployment in var.modelDeploymentList :
         try(deployment.dynamicThrottlingEnabled, null) == null
       ])

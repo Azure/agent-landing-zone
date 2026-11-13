@@ -78,12 +78,14 @@ function Get-AzdEnvValues {
     }
 }
 if ($env:QUOTA_GATE -eq 'foundation') {
-    Test-ModelQuota -Location 'westus3' -ModelDeployments $fixture.desired
+    $enabled = if ($fixture.PSObject.Properties['deployModelDeployments']) { [bool]$fixture.deployModelDeployments } else { $true }
+    Test-ModelQuota -Location 'westus3' -ModelDeployments $fixture.desired -DeployModelDeployments $enabled
     $script:FailureCount = @($script:Findings | Where-Object Severity -eq 'FAIL').Count
     $script:WarningCount = @($script:Findings | Where-Object Severity -eq 'WARN').Count
     foreach ($finding in $script:Findings) { Write-Host "$($finding.Severity) $($finding.Message)" }
 } else {
-    Test-ModelReadiness -Location 'westus3' -Models $fixture.desired
+    $enabled = if ($fixture.PSObject.Properties['deployModelDeployments']) { [bool]$fixture.deployModelDeployments } else { $true }
+    Test-ModelReadiness -Location 'westus3' -Models $fixture.desired -DeployModelDeployments $enabled
 }
 Write-Output ('RESULT:' + (@{ failures = $script:FailureCount; warnings = $script:WarningCount; calls = $script:Calls } | ConvertTo-Json -Compress))
 """
@@ -384,3 +386,53 @@ class RegionalModelQuotaTests(unittest.TestCase):
         )
         self.assertEqual(0, result["failures"], output)
         self.assertIn("--resource-group test-group", " ".join(result["calls"]))
+
+    def test_empty_models_and_disabled_model_deployments_skip_quota_cleanly(self) -> None:
+        helper_cmd = [
+            PWSH, "-NoProfile", "-NonInteractive", "-Command",
+            f". '{ROOT / 'scripts' / 'infra' / 'ModelQuota.ps1'}'; "
+            "$reqs = @(Get-ModelQuotaRequirements -Models @()); "
+            "if ($reqs.Count -ne 0) { throw 'Expected zero quota requirements' }",
+        ]
+        completed = subprocess.run(helper_cmd, capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
+        for gate in ("regional", "foundation"):
+            with self.subTest(gate=gate, case="empty"):
+                data = fixture()
+                data["desired"] = []
+                result, output = self.run_check(data, gate=gate)
+                self.assertEqual(0, result["failures"], output)
+                self.assertEqual(0, result["warnings"], output)
+                self.assertEqual([], result["calls"], output)
+            with self.subTest(gate=gate, case="disabled_with_seed_models"):
+                data = fixture()
+                data["usage"] = []
+                data["deployModelDeployments"] = False
+                result, output = self.run_check(data, gate=gate)
+                self.assertEqual(0, result["failures"], output)
+                self.assertEqual(0, result["warnings"], output)
+                self.assertEqual([], result["calls"], output)
+
+    def test_regional_preflight_script_passes_model_check_when_deploy_model_deployments_is_false(self) -> None:
+        env = dict(
+            os.environ,
+            AZURE_LOCATION="swedencentral",
+            DEPLOY_MODEL_DEPLOYMENTS="false",
+            DEPLOY_SEARCH_SERVICE="false",
+            DEPLOY_COSMOS_DB="false",
+        )
+        completed = subprocess.run(
+            [
+                PWSH, "-NoProfile", "-NonInteractive", "-File",
+                str(ROOT / "scripts" / "Invoke-RegionalPreflight.ps1"),
+                "-ProjectRoot", str(ROOT),
+                "-ParameterFile", str(ROOT / "main.parameters.json"),
+                "-SkipAzureCliChecks",
+            ],
+            env=env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("PASS models - deployModelDeployments is false", completed.stdout)
+        self.assertNotIn("FAIL models", completed.stdout)
+        self.assertNotIn("WARN models", completed.stdout)
