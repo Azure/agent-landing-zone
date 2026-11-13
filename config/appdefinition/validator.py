@@ -26,7 +26,10 @@ if TYPE_CHECKING:
 SCHEMA_RELATIVE_PATH = Path("contracts") / "app-definition-v1.schema.json"
 RESERVED_SETTING_PREFIX = "AGENTLZ_"
 AZURE_YAML = "azure.yaml"
+AGENT_YAML = "agent.yaml"
 UNPINNED_SOURCE_MESSAGE = "source must be a 40-character commit or a sha256 image digest."
+RESERVED_HOSTED_ENV_PREFIXES = ("FOUNDRY_", "AGENT_")
+RESERVED_HOSTED_ENV_NAMES = frozenset({"APPLICATIONINSIGHTS_CONNECTION_STRING"})
 
 #: Bundled component name -> manifest component name suffix. Suffix matching
 #: keeps the pin check valid across the component repository renames.
@@ -50,6 +53,81 @@ def _escape(token: object) -> str:
 def pointer(*tokens: object) -> str:
     """Build an RFC 6901 JSON pointer from path tokens."""
     return "".join(f"/{_escape(token)}" for token in tokens)
+
+
+def is_reserved_hosted_agent_env(name: str) -> bool:
+    """Return True when ``name`` is reserved by Microsoft Foundry Hosted Agents."""
+    normalized = name.strip().upper()
+    return normalized in RESERVED_HOSTED_ENV_NAMES or normalized.startswith(
+        RESERVED_HOSTED_ENV_PREFIXES
+    )
+
+
+def _iter_env_entries(
+    raw_env: Any,
+    base_tokens: tuple[object, ...],
+) -> Iterator[tuple[tuple[object, ...], str]]:
+    if isinstance(raw_env, dict):
+        for key in raw_env:
+            if isinstance(key, str):
+                yield (*base_tokens, key), key
+    elif isinstance(raw_env, list):
+        for index, item in enumerate(raw_env):
+            if isinstance(item, dict):
+                if isinstance(item.get("name"), str):
+                    yield (*base_tokens, index, "name"), item["name"]
+                elif isinstance(item.get("key"), str):
+                    yield (*base_tokens, index, "key"), item["key"]
+                else:
+                    for key in item:
+                        if isinstance(key, str):
+                            yield (*base_tokens, index, key), key
+            elif isinstance(item, str):
+                key = item.split("=", 1)[0].strip()
+                if key:
+                    yield (*base_tokens, index), key
+
+
+def _hosted_env_issues(
+    raw_env: Any,
+    file_label: str,
+    base_tokens: tuple[object, ...],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for tokens, key in _iter_env_entries(raw_env, base_tokens):
+        if is_reserved_hosted_agent_env(key):
+            issues.append(
+                ValidationIssue(
+                    f"{file_label}#{pointer(*tokens)}",
+                    f"environment variable `{key}` is reserved by Microsoft Foundry Hosted Agents. "
+                    "Foundry automatically injects and reserves `FOUNDRY_*`, `AGENT_*`, and "
+                    "`APPLICATIONINSIGHTS_CONNECTION_STRING`, and rejects overrides at publish time (`invalid_payload`).",
+                )
+            )
+    return issues
+
+
+def _agent_yaml_issues(agent_yaml: Path, folder: Path) -> list[ValidationIssue]:
+    import yaml
+
+    rel_label = agent_yaml.relative_to(folder).as_posix()
+    try:
+        document = yaml.safe_load(agent_yaml.read_text(encoding="utf-8-sig")) or {}
+    except yaml.YAMLError as error:
+        return [ValidationIssue(rel_label, f"{agent_yaml} is not valid YAML: {error}")]
+    if not isinstance(document, dict):
+        return [ValidationIssue(rel_label, f"{agent_yaml} must be a YAML mapping.")]
+    issues: list[ValidationIssue] = []
+    for field in ("environment_variables", "env"):
+        issues.extend(_hosted_env_issues(document.get(field), rel_label, (field,)))
+    for section in ("template", "container"):
+        nested = document.get(section)
+        if isinstance(nested, dict):
+            for field in ("environment_variables", "env"):
+                issues.extend(
+                    _hosted_env_issues(nested.get(field), rel_label, (section, field))
+                )
+    return issues
 
 
 @lru_cache(maxsize=4)
@@ -262,6 +340,7 @@ def _folder_issues(definition: AppDefinition, components: list[dict[str, Any]]) 
     for service_name, service in services.items():
         if isinstance(service, dict) and "hooks" in service:
             issues.append(ValidationIssue("", f"{AZURE_YAML}#{pointer('services', service_name, 'hooks')}: lifecycle hooks are not allowed in a custom application."))
+    seen_agent_yamls: set[Path] = set()
     for index, component in enumerate(components):
         name = component.get("name")
         if not isinstance(name, str):
@@ -273,6 +352,42 @@ def _folder_issues(definition: AppDefinition, components: list[dict[str, Any]]) 
         expected_host = _HOST_FOR_KIND.get(component.get("kind", ""))
         if expected_host and service.get("host") != expected_host:
             issues.append(ValidationIssue(pointer("components", index, "kind"), f"{AZURE_YAML} service `{name}` must use `host: {expected_host}`."))
+        if component.get("kind") == KIND_HOSTED_AGENT:
+            for field in ("env", "environment_variables"):
+                issues.extend(
+                    _hosted_env_issues(
+                        service.get(field), AZURE_YAML, ("services", name, field)
+                    )
+                )
+            container_section = service.get("container")
+            if isinstance(container_section, dict):
+                for field in ("env", "environment_variables"):
+                    issues.extend(
+                        _hosted_env_issues(
+                            container_section.get(field),
+                            AZURE_YAML,
+                            ("services", name, "container", field),
+                        )
+                    )
+            candidate_dirs: list[Path] = [folder]
+            for rel in (component.get("path"), service.get("project")):
+                if isinstance(rel, str):
+                    resolved = (folder / rel).resolve()
+                    if resolved.is_relative_to(folder):
+                        candidate_dirs.append(resolved)
+            for candidate_dir in candidate_dirs:
+                agent_yaml = (
+                    candidate_dir
+                    if candidate_dir.is_file() and candidate_dir.name == AGENT_YAML
+                    else candidate_dir / AGENT_YAML
+                ).resolve()
+                if (
+                    agent_yaml.is_relative_to(folder)
+                    and agent_yaml.is_file()
+                    and agent_yaml not in seen_agent_yamls
+                ):
+                    seen_agent_yamls.add(agent_yaml)
+                    issues.extend(_agent_yaml_issues(agent_yaml, folder))
     return issues
 
 

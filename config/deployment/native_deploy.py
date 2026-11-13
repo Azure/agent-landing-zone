@@ -219,7 +219,9 @@ def prepare_container_apps(root: Path, environment: Mapping[str, str], *, run: R
             "--output", "json",
         ]
         response = json.loads(_run(args, cwd=root, run=run).stdout)
-        containers = response["properties"]["template"]["containers"]
+        template = response["properties"]["template"]
+        template.pop("revisionSuffix", None)
+        containers = template["containers"]
         if len(containers) != 1 or containers[0]["name"] != service:
             raise ValueError("Native Container App must have exactly its expected worker/UI container.")
         container = containers[0]

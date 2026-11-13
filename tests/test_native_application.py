@@ -332,9 +332,13 @@ def test_ca_preparation_preserves_container_environment_and_sets_official_comman
         if "show" in args:
             selected_names.append(args[args.index("--name") + 1])
             service = args[args.index("--name") + 1].rsplit("-", 1)[1]
-            doc = {"properties": {"template": {"containers": [{
-                "name": service, "env": [{"name": "UNRELATED", "value": "kept"}],
-            }]}}}
+            doc = {"properties": {"template": {
+                "revisionSuffix": f"azd-existing-{service}",
+                "scale": {"minReplicas": 1, "maxReplicas": 2},
+                "containers": [{
+                    "name": service, "env": [{"name": "UNRELATED", "value": "kept"}],
+                }],
+            }}}
             return subprocess.CompletedProcess(args, 0, json.dumps(doc), "")
         if "--yaml" in args:
             updates.append(yaml.safe_load(Path(args[args.index("--yaml") + 1]).read_text()))
@@ -349,6 +353,9 @@ def test_ca_preparation_preserves_container_environment_and_sets_official_comman
     native_deploy.prepare_container_apps(tmp_path, env, run=run)
     assert len(updates) == 2
     assert selected_names == ["custom-frontend", "custom-orchestrator"]
+    for doc in updates:
+        assert "revisionSuffix" not in doc["properties"]["template"]
+        assert doc["properties"]["template"]["scale"] == {"minReplicas": 1, "maxReplicas": 2}
     worker = updates[1]["properties"]["template"]["containers"][0]
     assert worker["command"] == ["python", "-m", "native.durable"]
     assert worker["args"] == []

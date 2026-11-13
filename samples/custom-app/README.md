@@ -6,11 +6,16 @@ application definition (`app-definition.json`, schema
 
 | Folder | Hosting | What it does |
 |---|---|---|
-| `containerapp/` | Azure Container Apps | `GET /health` and `GET /` returning the platform outputs. |
-| `hosted/` | Microsoft Foundry hosted agent | Answers the responses protocol with the Foundry project endpoint. |
+| `containerapp/` | Azure Container Apps | `GET /health` and `GET /` returning the platform outputs from App Configuration (`AGENTLZ_PLATFORM_OUTPUTS`, label `agent-lz`). |
+| `hosted/` | Microsoft Foundry hosted agent | Answers the Responses protocol with the platform-injected `FOUNDRY_PROJECT_ENDPOINT`, without requiring `APP_CONFIG_ENDPOINT`. |
 
-Both read the platform outputs contract (`AGENTLZ_PLATFORM_OUTPUTS`, label
-`agent-lz`) from App Configuration through `APP_CONFIG_ENDPOINT`.
+`hosted/` stays dependency-free for greeting smoke validation whether App
+Configuration is enabled or disabled. When graduating a hosted agent to
+production, adopt `azure-ai-agentserver-responses` so `GET /responses/{id}`
+lookups are persisted and GenAI OpenTelemetry `invoke_agent` spans are emitted
+automatically when Foundry injects `APPLICATIONINSIGHTS_CONNECTION_STRING`. Do
+not declare `FOUNDRY_*`, `AGENT_*`, or `APPLICATIONINSIGHTS_CONNECTION_STRING`
+in `azure.yaml` because Microsoft Foundry reserves those variables.
 
 ## Use
 

@@ -1,2 +1,6 @@
-azure-identity==1.25.3
-azure-appconfiguration==1.9.0
+# Minimal greeting smoke sample uses only the Python standard library so it
+# builds and runs whether Azure App Configuration is enabled or disabled.
+#
+# When graduating to a production Microsoft Foundry Hosted Agent, add:
+#   azure-ai-agentserver-responses
+#   azure-identity
