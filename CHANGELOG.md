@@ -1,5 +1,49 @@
 # Changelog
 
+## [v7.4.0] - 2026-11-13
+
+### Changed
+
+- Decouple platform deployment discovery from optional Azure App Configuration.
+  Persist dedicated `DEPLOYMENT_METADATA` for both Bicep and Terraform and use
+  the same discovery contract in PowerShell and shell lifecycle hooks.
+- Keep runtime application settings separate from platform discovery and fail
+  explicitly on missing, stale or incompatible deployment metadata.
+
+### Removed
+
+- Retire the root `OBSERVABILITY_MIXED_WORKSPACES_ALLOWED` policy output.
+  Bicep retains 64 outputs and Terraform retains 69 outputs.
+
+### Migration
+
+- Before running the new deployment hooks in an existing environment, run
+  provisioning with the same infrastructure provider to refresh deployment
+  metadata and outputs. Do not mix provider state or reuse stale discovery
+  metadata.
+- For rollback, restore the previous release and re-run provisioning with the
+  same provider before using its deployment hooks. Runtime component pins are
+  unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI run `43344871754` passed deployment and hook contracts on Linux
+  and Windows with 1865 tests passed, 17 skipped and 839 subtests per job.
+  Both Terraform jobs and Bicep build, lint and contract checks passed.
+- The release gate validates the actual loaded `app-definition.json`, exact
+  manifest component pins and incorporated-foundation component review.
+  Runtime pins, infrastructure provenance, provider lock and module pins are
+  unchanged.
+- No live Azure deployment or deployed provider-parity validation was performed.
+
 ## [v7.3.0] - 2026-11-09
 
 ### Added

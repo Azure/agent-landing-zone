@@ -37,7 +37,7 @@ try {
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
     $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
-    $selection = $actual.resources.aiFoundry.properties.parameters.aiModelDeployments
+    $selection = (ConvertTo-PreDeploymentMetadataGraph $actual).resources.aiFoundry.properties.parameters.aiModelDeployments
     Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
     Assert-ScopedValue $embeddingRule.after `
         ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `
@@ -62,6 +62,13 @@ try {
     }
 
     $mutations = @(
+        @{ Name = 'metadata extra secret field'; Change = { param($t) $t.outputs.DEPLOYMENT_METADATA.value.connectionString = 'prohibited' } },
+        @{ Name = 'metadata disabled slot lost'; Change = { param($t) $null = $t.outputs.DEPLOYMENT_METADATA.value.resources.Remove('appConfig') } },
+        @{ Name = 'metadata wrong provider'; Change = { param($t) $t.outputs.DEPLOYMENT_METADATA.value.context.provider = 'terraform' } },
+        @{ Name = 'metadata wrong application default'; Change = { param($t) $t.parameters.applicationId.defaultValue = 'another-app' } },
+        @{ Name = 'metadata application replaced by label'; Change = { param($t) $t.outputs.DEPLOYMENT_METADATA.value.context.applicationId = "[parameters('appConfigLabel')]" } },
+        @{ Name = 'metadata model default drift'; Change = { param($t) $t.variables._deploymentMetadataModels = $t.variables._deploymentMetadataModels.Replace("'capacity', 10", "'capacity', 100") } },
+        @{ Name = 'metadata old policy echo restored'; Change = { param($t) $t.outputs.OBSERVABILITY_MIXED_WORKSPACES_ALLOWED = @{ type = 'bool'; value = $true } } },
         @{ Name = 'MCP vector capability default enabled'; Change = { param($t) $t.parameters.enableCosmosVectorSearch.defaultValue = $true } },
         @{ Name = 'MCP existing capabilities discarded'; Change = { param($t) $t.resources.cosmosDBAccount.properties.parameters.capabilities.value = @('EnableServerless', 'EnableNoSQLVectorSearch') } },
         @{ Name = 'MCP vector policy dropped'; Change = { param($t) $null = $t.resources.cosmosSqlDatabase.properties.template.resources.sqlContainers.properties.resource.Remove('vectorEmbeddingPolicy') } },

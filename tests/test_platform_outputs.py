@@ -34,6 +34,14 @@ def _schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+@pytest.fixture
+def platform_cli(monkeypatch):
+    # Resource and source verification is exercised by test_deployment_metadata.
+    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment: {
+        **environment, "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
+    })
+
+
 def test_document_validates_against_published_schema():
     document = outputs.build_platform_outputs(ENVIRONMENT)
     Draft202012Validator(_schema()).validate(document)
@@ -89,7 +97,7 @@ def test_schema_violation_is_rejected():
         outputs.validate_platform_outputs(document)
 
 
-def test_cli_dry_run_writes_nothing(monkeypatch, capsys):
+def test_cli_dry_run_writes_nothing(monkeypatch, capsys, platform_cli):
     for key, value in ENVIRONMENT.items():
         monkeypatch.setenv(key, value)
     with mock.patch("config.deployment.appconfig._run_az") as run_az:
@@ -98,7 +106,7 @@ def test_cli_dry_run_writes_nothing(monkeypatch, capsys):
     assert "AGENTLZ_PLATFORM_OUTPUTS" in json.loads(capsys.readouterr().out)
 
 
-def test_cli_discovers_and_publishes_container_identity_when_map_is_absent(monkeypatch, capsys):
+def test_cli_discovers_and_publishes_container_identity_when_map_is_absent(monkeypatch, capsys, platform_cli):
     for key, value in ENVIRONMENT.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv(outputs.IDENTITIES_ENV)
@@ -114,7 +122,7 @@ def test_cli_discovers_and_publishes_container_identity_when_map_is_absent(monke
     assert settings["AGENTLZ_IDENTITY_WEB_CLIENT_ID"] == UI_CLIENT_ID
 
 
-def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, caplog):
+def test_cli_rejects_identity_discovery_failure_before_publication(monkeypatch, caplog, platform_cli):
     from config.appdefinition.roles import RoleAssignmentError
 
     for key, value in ENVIRONMENT.items():
@@ -145,7 +153,7 @@ def test_repo_root_detected_by_markers_not_folder_name(tmp_path):
 
 
 @pytest.mark.parametrize("dry_run", [True, False])
-def test_pg_discovery_is_verified_before_any_publication(monkeypatch, dry_run):
+def test_pg_discovery_is_verified_before_any_publication(monkeypatch, dry_run, platform_cli):
     for key, value in ENVIRONMENT.items():
         monkeypatch.setenv(key, value)
     with mock.patch.object(outputs, "discovery_settings", side_effect=ValueError("PostgreSQL protection incomplete")) as discovery, \
@@ -156,7 +164,7 @@ def test_pg_discovery_is_verified_before_any_publication(monkeypatch, dry_run):
 
 
 @pytest.mark.parametrize("dry_run", [True, False])
-def test_pg_keys_are_additive_and_closed_v1_is_unchanged(monkeypatch, capsys, dry_run):
+def test_pg_keys_are_additive_and_closed_v1_is_unchanged(monkeypatch, capsys, dry_run, platform_cli):
     for key, value in ENVIRONMENT.items():
         monkeypatch.setenv(key, value)
     pg_settings = {
@@ -198,3 +206,33 @@ def test_pg_publication_uses_real_cli_exit_status_not_stdout(monkeypatch, exit_c
     else:
         outputs.publish(ENVIRONMENT["APP_CONFIG_ENDPOINT"], {"AGENTLZ_POSTGRESQL_PORT": "5432"})
     assert calls[0][-2:] == ["--output", "none"]
+
+
+@pytest.mark.parametrize("mode", ["containerEnv", "none"])
+def test_store_free_foundation_does_not_publish_runtime(monkeypatch, mode):
+    monkeypatch.setenv("AZURE_RESOURCE_GROUP", "rg-test")
+    monkeypatch.delenv("APP_CONFIG_ENDPOINT", raising=False)
+    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment: {
+        **environment, "APP_RUNTIME_CONFIGURATION_MODE": mode,
+    })
+    with mock.patch.object(outputs, "publish") as publish, \
+            mock.patch.object(outputs, "build_platform_outputs") as build:
+        assert outputs.main([]) == 0
+    publish.assert_not_called()
+    build.assert_not_called()
+
+
+def test_platform_environment_uses_fresh_output_not_store(monkeypatch):
+    from config.deployment.metadata import VerifiedMetadata
+
+    document = json.loads((
+        REPO_ROOT / "specs" / "006-optional-app-configuration" / "contracts" / "containerenv.example.json"
+    ).read_text(encoding="utf-8"))
+    verified = VerifiedMetadata(document, {"AZURE_ENV_NAME": "example"}, {}, {})
+    loader = mock.Mock(return_value=verified)
+    monkeypatch.setattr(outputs, "load_metadata", loader)
+    with mock.patch("config.deployment.appconfig._run_az", side_effect=AssertionError("store discovery")):
+        values = outputs.load_platform_environment({"AZURE_ENV_NAME": "example"})
+    assert values["AI_FOUNDRY_ACCOUNT_NAME"] == "example-foundry"
+    assert "APP_CONFIG_ENDPOINT" not in values
+    loader.assert_called_once_with({"AZURE_ENV_NAME": "example"})

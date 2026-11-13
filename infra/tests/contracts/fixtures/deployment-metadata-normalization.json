@@ -1,0 +1,17 @@
+{
+  "description": "ADR-0041 approved exact output replacement, typed selected application ID and shared native model selection; Bicep 0.42.1. No historical fixture is regenerated.",
+  "outputSha256": "d6acc021b89a47ec5be94ed23e0ba511e16960cdb10e427b6fb3291a01d0ea44",
+  "modelsSha256": "b4ad6537759de083d2d1f3c9e93da7b8c6f4d20395b5233ea15c5545b9c1ee18",
+  "applicationIdParameter": {
+    "type": "string",
+    "defaultValue": "agent-lz-default",
+    "minLength": 1,
+    "metadata": {
+      "description": "Selected application definition ID, independent of the App Configuration label."
+    }
+  },
+  "retiredOutput": {
+    "type": "bool",
+    "value": "[parameters('allowMixedObservabilityWorkspaces')]"
+  }
+}

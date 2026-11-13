@@ -291,7 +291,16 @@ class NativeSearchTransportTests(unittest.TestCase):
         }
 
     def discover(self, **overrides):
-        return access.discover({**ACCESS_ENV, **overrides}, run=self.azure)
+        selected = {
+            key: row["value"] for key, row in self.azure.settings.items()
+            if key in {
+                "RETRIEVAL_BACKEND", "SEARCH_SERVICE_RESOURCE_ID",
+                "SEARCH_SERVICE_NAME", "SEARCH_SERVICE_QUERY_ENDPOINT",
+                "AI_FOUNDRY_PROJECT_RESOURCE_ID", "AI_FOUNDRY_PROJECT_ENDPOINT",
+                "KNOWLEDGE_BASE_NAME", "TOOLBOX_ENDPOINT",
+            }
+        }
+        return access.discover({**ACCESS_ENV, **selected, **overrides}, run=self.azure)
 
     def test_existing_bootstrap_adds_only_exact_search_transport_for_actual_instance(self):
         plan = self.discover()
@@ -354,9 +363,13 @@ class NativeSearchTransportTests(unittest.TestCase):
         self.azure.settings["SEARCH_SERVICE_RESOURCE_ID"]["value"] = SEARCH.replace(
             "test-group", foundry_group
         )
+        self.azure.settings["AI_FOUNDRY_PROJECT_RESOURCE_ID"]["value"] = PROJECT.replace(
+            "test-group", foundry_group
+        )
         plan = self.discover(
             AZURE_RESOURCE_GROUP=foundry_group, AZURE_APP_RESOURCE_GROUP="test-group",
             AZURE_AI_PROJECT_RESOURCE_ID=PROJECT.replace("test-group", foundry_group),
+            AI_FOUNDRY_ACCOUNT_RESOURCE_ID=MODEL.replace("test-group", foundry_group),
         )
         self.assertEqual(
             SEARCH.replace("test-group", foundry_group),
@@ -378,7 +391,9 @@ class NativeSearchTransportTests(unittest.TestCase):
                 finally:
                     self.azure.settings[key] = row
         del self.azure.settings["RETRIEVAL_BACKEND"]
-        with self.assertRaisesRegex(access.AccessError, "RETRIEVAL_BACKEND"):
+        self.assertFalse(self.discover().search_transport)
+        del self.azure.settings["SEARCH_SERVICE_RESOURCE_ID"]
+        with self.assertRaises(access.AccessError):
             self.discover(RETRIEVAL_BACKEND="foundry_iq")
         self.assertEqual([], self.azure.writes)
 
@@ -420,7 +435,7 @@ class NativeSearchTransportTests(unittest.TestCase):
 
     def test_environment_and_persisted_binding_conflicts_fail_closed(self):
         for overrides in (
-            {"RETRIEVAL_BACKEND": "foundry_iq"}, {"SEARCH_SERVICE_RESOURCE_ID": MODEL},
+            {"RETRIEVAL_BACKEND": "unsupported"}, {"SEARCH_SERVICE_RESOURCE_ID": MODEL},
             {"SEARCH_SERVICE_ENDPOINT": "https://other.search.windows.net"},
             {"RETRIEVAL_AUTH_MODE": "foundry_toolbox"},
         ):

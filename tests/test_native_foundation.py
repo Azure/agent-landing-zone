@@ -40,6 +40,23 @@ def test_real_scheduler_hub_outputs_and_network_gates_in_compiled_foundation(com
     assert "durableTask" in compiled["outputs"]["HOSTED_AGENT_DEPLOYMENT"]["value"]
 
 
+def test_dedicated_metadata_closed_sections_and_output_budget(compiled):
+    outputs = compiled["outputs"]
+    assert len(outputs) == 64
+    assert "OBSERVABILITY_MIXED_WORKSPACES_ALLOWED" not in outputs
+    metadata = outputs["DEPLOYMENT_METADATA"]
+    assert metadata["type"] == "object"
+    assert set(metadata["value"]) == {
+        "schemaVersion", "context", "resources", "modelDeployments",
+        "containerApps", "dataResources",
+    }
+    assert metadata["value"]["schemaVersion"] == 1
+    assert metadata["value"]["context"]["provider"] == "bicep"
+    schema = json.loads((ROOT / "contracts/deployment-metadata-v1.schema.json").read_text())
+    assert set(metadata["value"]["resources"]) == set(schema["properties"]["resources"]["required"])
+    assert "DEPLOYMENT_METADATA" not in outputs["HOSTED_AGENT_DEPLOYMENT"]["value"]
+
+
 def test_terraform_real_scheduler_hub_mi_and_ingress_counterpart():
     text = (ROOT / "infra/terraform/main.durable.tf").read_text()
     assert 'Microsoft.DurableTask/schedulers@2026-02-01' in text
@@ -67,3 +84,35 @@ def test_private_scheduler_contract_both_providers_and_no_new_execution_store():
     module = (ROOT / "infra/bicep/modules/application/durable-task.bicep").read_text()
     assert "Microsoft.Web/sites" not in module and "Microsoft.Cache" not in module
     assert "Microsoft.DocumentDB" not in module
+
+
+def test_native_init_checks_existing_backend_without_state_parsing(tmp_path):
+    """Terraform, not Python, compares the initialized backend binding."""
+    import os
+
+    executable = shutil.which("terraform")
+    if not executable:
+        pytest.skip("Terraform not installed")
+    module = tmp_path / "infra"
+    module.mkdir()
+    (module / "main.tf").write_text('terraform {\n  backend "local" {}\n}\n')
+    data = tmp_path / ".azure" / "contract" / "infra" / ".terraform"
+    config = tmp_path / "backend.conf.json"
+    config.write_text(json.dumps({"path": str(tmp_path / "original.tfstate")}))
+    env = dict(os.environ, TF_DATA_DIR=str(data), TF_IN_AUTOMATION="1")
+    command = [executable, f"-chdir={module}", "init", "-input=false",
+               "-get=false", "-lockfile=readonly", f"-backend-config={config}"]
+    first = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert first.returncode == 0, first.stderr
+    assert data.is_dir()
+    same = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert same.returncode == 0, same.stderr
+    config.write_text(json.dumps({"path": str(tmp_path / "different.tfstate")}))
+    mismatch = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert mismatch.returncode != 0
+    assert "Backend configuration changed" in mismatch.stderr
+    # Restoring only the declared config succeeds: no migration/reconfigure took
+    # place. No test or loader opens native state, including backend metadata.
+    config.write_text(json.dumps({"path": str(tmp_path / "original.tfstate")}))
+    restored = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert restored.returncode == 0, restored.stderr

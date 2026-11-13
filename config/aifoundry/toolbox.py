@@ -12,7 +12,7 @@ from azure.identity import (
     ManagedIdentityCredential,
 )
 
-from .appconfig import AppConfigClient
+from config.deployment.setup_settings import load_setup_settings
 
 SETTINGS = (
     "RETRIEVAL_BACKEND",
@@ -77,8 +77,7 @@ class KnowledgeToolbox:
 
 
 def main() -> None:
-    config = AppConfigClient()
-    binding = KnowledgeToolbox.read({key: config.get(key) for key in SETTINGS if config.get(key) is not None})
+    binding = KnowledgeToolbox.read(load_setup_settings())
     if binding is None:
         return
     with (

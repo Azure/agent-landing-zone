@@ -72,8 +72,10 @@ class LifecycleParityTests(unittest.TestCase):
         for stem in ("preProvision", "preDeploy", "postProvision"):
             for extension in ("ps1", "sh"):
                 content = (ROOT / "scripts" / f"{stem}.{extension}").read_text(encoding="utf-8-sig")
-                if stem != "postProvision" or extension == "ps1":
-                    self.assertIn("config.deployment.topology", content)
+                self.assertIn(
+                    "config.deployment.metadata" if stem == "postProvision" else "config.deployment.topology",
+                    content,
+                )
                 for obsolete in (
                     "PRESERVE_CLASSIC_RUNTIME", "HOSTED_CUTOVER_COMPLETE",
                     "DEPLOYMENT_TOPOLOGY", "DEPLOY_ADMINISTRATIVE_PANEL",

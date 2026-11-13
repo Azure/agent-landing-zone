@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Azure/agent-landing-zone/specs/006-optional-app-configuration/contracts/deployment-metadata-v1.schema.json",
+  "title": "Proposed Agent Landing Zone deployment metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "context", "resources", "modelDeployments", "containerApps", "dataResources"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environmentName", "provider", "tenantId", "subscriptionId", "deploymentName", "resourceGroups", "applicationId", "runtimeConfigurationMode"],
+      "properties": {
+        "environmentName": { "$ref": "#/$defs/nonempty" },
+        "provider": { "enum": ["bicep", "terraform"] },
+        "tenantId": { "$ref": "#/$defs/uuid" },
+        "subscriptionId": { "$ref": "#/$defs/uuid" },
+        "deploymentName": { "$ref": "#/$defs/nonempty" },
+        "applicationId": { "$ref": "#/$defs/nonempty" },
+        "runtimeConfigurationMode": { "enum": ["appConfig", "containerEnv", "none"] },
+        "resourceGroups": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["foundry", "application", "network"],
+          "properties": {
+            "foundry": { "$ref": "#/$defs/nonempty" },
+            "application": { "$ref": "#/$defs/nonempty" },
+            "network": { "$ref": "#/$defs/nonempty" }
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["foundryAccount", "foundryProject", "registry", "appConfig", "keyVault", "storage", "search", "cosmos", "containerEnvironment", "network", "speech", "logAnalytics", "appInsights"],
+      "properties": {
+        "foundryAccount": { "$ref": "#/$defs/resourceSlot" },
+        "foundryProject": { "$ref": "#/$defs/resourceSlot" },
+        "registry": { "$ref": "#/$defs/resourceSlot" },
+        "appConfig": { "$ref": "#/$defs/resourceSlot" },
+        "keyVault": { "$ref": "#/$defs/resourceSlot" },
+        "storage": { "$ref": "#/$defs/resourceSlot" },
+        "search": { "$ref": "#/$defs/resourceSlot" },
+        "cosmos": { "$ref": "#/$defs/resourceSlot" },
+        "containerEnvironment": { "$ref": "#/$defs/resourceSlot" },
+        "network": { "$ref": "#/$defs/resourceSlot" },
+        "speech": { "$ref": "#/$defs/resourceSlot" },
+        "logAnalytics": { "$ref": "#/$defs/resourceSlot" },
+        "appInsights": { "$ref": "#/$defs/resourceSlot" }
+      }
+    },
+    "modelDeployments": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["canonicalName", "resourceId", "name", "model", "apiVersion", "endpoint"],
+        "properties": {
+          "canonicalName": { "$ref": "#/$defs/canonicalName" },
+          "resourceId": { "$ref": "#/$defs/armId" },
+          "name": { "$ref": "#/$defs/nonempty" },
+          "apiVersion": { "$ref": "#/$defs/nonempty" },
+          "endpoint": { "$ref": "#/$defs/endpoint" },
+          "model": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["format", "name", "version"],
+            "properties": {
+              "format": { "$ref": "#/$defs/nonempty" },
+              "name": { "$ref": "#/$defs/nonempty" },
+              "version": { "$ref": "#/$defs/nonempty" }
+            }
+          }
+        }
+      }
+    },
+    "containerApps": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["canonicalName", "serviceName", "resourceId", "name", "fqdn", "identity"],
+        "properties": {
+          "canonicalName": { "$ref": "#/$defs/canonicalName" },
+          "serviceName": { "$ref": "#/$defs/nonempty" },
+          "resourceId": { "$ref": "#/$defs/armId" },
+          "name": { "$ref": "#/$defs/nonempty" },
+          "fqdn": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" }
+            ]
+          },
+          "identity": { "$ref": "#/$defs/identity" }
+        }
+      }
+    },
+    "dataResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storageContainers", "cosmosDatabases", "cosmosContainers"],
+      "properties": {
+        "storageContainers": { "$ref": "#/$defs/children" },
+        "cosmosDatabases": { "$ref": "#/$defs/children" },
+        "cosmosContainers": { "$ref": "#/$defs/children" }
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1, "pattern": "^[^\\u0000]+$" },
+    "canonicalName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "armId": {
+      "type": "string",
+      "pattern": "^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/[^/?#\\s]+/providers/[A-Za-z0-9.]+/[^?#\\s]+$"
+    },
+    "endpoint": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://[A-Za-z0-9.-]+(?::443)?(?:/[^?#@\\s]*)?$"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "name", "endpoint"],
+      "properties": {
+        "resourceId": { "$ref": "#/$defs/armId" },
+        "name": { "$ref": "#/$defs/nonempty" },
+        "endpoint": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/endpoint" }
+          ]
+        }
+      }
+    },
+    "resourceSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "resource"],
+      "properties": {
+        "status": { "enum": ["disabled", "managed", "referenced"] },
+        "resource": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/resource" }
+          ]
+        }
+      },
+      "if": { "properties": { "status": { "const": "disabled" } } },
+      "then": { "properties": { "resource": { "type": "null" } } },
+      "else": { "properties": { "resource": { "$ref": "#/$defs/resource" } } }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "principalId", "clientId", "resourceId"],
+      "properties": {
+        "kind": { "enum": ["systemAssigned", "userAssigned"] },
+        "principalId": { "$ref": "#/$defs/uuid" },
+        "clientId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/uuid" }
+          ]
+        },
+        "resourceId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/armId" }
+          ]
+        }
+      },
+      "if": { "properties": { "kind": { "const": "userAssigned" } } },
+      "then": {
+        "properties": {
+          "clientId": { "$ref": "#/$defs/uuid" },
+          "resourceId": { "$ref": "#/$defs/armId" }
+        }
+      },
+      "else": {
+        "properties": {
+          "clientId": { "type": "null" },
+          "resourceId": { "type": "null" }
+        }
+      }
+    },
+    "children": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["canonicalName", "resourceId", "name"],
+        "properties": {
+          "canonicalName": { "$ref": "#/$defs/canonicalName" },
+          "resourceId": { "$ref": "#/$defs/armId" },
+          "name": { "$ref": "#/$defs/nonempty" }
+        }
+      }
+    }
+  }
+}

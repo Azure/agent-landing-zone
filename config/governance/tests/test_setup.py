@@ -191,6 +191,14 @@ class GovernanceSetupTests(TestCase):
         app_config_client.get_configuration_setting.side_effect = get_setting
         with patch.object(
             setup,
+            "load_setup_settings",
+            return_value={
+                "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
+                "APP_CONFIG_ENDPOINT": "https://config.azconfig.io",
+                "DEPLOY_KEY_VAULT": "false",
+            },
+        ), patch.object(
+            setup,
             "AzureAppConfigurationClient",
             return_value=app_config_client,
         ), patch.dict(

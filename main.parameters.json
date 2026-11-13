@@ -32,6 +32,7 @@
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
     "principalType":                       { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
     "appConfigLabel":                      { "value": "agent-lz" },
+    "applicationId":                       { "value": "${AGENTLZ_APP_ID=agent-lz-default}" },
 
     "networkIsolation":                    { "value": "${NETWORK_ISOLATION}" },
     "allowedIpRanges":                     { "value": [] },

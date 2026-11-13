@@ -133,6 +133,16 @@ variable "appConfigLabel" {
   default  = "agent-lz"
   nullable = false
 }
+variable "applicationId" {
+  description = "Selected application definition ID, independent of the App Configuration label."
+  type        = string
+  default     = "agent-lz-default"
+  nullable    = false
+  validation {
+    condition     = length(var.applicationId) > 0
+    error_message = "applicationId must not be empty."
+  }
+}
 variable "additionalAppConfigurationSettings" {
   type = list(object({
     name        = string

@@ -22,6 +22,7 @@ from config.appdefinition import (
     resolve_env_name,
 )
 from config.appdefinition.__main__ import main as cli_main
+from config.deployment.metadata import MetadataError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -100,6 +101,47 @@ class DefinitionSelectionTests(unittest.TestCase):
             resolve_definition_path({"AGENTLZ_APP_DEFINITION": "does/not/exist"}, ROOT)
         self.assertIn("AGENTLZ_APP_DEFINITION", str(raised.exception))
         self.assertIn("does/not/exist", str(raised.exception))
+
+
+class DirectRoleEntryTests(unittest.TestCase):
+    def test_metadata_rejection_prevents_role_assignments(self):
+        for field in ("source.missing", "source.stale", "context.environmentName",
+                      "resourceGroups", "resource.identity", "containerApps.identity"):
+            with (
+                self.subTest(field=field),
+                patch("config.deployment.setup_settings.load_setup_environment",
+                      side_effect=MetadataError(field + ": Restore selected metadata.")),
+                patch("config.appdefinition.roles.assign_roles") as assign,
+                self.assertLogs("config.appdefinition", "ERROR"),
+            ):
+                self.assertEqual(3, cli_main(["--assign-roles"]))
+            assign.assert_not_called()
+
+    def test_roles_use_verified_selection_not_caller_mode_or_destinations(self):
+        verified = {
+            "AGENTLZ_APP_ID": "agent-lz-default",
+            "ORCHESTRATION_HOST": "container_apps",
+            "APP_RUNTIME_CONFIGURATION_MODE": "none",
+            "AZURE_RESOURCE_GROUP": "verified-group",
+        }
+        with (
+            patch.dict(os.environ, {"ORCHESTRATION_HOST": "hosted", "AZURE_RESOURCE_GROUP": "foreign"}),
+            patch("config.deployment.setup_settings.load_setup_environment", return_value=verified),
+            patch("config.appdefinition.roles.assign_roles", return_value=[]) as assign,
+        ):
+            self.assertEqual(0, cli_main(["--assign-roles"]))
+        self.assertEqual(assign.call_args.args[1], verified)
+        self.assertFalse(assign.call_args.kwargs["hosted_orchestration"])
+
+    def test_different_application_cannot_receive_selected_foundation_roles(self):
+        with (
+            patch("config.deployment.setup_settings.load_setup_environment",
+                  return_value={"AGENTLZ_APP_ID": "another-application"}),
+            patch("config.appdefinition.roles.assign_roles") as assign,
+            self.assertLogs("config.appdefinition", "ERROR"),
+        ):
+            self.assertEqual(3, cli_main(["--assign-roles"]))
+        assign.assert_not_called()
 
 
 if __name__ == "__main__":

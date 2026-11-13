@@ -91,6 +91,10 @@ param deploymentTags object = {}
 @description('Label used for App Configuration key-value pairs.')
 param appConfigLabel string = 'ai-lz'
 
+@description('Selected application definition ID, independent of the App Configuration label.')
+@minLength(1)
+param applicationId string = 'agent-lz-default'
+
 @description('Optional. Accelerator-specific App Configuration key-values appended verbatim to the App Configuration store. This lets a consuming accelerator publish its own settings without the landing zone needing to know about them. Values are stored as plaintext in App Configuration, so never pass secrets here (use Key Vault references instead). Each entry must have a unique name+label. On a name+label collision with a workload configuration key the landing zone already emits, the passthrough entry wins. Do not redefine reserved infrastructure keys emitted by other modules (the Cosmos identifiers COSMOS_DB_ACCOUNT_RESOURCE_ID and COSMOS_DB_ENDPOINT, and the per-app <APP>_APIKEY Key Vault references); reusing those names would create a duplicate key-value and fail the deployment. Note: this is only applied on non network-isolated deployments, where the landing zone writes App Configuration at deploy time. Network-isolated deployments configure App Configuration from the accelerator post-provision step, so pass these values through that path instead.')
 param additionalAppConfigurationSettings additionalAppConfigurationSettingType[] = []
 
@@ -2708,34 +2712,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
         : null
     }
 
-    aiModelDeployments: !empty(modelDeploymentList)
-      ? modelDeploymentList
-      : [
-          {
-            model: {
-              format: 'OpenAI'
-              name: 'gpt-5-nano'
-              version: '2025-08-07'
-            }
-            name: 'gpt-5-nano'
-            sku: {
-              name: 'GlobalStandard'
-              capacity: 40
-            }
-          }
-          {
-            model: {
-              format: 'OpenAI'
-              name: 'text-embedding-3-large'
-              version: '1'
-            }
-            name: 'text-embedding-3-large'
-            sku: {
-              name: 'GlobalStandard'
-              capacity: 10
-            }
-          }
-        ]
+    aiModelDeployments: _deploymentMetadataModels
 
     aiSearchConfiguration: varAfAiSearchCfgComplete
     cosmosDbConfiguration: varAfCosmosCfgComplete
@@ -2814,6 +2791,33 @@ var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
   blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : null
   roleAssignments: []
 } : {}
+
+var _deploymentMetadataModels = !empty(modelDeploymentList) ? modelDeploymentList : [
+  {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-5-nano'
+      version: '2025-08-07'
+    }
+    name: 'gpt-5-nano'
+    sku: {
+      name: 'GlobalStandard'
+      capacity: 40
+    }
+  }
+  {
+    model: {
+      format: 'OpenAI'
+      name: 'text-embedding-3-large'
+      version: '1'
+    }
+    name: 'text-embedding-3-large'
+    sku: {
+      name: 'GlobalStandard'
+      capacity: 10
+    }
+  }
+]
 
 var aiFoundryAccountResourceId = aiFoundry!.outputs.accountResourceId
 
@@ -4522,9 +4526,187 @@ output KEY_VAULT_NAME string = deployKeyVault ? resourceNames.keyVaultName : ''
 #disable-next-line BCP318
 output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
 output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId
-output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWorkspaces
 #disable-next-line BCP318
 output CONTAINER_APP_INTERNAL_FQDN string = (_deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
+
+// Independently versioned discovery contract. Only public, selected resource
+// leaves belong here, never module response bags or runtime settings.
+output DEPLOYMENT_METADATA object = {
+  schemaVersion: 1
+  context: {
+    environmentName: environmentName
+    provider: 'bicep'
+    tenantId: tenant().tenantId
+    subscriptionId: subscription().subscriptionId
+    deploymentName: deployment().name
+    resourceGroups: {
+      foundry: resourceGroup().name
+      application: _applicationResourceGroupName
+      network: _networkResourceGroupName
+    }
+    applicationId: applicationId
+    runtimeConfigurationMode: appRuntimeConfigurationMode
+  }
+  resources: {
+    foundryAccount: {
+      status: deployAiFoundry ? 'managed' : 'disabled'
+      resource: deployAiFoundry ? {
+        resourceId: aiFoundryAccountResourceId
+        name: aiFoundry!.outputs.aiServicesName
+        endpoint: aiFoundryAccountEndpoint
+      } : null
+    }
+    foundryProject: {
+      status: deployAiFoundry && deployAfProject ? 'managed' : 'disabled'
+      resource: deployAiFoundry && deployAfProject ? {
+        resourceId: aiFoundryProjectResourceId
+        name: aiFoundry!.outputs.aiProjectName
+        endpoint: aiFoundryProjectEndpoint
+      } : null
+    }
+    registry: {
+      status: deployContainerRegistry ? 'managed' : (_hostedAgentPrerequisitesEnabled ? 'referenced' : 'disabled')
+      resource: deployContainerRegistry || _hostedAgentPrerequisitesEnabled ? {
+        resourceId: _hostedAgentContainerRegistryResourceId
+        name: last(split(_hostedAgentContainerRegistryResourceId, '/'))
+        endpoint: 'https://${_hostedAgentContainerRegistryEndpoint}'
+      } : null
+    }
+    appConfig: {
+      status: deployAppConfig ? 'managed' : 'disabled'
+      resource: deployAppConfig ? {
+        resourceId: appConfig.outputs.resourceId
+        name: resourceNames.appConfigName
+        endpoint: appConfig.outputs.properties.endpoint
+      } : null
+    }
+    keyVault: {
+      status: deployKeyVault ? 'managed' : 'disabled'
+      resource: deployKeyVault ? {
+        resourceId: keyVault!.outputs.resourceId
+        name: resourceNames.keyVaultName
+        endpoint: keyVault!.outputs.properties.vaultUri
+      } : null
+    }
+    storage: {
+      status: deployStorageAccount ? 'managed' : 'disabled'
+      resource: deployStorageAccount ? {
+        resourceId: storageAccount.outputs.resourceId
+        name: resourceNames.storageAccountName
+        endpoint: storageAccount.outputs.primaryBlobEndpoint
+      } : null
+    }
+    search: {
+      status: deploySearchService ? 'managed' : 'disabled'
+      resource: deploySearchService ? {
+        resourceId: searchService.outputs.resourceId
+        name: resourceNames.searchServiceName
+        endpoint: searchService.outputs.endpoint
+      } : null
+    }
+    cosmos: {
+      status: deployCosmosDb ? 'managed' : 'disabled'
+      resource: deployCosmosDb ? {
+        resourceId: cosmosDBAccount.outputs.resourceId
+        name: cosmosDBAccount.outputs.name
+        endpoint: cosmosDBAccount.outputs.endpoint
+      } : null
+    }
+    containerEnvironment: {
+      status: deployContainerEnv ? 'managed' : 'disabled'
+      resource: deployContainerEnv ? {
+        resourceId: containerEnv.outputs.resourceId
+        name: resourceNames.containerEnvName
+        endpoint: null
+      } : null
+    }
+    network: {
+      status: empty(virtualNetworkResourceId) ? 'disabled' : (useExistingVNet ? 'referenced' : 'managed')
+      resource: !empty(virtualNetworkResourceId) ? {
+        resourceId: virtualNetworkResourceId
+        name: last(split(virtualNetworkResourceId, '/'))
+        endpoint: null
+      } : null
+    }
+    speech: {
+      status: deploySpeechService ? 'managed' : 'disabled'
+      resource: deploySpeechService ? {
+        resourceId: speechService.outputs.resourceId
+        name: resourceNames.speechServiceName
+        endpoint: speechService.outputs.endpoint
+      } : null
+    }
+    logAnalytics: {
+      status: !_hasEffectiveLaw ? 'disabled' : (_createLogAnalytics ? 'managed' : 'referenced')
+      resource: _hasEffectiveLaw ? {
+        resourceId: _lawResourceId
+        name: last(split(_lawResourceId, '/'))
+        endpoint: null
+      } : null
+    }
+    appInsights: {
+      status: !_hasEffectiveAI ? 'disabled' : (_createAppInsights ? 'managed' : 'referenced')
+      resource: _hasEffectiveAI ? {
+        resourceId: _appInsightsResourceId
+        name: last(split(_appInsightsResourceId, '/'))
+        endpoint: null
+      } : null
+    }
+  }
+  modelDeployments: _deploymentMetadataModelBindings
+  containerApps: _deploymentMetadataAppBindings
+  dataResources: {
+    storageContainers: _deploymentMetadataStorageBindings
+    cosmosDatabases: deployCosmosDb ? [{
+      canonicalName: 'DATABASE_NAME'
+      resourceId: '${cosmosDBAccount.outputs.resourceId}/sqlDatabases/${resourceNames.dbDatabaseName}'
+      name: resourceNames.dbDatabaseName
+    }] : []
+    cosmosContainers: _deploymentMetadataCosmosBindings
+  }
+}
+
+var _deploymentMetadataModelBindings = map(deployAiFoundry ? _deploymentMetadataModels : [], (model, index) => {
+  canonicalName: empty(modelDeploymentList) ? (index == 0 ? 'GPT_MODEL' : 'EMBEDDING_MODEL') : model.canonical_name
+  resourceId: '${aiFoundryAccountResourceId}/deployments/${model.name}'
+  name: model.name
+  model: {
+    format: model.model.format
+    name: model.model.name
+    version: model.model.version
+  }
+  apiVersion: model.?apiVersion ?? '2025-01-01-preview'
+  endpoint: 'https://${aiFoundry!.outputs.aiServicesName}.openai.azure.com/'
+})
+// Symbolic collection references preserve the evaluated module bindings.
+var _deploymentMetadataAppBindings = map(containerApps, (app, index) => {
+  canonicalName: containerAppsList[index].canonical_name
+  serviceName: containerAppsList[index].service_name
+  resourceId: app.outputs.resourceId
+  name: app.outputs.name
+  fqdn: empty(app.outputs.fqdn) ? null : app.outputs.fqdn
+  identity: {
+    kind: _useUAI ? 'userAssigned' : 'systemAssigned'
+    principalId: _useUAI ? _deploymentMetadataAppIdentities[index].principalId : app.outputs.systemAssignedMIPrincipalId
+    clientId: _useUAI ? _deploymentMetadataAppIdentities[index].clientId : null
+    resourceId: _useUAI ? _deploymentMetadataAppIdentities[index].resourceId : null
+  }
+})
+var _deploymentMetadataAppIdentities = map(containerAppsUAI, identity => {
+  principalId: identity.outputs.principalId
+  clientId: identity.outputs.clientId
+  resourceId: identity.outputs.resourceId
+})
+var _deploymentMetadataStorageBindings = map(deployStorageAccount ? storageAccountContainersList : [], container => {
+  canonicalName: container.canonical_name
+  resourceId: '${storageAccount.outputs.resourceId}/blobServices/default/containers/${container.name}'
+  name: container.name
+})
+var _deploymentMetadataCosmosBindings = map(deployCosmosDb ? databaseContainersList : [], container => {
+  canonicalName: container.canonical_name
+  resourceId: '${cosmosDBAccount.outputs.resourceId}/sqlDatabases/${resourceNames.dbDatabaseName}/containers/${container.name}'
+  name: container.name
+})
 
 // Microsoft Foundry hosted-agent deployment handoff. The actual agent version,
 // dedicated agent identity, and invocation endpoint are data-plane resources

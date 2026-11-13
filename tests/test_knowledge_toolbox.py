@@ -116,6 +116,20 @@ def test_failed_registration_never_promotes_or_retries_without_its_connection():
     client.toolboxes.update.assert_not_called()
 
 
+def test_store_free_entrypoint_provisions_verified_toolbox():
+    from config.aifoundry import toolbox
+    with (
+        patch.object(toolbox, "load_setup_settings", return_value=BASE) as loader,
+        patch.object(toolbox, "ChainedTokenCredential"),
+        patch.object(toolbox, "AIProjectClient") as projects,
+    ):
+        toolbox.main()
+    loader.assert_called_once_with()
+    client = projects.return_value.__enter__.return_value
+    client.toolboxes.create_version.assert_called_once()
+    client.toolboxes.update.assert_called_once()
+
+
 def test_hooks_order_and_provider_binding_publication_are_coherent():
     root = Path(__file__).resolve().parents[1]
     for path in ("scripts/postProvision.ps1", "scripts/postProvision.sh"):

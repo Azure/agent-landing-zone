@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from config.deployment.context import context_settings, registry_resource_group
-from config.deployment import outputs
+from config.deployment import metadata as deployment_metadata, outputs
 
 SUB = "11111111-1111-1111-1111-111111111111"
 BASE = {
@@ -27,6 +27,62 @@ BASE = {
     "AZURE_AI_PROJECT_RESOURCE_ID": f"/subscriptions/{SUB}/resourceGroups/rg-ai/providers/Microsoft.CognitiveServices/accounts/account/projects/project",
     "AZURE_AI_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/project",
 }
+
+
+@pytest.mark.parametrize("failure", ["missing", "stale", "environment", "group", "resource", "identity"])
+def test_direct_role_entry_rejects_invalid_native_metadata_before_assignment(failure, caplog):
+    from config.appdefinition.__main__ import main
+
+    root = Path(__file__).resolve().parents[1]
+    document = json.loads((root / "tests" / "fixtures" / "deployment-metadata-v1.json").read_text(encoding="utf-8"))
+    document["context"]["applicationId"] = "agent-lz-default"
+    selected = {
+        **deployment_metadata.aliases(document), "AGENTLZ_APP_DEFINITION": "",
+        "ORCHESTRATION_HOST": "container_apps", "DEPLOYMENT_METADATA": json.dumps(document),
+    }
+    bound = deployment_metadata.resolve_resource_groups(selected)
+    if failure == "missing":
+        document = None
+    elif failure == "stale":
+        document["context"]["deploymentName"] = "stale-foundation"
+    elif failure == "environment":
+        document["context"]["environmentName"] = "foreign"
+    elif failure == "group":
+        selected["AZURE_APP_RESOURCE_GROUP"] = "foreign"
+    elif failure == "resource":
+        resource = document["resources"]["registry"]["resource"]
+        resource["resourceId"] = resource["resourceId"].replace("/rg-example-app/", "/foreign/")
+    else:
+        document["containerApps"][0]["identity"]["principalId"] = "55555555-5555-5555-5555-555555555555"
+
+    read_native = deployment_metadata.read_bicep
+
+    def run(command, **kwargs):
+        assert command[1:4] == ["deployment", "group", "show"]
+        return "Succeeded" if command[-1] == "properties.provisioningState" else document
+
+    with (
+        patch.dict(os.environ, selected, clear=True),
+        patch.object(deployment_metadata, "selected_environment", return_value=selected),
+        patch.object(deployment_metadata, "resolve_provider", return_value={"provider": "bicep"}),
+        patch.object(deployment_metadata, "resolve_az_command", return_value="az"),
+        patch.object(deployment_metadata, "read_binding", return_value=bound),
+        patch.object(deployment_metadata, "resolve_declared_parameters", return_value={
+            "appRuntimeConfigurationMode": "containerEnv",
+        }),
+        patch.object(deployment_metadata, "read_bicep", side_effect=lambda env, runner: read_native(env, run)),
+        patch("config.appdefinition.roles.assign_roles") as assign,
+    ):
+        assert main(["--assign-roles"]) == 3
+    assert "Capability-profile role assignment failed" in caplog.text
+    expected_error = {
+        "missing": "source: Missing DEPLOYMENT_METADATA",
+        "stale": "context.deploymentName", "environment": "context.environmentName",
+        "group": "selection: Invalid declared inputs", "resource": "cache: Stale saved metadata",
+        "identity": "cache: Stale saved metadata",
+    }[failure]
+    assert expected_error in caplog.text
+    assign.assert_not_called()
 
 
 @pytest.mark.parametrize("application,network", [("", ""), ("rg-app", ""), ("rg-app", "rg-net"), ("RG-AI", "rg-ai")])
@@ -74,7 +130,9 @@ def test_explicit_acr_id_does_not_use_foundry_group():
 def test_postprovision_registry_lookup_supports_isolated_python(tmp_path, external_registry):
     root = Path(__file__).resolve().parents[1]
     source = (root / "scripts" / "postProvision.ps1").read_text(encoding="utf-8-sig")
-    code = re.search(r'& python -c "([^"\n]*registry_resource_group[^"\n]*)"', source)
+    # Discovery moved to Python. Exercise the shipped import bootstrap under
+    # isolated Python, then the same shared destination resolver used by setup.
+    code = re.search(r'& python -c "([^"\n]*sys\.path\.insert[^"\n]*)"', source)
     assert code is not None
     environment = {**os.environ, **BASE, "AGENTLZ_REPO_ROOT": str(root)}
     for key in (
@@ -91,7 +149,10 @@ def test_postprovision_registry_lookup_supports_isolated_python(tmp_path, extern
             ),
         )
     result = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", code.group(1)],
+        [sys.executable, "-I", "-S", "-c", code.group(1).replace(
+            "runpy.run_module('$ModuleName', run_name='__main__')",
+            "from config.deployment.context import registry_resource_group; print(registry_resource_group(os.environ))",
+        )],
         cwd=tmp_path, env=environment, capture_output=True, text=True,
         timeout=20, check=False,
     )
@@ -113,7 +174,7 @@ def test_flat_context_does_not_clobber_bicep_document_scope_without_storage_outp
 
 
 @pytest.mark.parametrize("container", ["documents", "custom-documents"])
-def test_shell_platform_publication_hydrates_missing_azd_outputs_from_flat_agent_lz_metadata(container):
+def test_platform_publication_uses_verified_native_metadata_without_store_hydration(container):
     environment = {
         **BASE, "AZURE_CONTAINER_REGISTRY_ENDPOINT": "registry.azurecr.io",
         "KEY_VAULT_URI": "https://vault.vault.azure.net",
@@ -121,26 +182,29 @@ def test_shell_platform_publication_hydrates_missing_azd_outputs_from_flat_agent
     environment.pop("STORAGE_BLOB_ENDPOINT")
     environment.pop("AZURE_STORAGE_ACCOUNT_NAME")
     storage_id = f"/subscriptions/{SUB}/resourceGroups/rg-ai/providers/Microsoft.Storage/storageAccounts/sttest"
-    metadata = {
-        "AI_FOUNDRY_ACCOUNT_NAME": "account",
-        "STORAGE_BLOB_ENDPOINT": "https://sttest.blob.core.windows.net/",
-        "STORAGE_ACCOUNT_RESOURCE_ID": storage_id,
-        "DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID": f"{storage_id}/blobServices/default/containers/{container}",
-    }
-    calls = []
-    def read(arguments):
-        calls.append(arguments)
-        assert arguments[:3] == ["appconfig", "kv", "list"]
-        assert arguments[arguments.index("--label") + 1] == "agent-lz"
-        key = arguments[arguments.index("--key") + 1]
-        return json.dumps([{"key": key, "label": "agent-lz", "value": metadata[key]}] if key in metadata else [])
-    values = outputs.load_platform_environment(environment, run_az=read)
+    source = (Path(__file__).parent / "fixtures" / "deployment-metadata-v1.json").read_text()
+    document = json.loads(source.replace("22222222-2222-2222-2222-222222222222", SUB)
+                          .replace("/resourceGroups/rg-example/", "/resourceGroups/rg-ai/")
+                          .replace("/resourceGroups/rg-example-app/", "/resourceGroups/rg-app/"))
+    document["context"].update(subscriptionId=SUB, resourceGroups={
+        "foundry": "rg-ai", "application": "rg-app", "network": "rg-net",
+    })
+    document["resources"]["storage"] = {"status": "managed", "resource": {
+        "resourceId": storage_id, "name": "sttest", "endpoint": "https://sttest.blob.core.windows.net/",
+    }}
+    child_id = f"{storage_id}/blobServices/default/containers/{container}"
+    document["dataResources"]["storageContainers"] = [{
+        "canonicalName": "DOCUMENTS_STORAGE_CONTAINER", "name": container, "resourceId": child_id,
+    }]
+    verified = deployment_metadata.VerifiedMetadata(document, environment, {}, {})
+    with patch.object(outputs, "load_metadata", return_value=verified), \
+         patch("config.deployment.appconfig._run_az", side_effect=AssertionError("store discovery")):
+        values = outputs.load_platform_environment(environment)
     settings = outputs.platform_settings(outputs.build_platform_outputs(values), values)
-    assert settings["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"] == metadata["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"]
+    assert settings["DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"] == child_id
     assert settings["AZURE_APP_RESOURCE_GROUP"] == "rg-app"
     assert settings["AZURE_RESOURCE_GROUP"] == "rg-ai"
     assert "STORAGE_BLOB_ENDPOINT" not in environment
-    assert all("set" not in call and "secret" not in str(call).lower() for call in calls)
     assert "resourceGroups" not in settings[outputs.PLATFORM_OUTPUTS_KEY]
 
 
@@ -160,30 +224,14 @@ def test_explicit_custom_container_does_not_override_a_conflicting_configured_na
         })
 
 
-def _foundation_reader(environment, calls):
-    def read(arguments):
-        calls.append(arguments)
-        if arguments[:2] == ["group", "show"]:
-            group = arguments[arguments.index("--name") + 1]
-            return json.dumps({"id": f"/subscriptions/{SUB}/resourceGroups/{group}"})
-        if arguments[:2] == ["resource", "show"]:
-            resource_id = arguments[arguments.index("--ids") + 1]
-            return json.dumps({"id": resource_id, "properties": {"customSubDomainName": "account"}})
-        return json.dumps({
-            "id": f"/subscriptions/{SUB}/resourceGroups/rg-app/providers/Microsoft.AppConfiguration/configurationStores/config",
-            "endpoint": environment["APP_CONFIG_ENDPOINT"],
-        })
-    return read
-
-
-def test_foundation_verifies_every_destination_and_project_without_changing_runtime():
-    calls = []
+def test_foundation_delegates_selected_destinations_without_changing_runtime():
     environment = {**BASE, "ORCHESTRATION_HOST": "hosted", "APPLICATION_MODE": "both"}
-    outputs.verify_foundation(environment, run_az=_foundation_reader(environment, calls))
-    assert {c[c.index("--name") + 1] for c in calls if c[:2] == ["group", "show"]} == {"rg-app", "rg-ai", "rg-net"}
+    original = dict(environment)
+    with patch.object(outputs, "load_metadata") as verify:
+        outputs.verify_foundation(environment)
+    verify.assert_called_once_with(environment)
     assert environment["ORCHESTRATION_HOST"] == "hosted"
-    assert any(c[:2] == ["resource", "show"] and BASE["AZURE_AI_PROJECT_RESOURCE_ID"] in c for c in calls)
-    assert not any("create" in c or "set" in c for c in calls)
+    assert environment == original
 
 
 @pytest.mark.parametrize("group", ["rg-ai(team)", "rg-équipe", "rg-٣"])
@@ -193,12 +241,9 @@ def test_classic_foundation_accepts_shared_resolver_valid_foundry_groups(group):
         "AZURE_RESOURCE_GROUP": group,
         "AZURE_AI_PROJECT_RESOURCE_ID": BASE["AZURE_AI_PROJECT_RESOURCE_ID"].replace("rg-ai", group),
     }
-    calls = []
-    outputs.verify_foundation(environment, run_az=_foundation_reader(environment, calls))
-    assert any(call[:2] == ["group", "show"] and group in call for call in calls)
-    assert environment["AZURE_AI_PROJECT_RESOURCE_ID"] in next(
-        call for call in calls if call[:2] == ["resource", "show"]
-    )
+    with patch.object(outputs, "load_metadata") as verify:
+        outputs.verify_foundation(environment)
+    verify.assert_called_once_with(environment)
     assert environment["ORCHESTRATION_HOST"] == "container_apps"
 
 
@@ -215,12 +260,10 @@ def test_unicode_foundation_group_keeps_subscription_destination_and_endpoint_ch
         environment["AZURE_AI_PROJECT_RESOURCE_ID"] = environment["AZURE_AI_PROJECT_RESOURCE_ID"].replace(group, "other-équipe")
     else:
         environment["AZURE_AI_PROJECT_ENDPOINT"] = environment["AZURE_AI_PROJECT_ENDPOINT"].replace("account.services", "foreign.services")
-    calls = []
-    with pytest.raises(RuntimeError):
-        outputs.verify_foundation(environment, run_az=_foundation_reader(environment, calls))
-    if wrong_binding != "endpoint":
-        assert calls == []
-    assert not any("create" in call or "set" in call for call in calls)
+    with patch.object(outputs, "load_metadata", side_effect=deployment_metadata.MetadataError("resource.binding")) as verify, \
+         pytest.raises(deployment_metadata.MetadataError, match="resource.binding"):
+        outputs.verify_foundation(environment)
+    verify.assert_called_once_with(environment)
 
 
 @pytest.mark.parametrize("group", ["rg bad", "rg.", "rg-²", "a" * 91, "rg\\bad"])
@@ -247,16 +290,17 @@ def test_valid_group_support_does_not_relax_account_or_project_segments(segment,
 
 def test_foundation_rejects_project_in_app_group_before_reading_azure():
     environment = {**BASE, "AZURE_AI_PROJECT_RESOURCE_ID": BASE["AZURE_AI_PROJECT_RESOURCE_ID"].replace("rg-ai", "rg-app")}
-    with patch("config.deployment.appconfig._run_az") as run, pytest.raises(RuntimeError):
+    with patch.object(outputs, "load_metadata", side_effect=deployment_metadata.MetadataError("resource.binding")), \
+         patch("config.deployment.appconfig._run_az") as run, pytest.raises(deployment_metadata.MetadataError):
         outputs.verify_foundation(environment)
     run.assert_not_called()
 
 
 def test_foundation_never_falls_back_when_destination_read_fails():
-    def denied(arguments):
-        raise RuntimeError("read denied")
-    with pytest.raises(RuntimeError, match="read denied"):
-        outputs.verify_foundation(BASE, run_az=denied)
+    with patch.object(outputs, "load_metadata", side_effect=deployment_metadata.MetadataError("provider/access")) as verify, \
+         pytest.raises(deployment_metadata.MetadataError, match="provider/access"):
+        outputs.verify_foundation(BASE)
+    verify.assert_called_once_with(BASE)
 
 
 @pytest.mark.parametrize("groups", [("rg-app",), ("rg-app", "rg-ai"), ("rg-app", "rg-ai", "rg-net")])
@@ -345,52 +389,23 @@ def test_foundry_configuration_does_not_fallback_after_permission_failure():
 
 
 def test_powershell_discovery_honors_destination_and_exact_external_monitoring_ids():
-    pwsh = shutil.which("pwsh")
-    if not pwsh:
-        pytest.skip("PowerShell is unavailable")
-    driver = r"""
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile(
-    $env:RG_CONSUMER_SOURCE, [ref]$tokens, [ref]$errors)
-if ($errors.Count) { throw 'Hook syntax failed' }
-$node = $ast.FindAll({
-    param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq '_resolveResource'
-}, $true)[0]
-Invoke-Expression $node.Extent.Text
-$resourceGroup = 'rg-app'
-$subscriptionId = 'selected-sub'
-$script:Mode = 'split'
-function az {
-    if ($script:Mode -eq 'external') {
-        if ($args[0] -ne 'resource' -or $args[1] -ne 'show' -or '--ids' -notin $args) { throw 'External ID was replaced by root discovery' }
-        '{"id":"/subscriptions/central-sub/resourceGroups/central-rg/providers/Microsoft.Insights/components/central","type":"Microsoft.Insights/components"}'
-    } else {
-        if ($args[0] -ne 'resource' -or $args[1] -ne 'list') { throw 'Unexpected operation' }
-        $group = $args[[array]::IndexOf($args, '-g') + 1]
-        if ($group -ne 'rg-ai') { throw 'Foundry discovery used application RG' }
-        $owner = if ($script:Mode -eq 'foreign') { 'foreign-rg' } else { 'rg-ai' }
-        '[{"id":"/subscriptions/selected-sub/resourceGroups/' + $owner + '/providers/Microsoft.Search/searchServices/search","name":"search"}]'
-    }
-    $global:LASTEXITCODE = 0
-}
-if ((_resolveResource -Type 'Microsoft.Search/searchServices' -Group 'rg-ai' -PreferredName 'search') -ne 'search') { throw 'Wrong Foundry name' }
-$script:Mode = 'foreign'
-$denied = $false
-try { _resolveResource -Type 'Microsoft.Search/searchServices' -Group 'rg-ai' | Out-Null } catch { $denied = $true }
-if (-not $denied) { throw 'Foreign ID was accepted' }
-$script:Mode = 'external'
-$id = '/subscriptions/central-sub/resourceGroups/central-rg/providers/Microsoft.Insights/components/central'
-if ((_resolveResource -Type 'Microsoft.Insights/components' -ResourceId $id) -ne 'central') { throw 'Central monitoring override was replaced' }
-Write-Output 'destination/exact-ID checks passed'
-"""
-    source = Path(__file__).resolve().parents[1] / "scripts" / "postProvision.ps1"
-    result = subprocess.run(
-        [pwsh, "-NoProfile", "-NonInteractive", "-Command", driver],
-        env={**os.environ, "RG_CONSUMER_SOURCE": str(source)},
-        capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "destination/exact-ID checks passed" in result.stdout
+    """The hook now delegates exact destination checks to the shared verifier."""
+    from config.deployment import metadata
+
+    document = {"context": {
+        "subscriptionId": SUB, "resourceGroups": {"foundry": "rg-ai", "application": "rg-app"},
+    }}
+    search = f"/subscriptions/{SUB}/resourceGroups/rg-ai/providers/Microsoft.Search/searchServices/search"
+    metadata._arm(search, "Microsoft.Search/searchServices", document, area="foundry")
+    for wrong in (
+        search.replace("rg-ai", "rg-app"),
+        search.replace("rg-ai", "foreign"),
+        search.replace(SUB, "foreign-sub"),
+    ):
+        with pytest.raises(metadata.MetadataError, match="binding"):
+            metadata._arm(wrong, "Microsoft.Search/searchServices", document, area="foundry")
+    external = "/subscriptions/central-sub/resourceGroups/central-rg/providers/Microsoft.Insights/components/central"
+    metadata._arm(external, "Microsoft.Insights/components", document, area="application", external=external)
+    for wrong in (external.replace("/central", "/other"), search):
+        with pytest.raises(metadata.MetadataError, match="binding"):
+            metadata._arm(wrong, "Microsoft.Insights/components", document, area="application", external=external)

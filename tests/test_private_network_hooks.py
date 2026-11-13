@@ -57,6 +57,12 @@ def probe(key, endpoint):
         raise network.PrivateNetworkError("offline unreachable fixture")
 
 network.check_endpoint = probe
+# The provider verifier is a separate mocked boundary in this DNS/TLS fixture.
+# Direct CLI verification itself is covered in test_private_network.
+import types
+settings_module = types.ModuleType("config.deployment.setup_settings")
+settings_module.load_setup_environment = lambda environment: dict(environment)
+sys.modules[settings_module.__name__] = settings_module
 raise SystemExit(network.main(["--stage", sys.argv[1]]))
 """
 
@@ -89,6 +95,15 @@ function git {
 function docker { $global:LASTEXITCODE = 0 }
 function python {
     $call = $args -join ' '
+    if ($call -match 'config.deployment.metadata') {
+        $global:LASTEXITCODE = if ($env:FAKE_RG_MISSING -eq '1') { 1 } else { 0 }
+        return
+    }
+    if ($call -match 'config.deployment.appconfig') {
+        Add-Content -LiteralPath $env:FAKE_TRACE -Value 'azure-boundary'
+        $global:LASTEXITCODE = 93
+        return
+    }
     if ($call -match 'config.deployment.egress') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.resource_groups') { $global:LASTEXITCODE = 0; return }
     if ($call -match 'config.deployment.postgresql' -and $call -match 'protect') {
@@ -168,6 +183,7 @@ exit "$FAKE_AZD_EXIT"
 """,
     "python3": """#!/usr/bin/env bash
 case "$*" in
+  *config.deployment.metadata*) [ "${FAKE_RG_MISSING:-0}" != 1 ]; exit $? ;;
   *config.deployment.egress*) exit 0 ;;
   *config.deployment.resource_groups*) exit 0 ;;
   *config.deployment.postgresql*protect*) exit 0 ;;
@@ -338,19 +354,19 @@ class HookExecutionTests(unittest.TestCase):
         result, events = self.run_hook(shell, "preDeploy", 20)
         self.assertEqual(20, result.returncode, result.stdout + result.stderr)
         self.assertEqual(["probe"], events)
-        # Foundation guard: azd deploy without a provisioned foundation exits 3
-        # before the probe or any deployment step.
-        for values, rg_missing in (
-            (VALUES, True),
-            (VALUES.replace('APP_CONFIG_ENDPOINT="https://config.azconfig.io"', 'APP_CONFIG_ENDPOINT=""'), False),
-            (VALUES.replace('AZURE_RESOURCE_GROUP="test-group"', 'AZURE_RESOURCE_GROUP=""'), False),
+        # Structural absence exits 3; verified metadata failures propagate their
+        # own status. A missing runtime endpoint alone is not foundation absence.
+        for values, rg_missing, expected_status in (
+            (VALUES, True, 1),
+            (VALUES.replace('AZURE_RESOURCE_GROUP="test-group"', 'AZURE_RESOURCE_GROUP=""'), False, 3),
         ):
             with self.subTest(shell=shell, guard=values != VALUES or "rg-missing"):
                 result, events = self.run_hook(shell, "preDeploy", 0, values=values, rg_missing=rg_missing)
                 output = result.stdout + result.stderr
-                self.assertEqual(3, result.returncode, output)
+                self.assertEqual(expected_status, result.returncode, output)
                 self.assertEqual([], events, output)
-                self.assertIn("Run azd provision first", output)
+                if expected_status == 3:
+                    self.assertIn("Run azd provision first", output)
 
         for build_mode, allowed in (("acr-task", False), ("local", True)):
             with self.subTest(shell=shell, build_mode=build_mode, pool_missing=True):
@@ -395,12 +411,6 @@ class HookExecutionTests(unittest.TestCase):
                         endpoint_fail=endpoint_fail, process_env=process,
                     )
                     output = result.stdout + result.stderr
-                    if hook == "preDeploy" and 'APP_CONFIG_ENDPOINT=""' in extra:
-                        # No App Configuration endpoint means no provisioned
-                        # foundation: the preDeploy guard exits 3 first.
-                        self.assertEqual(3, result.returncode, output)
-                        self.assertEqual([], events, output)
-                        continue
                     self.assertIn("probe", events, output)
                     if expected == "deferred" and hook == "postProvision":
                         self.assertEqual(0, result.returncode, output)

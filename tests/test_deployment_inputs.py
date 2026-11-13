@@ -51,6 +51,24 @@ def values() -> dict:
     return {key: entry["value"] for key, entry in source()["parameters"].items()}
 
 
+@pytest.mark.parametrize("selection", [None, "samples/custom-app/containerapp", "samples/custom-app/hosted"])
+def test_selected_application_id_survives_both_strict_provider_inputs(selection):
+    definition = ROOT / selection / "app-definition.json" if selection else ROOT / "app-definition.json"
+    application_id = json.loads(definition.read_text(encoding="utf-8"))["id"]
+    environment = {**ENVIRONMENT}
+    if selection:
+        environment.update(AGENTLZ_APP_DEFINITION=selection, AGENTLZ_APP_ID=application_id)
+    terraform = compose_inputs(values(), environment)
+    bicep = substitute_values(compose_parameters(source(), environment), environment)["parameters"]
+    assert terraform["applicationId"] == bicep["applicationId"]["value"] == application_id
+    assert terraform["appConfigLabel"] == "agent-lz", "Store label is not application identity."
+
+
+def test_application_id_is_a_strict_string_input():
+    with pytest.raises(ValueError):
+        compose_inputs({"applicationId": 123}, ENVIRONMENT)
+
+
 def test_embedding_defaults_match_tracked_bicep_seed():
     seed = json.loads(
         (ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8")
@@ -233,7 +251,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 241
+    assert len(declarations) == 242
     original = values()
     for name, kind in declarations:
         if name in original:

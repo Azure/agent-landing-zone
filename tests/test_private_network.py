@@ -5,6 +5,7 @@ import socket
 import ssl
 import subprocess
 import unittest
+import types
 from unittest.mock import MagicMock, call, patch
 
 from config.deployment import private_network as network
@@ -20,6 +21,33 @@ PRIVATE = {
 
 
 class StageTests(unittest.TestCase):
+    @patch.object(network, "check_endpoint")
+    def test_store_free_probes_bound_setup_destinations(self, probe: MagicMock) -> None:
+        for mode in ("containerEnv", "none"):
+            probe.reset_mock()
+            self.assertEqual(0, network.check_stage({
+                **PRIVATE, "APP_RUNTIME_CONFIGURATION_MODE": mode,
+                "KEY_VAULT_URI": "https://vault.vault.azure.net",
+                "SEARCH_SERVICE_QUERY_ENDPOINT": "https://search.search.windows.net",
+            }, "post-provision"))
+            self.assertEqual(
+                ["AZURE_AI_PROJECT_ENDPOINT", "KEY_VAULT_URI", "SEARCH_SERVICE_QUERY_ENDPOINT"],
+                [item.args[0] for item in probe.call_args_list],
+            )
+
+    def test_direct_cli_verifies_context_and_does_not_hydrate_process(self) -> None:
+        module = types.ModuleType("config.deployment.setup_settings")
+        loader = MagicMock(return_value={"NETWORK_ISOLATION": "false"})
+        module.load_setup_environment = loader
+        with patch.dict("sys.modules", {module.__name__: module}), patch.object(network, "check_stage", return_value=0) as stage:
+            self.assertEqual(0, network.main(["--stage", "pre-deploy"]))
+            loader.assert_called_once_with(network.os.environ)
+            self.assertEqual("false", stage.call_args.args[0]["NETWORK_ISOLATION"])
+        loader.side_effect = ValueError("Invalid resource identity; reprovision.")
+        with patch.dict("sys.modules", {module.__name__: module}), patch.object(network, "check_stage") as stage:
+            self.assertEqual(4, network.main(["--stage", "pre-deploy"]))
+            stage.assert_not_called()
+
     @patch.object(network, "check_endpoint")
     def test_public_needs_no_endpoints_or_network(self, probe: MagicMock) -> None:
         for stage in network.STAGES:
@@ -102,7 +130,7 @@ class StageTests(unittest.TestCase):
                 probe.reset_mock()
                 env = {**PRIVATE, "RUN_FROM_JUMPBOX": flag}
                 self.assertEqual(0, network.check_stage(env, "post-provision"))
-                probe.assert_called_once()
+                self.assertEqual(2, probe.call_count)
                 probe.reset_mock()
                 with self.assertLogs(network.LOGGER, level="WARNING"):
                     self.assertEqual(network.DEFERRED, network.check_stage({
@@ -119,7 +147,7 @@ class StageTests(unittest.TestCase):
                 probe.reset_mock()
                 probe.side_effect = None
                 self.assertEqual(0, network.check_stage(env, "post-provision"))
-                probe.assert_called_once()
+                self.assertEqual(2, probe.call_count)
                 probe.side_effect = network.PrivateNetworkError("unreachable")
                 with self.assertRaises(network.PrivateNetworkError):
                     network.check_stage(env, "post-provision")
@@ -153,7 +181,9 @@ class StageTests(unittest.TestCase):
         probe.assert_not_called()
 
     def test_cli_reports_failure_not_success(self) -> None:
-        with patch.object(network.os, "environ", PRIVATE), patch.object(
+        module = types.ModuleType("config.deployment.setup_settings")
+        module.load_setup_environment = MagicMock(return_value=PRIVATE)
+        with patch.dict("sys.modules", {module.__name__: module}), patch.object(network.os, "environ", PRIVATE), patch.object(
             network, "check_endpoint", side_effect=network.PrivateNetworkError("DNS failed")
         ), self.assertLogs(network.LOGGER, level="ERROR") as logs:
             self.assertEqual(4, network.main(["--stage", "pre-deploy"]))

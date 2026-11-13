@@ -86,17 +86,19 @@ class InfraProducedPermissionTests(unittest.TestCase):
         return context
 
     def render_setup(self, context, client):
-        # Exercise the real App Configuration loader (including JSON parsing),
-        # settings template, normalization, persistence and final payload render.
-        client.list_configuration_settings.return_value = [
-            Mock(key=key, value=value) for key, value in context.items()
-        ]
+        # Foundation intent now enters through verified typed setup settings,
+        # never through runtime-store discovery.
         with (
             patch.dict(setup.os.environ, {"APP_CONFIG_ENDPOINT": "https://config.azconfig.io"}),
             patch.object(setup, "ChainedTokenCredential"),
             patch.object(setup, "AzureCliCredential"),
             patch.object(setup, "ManagedIdentityCredential"),
             patch.object(setup, "AzureAppConfigurationClient", return_value=client),
+            patch.object(setup, "load_setup_settings", return_value={
+                **context, "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
+                "APP_CONFIG_ENDPOINT": "https://config.azconfig.io",
+            }),
+            patch.object(setup, "load_appconfig_settings", return_value={}),
         ):
             return setup.prepare_context_and_render(setup.TEMPLATE_NAME, str(TEMPLATE_DIR))
 

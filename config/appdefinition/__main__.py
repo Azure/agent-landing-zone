@@ -72,13 +72,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _assign_roles(definition: AppDefinition) -> int:
     from config.deployment.composition import DeploymentTopologyError, resolve_mode
+    from config.deployment.metadata import MetadataError
+    from config.deployment.setup_settings import load_setup_environment
 
     from .roles import RoleAssignmentError, assign_roles
 
     try:
-        hosted = resolve_mode(os.environ).value == "hosted"
-        created = assign_roles(definition, os.environ, hosted_orchestration=hosted)
-    except (DeploymentTopologyError, RoleAssignmentError, RuntimeError) as error:
+        environment = load_setup_environment(os.environ)
+        if definition.id != environment["AGENTLZ_APP_ID"]:
+            raise RoleAssignmentError("Application definition differs from the verified foundation application.")
+        hosted = resolve_mode(environment).value == "hosted"
+        created = assign_roles(definition, environment, hosted_orchestration=hosted)
+    except (DeploymentTopologyError, RoleAssignmentError, MetadataError, RuntimeError) as error:
         LOGGER.error("Capability-profile role assignment failed: %s", error)
         return 3
     LOGGER.info("Capability-profile roles are in place (%d created).", len(created))

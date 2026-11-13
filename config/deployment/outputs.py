@@ -30,6 +30,7 @@ from config.deployment.composition import APP_CONFIG_LABEL, is_truthy
 from config.deployment.context import bound_resource_id, context_settings
 from config.deployment.resource_groups import resource_group_for
 from config.deployment.postgresql import discovery_settings
+from config.deployment.metadata import aliases, load_metadata, run_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +43,6 @@ FOUNDATION_MISSING_MESSAGE = (
 # azd environment values that only exist after a successful ``azd provision``.
 FOUNDATION_REQUIRED_ENV: tuple[str, ...] = (
     "AZURE_RESOURCE_GROUP",
-    "APP_CONFIG_ENDPOINT",
 )
 IDENTITIES_ENV = "AGENTLZ_COMPONENT_IDENTITIES"
 
@@ -92,62 +92,20 @@ def require_foundation(environment: Mapping[str, str]) -> None:
 def verify_foundation(
     environment: Mapping[str, str], *, run_az: Callable[..., str] | None = None,
 ) -> None:
-    """Read every destination and verify the exact Foundry and store binding."""
+    """Verify native provider metadata, independently of runtime publication."""
     require_foundation(environment)
-    from config.deployment.appconfig import _run_az
-    from config.deployment.hosted_access import PROJECT_PATH, _bound_scope, _endpoint, _guid
+    if run_az is None:
+        load_metadata(environment)
+    else:
+        load_metadata(environment, runner=_metadata_runner(run_az))
 
-    run_az = run_az or _run_az
-    subscription = _guid(environment.get("AZURE_SUBSCRIPTION_ID"))
-    project = (environment.get("AZURE_AI_PROJECT_RESOURCE_ID") or "").strip()
-    foundry_group = resource_group_for(environment, "foundry")
-    _bound_scope(project, PROJECT_PATH, subscription, foundry_group)
-    project_name = project.rsplit("/", 1)[-1]
-    endpoint = _endpoint(
-        environment.get("AZURE_AI_PROJECT_ENDPOINT"), ".services.ai.azure.com",
-        rf"/api/projects/{re.escape(project_name)}/?",
-    )
-    groups = dict.fromkeys(
-        resource_group_for(environment, area).lower()
-        for area in ("application", "foundry", "network")
-    )
-    for group in groups:
-        row = json.loads(run_az([
-            "group", "show", "--name", group, "--subscription", subscription, "--output", "json",
-        ]))
-        expected = f"/subscriptions/{subscription}/resourceGroups/{group}"
-        if not isinstance(row, dict) or str(row.get("id", "")).lower() != expected.lower():
-            raise FoundationMissingError(f"{FOUNDATION_MISSING_MESSAGE} Destination identity mismatch.")
-    project_row = json.loads(run_az(["resource", "show", "--ids", project, "--output", "json"]))
-    if not isinstance(project_row, dict) or str(project_row.get("id", "")).lower() != project.lower():
-        raise FoundationMissingError("Foundry project ARM identity mismatch.")
-    account_id = project.rsplit("/", 2)[0]
-    account = json.loads(run_az(["resource", "show", "--ids", account_id, "--output", "json"]))
-    domain = (account.get("properties") or {}).get("customSubDomainName") if isinstance(account, dict) else None
-    if (
-        not isinstance(domain, str) or str(account.get("id", "")).lower() != account_id.lower()
-        or endpoint != f"https://{domain.lower()}.services.ai.azure.com/api/projects/{project_name}"
-    ):
-        raise FoundationMissingError("Foundry endpoint/account binding mismatch.")
-    config_endpoint = _endpoint(environment.get("APP_CONFIG_ENDPOINT"), ".azconfig.io")
-    name = config_endpoint.split("://", 1)[1].split(".", 1)[0]
-    store = json.loads(run_az([
-        "appconfig", "show", "--name", name,
-        "--resource-group", resource_group_for(environment, "application"),
-        "--subscription", subscription, "--output", "json",
-    ]))
-    if not isinstance(store, dict):
-        raise FoundationMissingError("App Configuration metadata is invalid.")
-    bound_resource_id(str(store.get("id", "")), environment, "Microsoft.AppConfiguration/configurationStores", area="application")
-    expected_store = (
-        f"/subscriptions/{subscription}/resourceGroups/{resource_group_for(environment, 'application')}"
-        f"/providers/Microsoft.AppConfiguration/configurationStores/{name}"
-    )
-    if (
-        str(store.get("id", "")).lower() != expected_store.lower()
-        or _endpoint(store.get("endpoint"), ".azconfig.io") != config_endpoint
-    ):
-        raise FoundationMissingError("App Configuration endpoint binding mismatch.")
+
+def _metadata_runner(run_az: Callable[..., str]) -> Callable[..., Any]:
+    def run(command: list[str], **kwargs: Any) -> Any:
+        if Path(command[0]).name.lower() in ("az", "az.cmd", "az.exe"):
+            return json.loads(run_az(command[1:]))
+        return run_json(command, **kwargs)
+    return run
 
 
 def _first(environment: Mapping[str, str], names: tuple[str, ...]) -> str:
@@ -161,54 +119,12 @@ def _first(environment: Mapping[str, str], names: tuple[str, ...]) -> str:
 def load_platform_environment(
     environment: Mapping[str, str], *, run_az: Callable[..., str] | None = None,
 ) -> dict[str, str]:
-    """Read missing non-secret metadata from the foundation's flat settings.
-
-    ARM limits the root to 64 outputs. Shell hooks therefore cannot assume
-    every App Configuration field is also an azd output.
-    """
-    from config.deployment.appconfig import _run_az
-
-    run_az = run_az or _run_az
-    values = dict(environment)
-    endpoint = _first(values, ("APP_CONFIG_ENDPOINT",))
-    hydrated = False
-
-    def read(key: str) -> str:
-        rows = json.loads(run_az([
-            "appconfig", "kv", "list", "--endpoint", endpoint,
-            "--key", key, "--label", APP_CONFIG_LABEL, "--auth-mode", "login",
-            "--output", "json", "--only-show-errors",
-        ]))
-        if not isinstance(rows, list) or len(rows) > 1:
-            raise PlatformOutputsError(f"Non-unique flat foundation setting {key}.")
-        if not rows:
-            return ""
-        row = rows[0]
-        if (
-            not isinstance(row, dict) or row.get("key") != key
-            or row.get("label") != APP_CONFIG_LABEL or not isinstance(row.get("value"), str)
-        ):
-            raise PlatformOutputsError(f"Invalid flat foundation setting binding for {key}.")
-        return row["value"].strip()
-
-    for (section, _), _, sources in _FIELDS:
-        if section in _OPTIONAL_SECTIONS or _first(values, sources):
-            continue
-        for source in sources:
-            value = read(source)
-            if value:
-                values[source] = value
-                hydrated = True
-                break
-        else:
-            raise PlatformOutputsError(f"Missing flat foundation metadata: {' or '.join(sources)}.")
-    if hydrated:
-        for key in ("STORAGE_ACCOUNT_RESOURCE_ID", "DOCUMENTS_STORAGE_CONTAINER_RESOURCE_ID"):
-            if not (values.get(key) or "").strip():
-                value = read(key)
-                if value:
-                    values[key] = value
-    return values
+    """Adapt freshly verified provider output, never runtime store values."""
+    verified = (
+        load_metadata(environment) if run_az is None else
+        load_metadata(environment, runner=_metadata_runner(run_az))
+    )
+    return {**verified.environment, **aliases(verified.document)}
 
 
 def identity_flat_key(component: str) -> str:
@@ -374,6 +290,9 @@ def main(argv: list[str] | None = None) -> int:
             verify_foundation(os.environ)
             return 0
         environment = load_platform_environment(os.environ)
+        if environment["APP_RUNTIME_CONFIGURATION_MODE"] != "appConfig":
+            LOGGER.info("Runtime publication is not selected for this foundation.")
+            return 0
         identities = None
         if not (environment.get(IDENTITIES_ENV) or "").strip():
             definition = validate_definition(load_selected_definition(environment))
@@ -394,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print(json.dumps(settings, indent=2))
         return 0
-    publish(os.environ["APP_CONFIG_ENDPOINT"].strip(), settings)
+    publish(environment["APP_CONFIG_ENDPOINT"].strip(), settings)
     print(f"Published {len(settings)} platform output keys (label {APP_CONFIG_LABEL}).")
     return 0
 

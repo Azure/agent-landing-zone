@@ -92,33 +92,34 @@ def test_disabled_endpoint_reconciliation_never_looks_up_ingestion(host):
 @pytest.mark.parametrize("host", list(OrchestrationHost))
 @pytest.mark.parametrize("enabled", [False, True])
 def test_powershell_postprovision_skips_worker_ingress_and_optional_ingestion_reads(tmp_path, host, enabled):
-    source = (ROOT / "scripts/postProvision.ps1").read_text(encoding="utf-8-sig")
-    start = source.index("    $frontendFqdn = Invoke-AzTsv")
-    end = source.index("    $modelDeployments = @(", start)
-    script = f"""
-$ErrorActionPreference = 'Stop'
-$deployIngestion = ${str(enabled).lower()}
-$hostedMode = ${str(host is OrchestrationHost.HOSTED).lower()}
-$frontendAppName = 'frontend'; $orchestratorAppName = 'orchestrator'
-$dataIngestAppName = 'dataingest'; $resourceGroup = 'test-group'
-$script:calls = @()
-function Invoke-AzTsv {{
-    param($Arguments, $Description, [switch]$Required)
-    $script:calls += ($Arguments -join ' ')
-    return 'mock-value'
-}}
-""" + source[start:end] + """
-[ordered]@{ apps = @($containerApps.serviceName); calls = $script:calls } | ConvertTo-Json -Compress
-"""
-    path = tmp_path / "hook.ps1"
-    path.write_text(script, encoding="utf-8")
-    result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-File", str(path)],
-                            capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, result.stdout + result.stderr
-    payload = json.loads(result.stdout)
-    assert ("dataingest" in payload["apps"]) is enabled
-    assert any("dataingest" in call for call in payload["calls"]) is enabled
-    assert not any("orchestrator" in call and "ingress.fqdn" in call for call in payload["calls"])
+    """The shared resolver replaces PS ingress discovery, including workers."""
+    from copy import deepcopy
+    from config.deployment.metadata import VerifiedMetadata
+    from config.deployment.setup_settings import resolve_setup_settings
+
+    document = json.loads((ROOT / "tests/fixtures/deployment-metadata-v1.json").read_text())
+    template = document["containerApps"][0]
+    services = ["frontend"]
+    if host is OrchestrationHost.CONTAINER_APPS:
+        services.append("orchestrator")
+    if enabled:
+        services.append("dataingest")
+    document["containerApps"] = []
+    for service in services:
+        row = deepcopy(template)
+        row.update(serviceName=service, name=service, canonicalName=service.upper())
+        # Native workers have no ingress. An empty evaluated FQDN is retained,
+        # never replaced by a control-plane ingress lookup or guessed endpoint.
+        row["fqdn"] = template["fqdn"] if service == "frontend" else ""
+        document["containerApps"].append(row)
+    with patch("config.deployment.metadata.run_json", side_effect=AssertionError("No secondary discovery")):
+        settings = resolve_setup_settings(VerifiedMetadata(
+            document, {}, {"deployIngestionContainerApp": enabled, "orchestrationHost": host.value}, {},
+        ))
+    apps = settings["CONTAINER_APPS"]
+    assert ("dataingest" in {row["service_name"] for row in apps}) is enabled
+    assert all(not row["fqdn"] for row in apps if row["service_name"] != "frontend")
+    assert ("orchestrator" in {row["service_name"] for row in apps}) is (host is OrchestrationHost.CONTAINER_APPS)
 
 
 @pytest.mark.parametrize("shell,suffix", [("pwsh", "ps1"), ("bash", "sh")])

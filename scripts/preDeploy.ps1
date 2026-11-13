@@ -116,15 +116,17 @@ foreach ($prop in $globalEnv.PSObject.Properties) {
 
 # Foundation guard (first step, before any Azure change): azd deploy only
 # deploys applications onto a foundation created by azd provision.
-$foundationMissing = (-not $globalRG) -or (-not $globalEnv.APP_CONFIG_ENDPOINT)
+$foundationMissing = (-not $globalRG)
 if ($foundationMissing) {
   Write-Error "The foundation is not provisioned. Run azd provision first."
   exit 3
 }
 Invoke-PythonModule -ModuleName 'config.deployment.resource_groups' -Arguments @('--azure-dir', $dotAzure, '--check') | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error "Resource-group binding check failed. No changes were made."; exit 3 }
-Invoke-PythonModule -ModuleName 'config.deployment.outputs' -Arguments @('--check-foundation')
-if ($LASTEXITCODE -ne 0) { Write-Error "Foundation destination/project verification failed. Run azd provision first."; exit 3 }
+# BEGIN deployment metadata verification
+Invoke-PythonModule -ModuleName 'config.deployment.metadata' -Arguments @('--check', '--environment', $env:AZURE_ENV_NAME, '--project-root', $repoRoot)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# END deployment metadata verification
 
 # Re-validate the application definition and compare it with the binding.
 $appDefinitionPath = if ($globalEnv.AGENTLZ_APP_DEFINITION) { "$($globalEnv.AGENTLZ_APP_DEFINITION)" } elseif ($env:AGENTLZ_APP_DEFINITION) { $env:AGENTLZ_APP_DEFINITION } else { Join-Path $repoRoot 'app-definition.json' }
@@ -252,8 +254,10 @@ if ($nativeMode) {
   foreach ($prop in $globalEnv.PSObject.Properties) {
     Set-Item -Path "Env:$($prop.Name)" -Value "$($prop.Value)"
   }
-  Invoke-PythonModule -ModuleName 'config.deployment.appconfig' -Arguments @('--require-hosted-endpoint')
-  if ($LASTEXITCODE -ne 0) { Write-Error "Native runtime settings could not be published."; exit 1 }
+  if (-not $env:APP_RUNTIME_CONFIGURATION_MODE -or $env:APP_RUNTIME_CONFIGURATION_MODE -ceq 'appConfig') {
+    Invoke-PythonModule -ModuleName 'config.deployment.appconfig' -Arguments @('--require-hosted-endpoint')
+    if ($LASTEXITCODE -ne 0) { Write-Error "Native runtime settings could not be published."; exit 1 }
+  }
 }
 # END native application lifecycle
 
