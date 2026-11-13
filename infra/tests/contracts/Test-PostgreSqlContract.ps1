@@ -92,8 +92,8 @@ try {
         Assert ($seed.postgreSqlAllowedIpRanges.value -is [array] -and $seed.postgreSqlAllowedIpRanges.value.Count -eq 0) 'Typed operator ranges.'
     }
     $actual = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph $actual)
-    $before = ConvertTo-ModelDeploymentsOptionalPrePostgreSqlGraph (ConvertTo-DeterministicSubnetPrePostgreSqlGraph (ConvertTo-PrePostgreSqlGraph $preSubnet))
+    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))
+    $before = ConvertTo-PrivateMonitoringTraceRbacPrePostgreSqlGraph (ConvertTo-ModelDeploymentsOptionalPrePostgreSqlGraph (ConvertTo-DeterministicSubnetPrePostgreSqlGraph (ConvertTo-PrePostgreSqlGraph $preSubnet)))
     Assert ((Get-PostgreSqlDigest 'Enabled') -cne (Get-PostgreSqlDigest 'enabled')) 'Digest caching must not swallow case-only mutations.'
     [IO.File]::WriteAllText($beforeFile, (ConvertTo-Json -InputObject $before -Depth 100 -Compress))
     & python (Join-Path $PSScriptRoot 'postgresql_disabled_ast.py') $compiled $beforeFile

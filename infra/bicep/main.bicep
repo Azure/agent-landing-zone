@@ -206,7 +206,7 @@ param existingPrivateDnsZoneOmsOpsInsightsResourceId string?
 @description('Gap 2 — Resource ID of an existing `privatelink.ods.opinsights.azure.com` Private DNS Zone to reuse (ODS Log Analytics ingestion PE DNS).')
 param existingPrivateDnsZoneOdsOpsInsightsResourceId string?
 
-@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure.automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
+@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure-automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
 param existingPrivateDnsZoneAzureAutomationResourceId string?
 
 @description('Gap 2 — Resource ID of an existing `privatelink.applicationinsights.io` Private DNS Zone to reuse. Only consumed when `enablePrivateLogAnalytics=true` and AMPLS is created locally; otherwise this BYO ID is ignored.')
@@ -517,6 +517,12 @@ param existingPrivateDnsZoneDurableTaskResourceId string = ''
 
 @description('Grant the deployment executor Foundry Project Manager when Hosted prerequisites are selected. Defaults to true for compatible foundation callers. Set false when the executor already has required project authorization; this never disables the project managed identity registry pull grant.')
 param grantHostedAgentProjectManager bool = true
+
+@description('Opt-in: grant the AI Foundry project managed identity Reader on the effective Application Insights resource and Log Analytics Data Reader on the effective Log Analytics workspace for scheduled Foundry trace evaluations. Defaults to false.')
+param grantProjectTraceEvaluationReader bool = false
+
+@description('Strictly opt-in: grant the AI Foundry project managed identity Privileged Monitoring Data Reader with an ABAC v2.0 condition restricted to the Protected AppGenAIContent table on the effective Application Insights and Log Analytics resources. Requires grantProjectTraceEvaluationReader=true. Defaults to false.')
+param grantProjectProtectedTraceContentReader bool = false
 
 @description('Request the downstream Microsoft Foundry hosted-agent deployment handoff. Implies prepareHostedAgent behavior and requires hostedAgent.version to be an immutable OCI digest. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
@@ -1198,6 +1204,8 @@ var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containe
 var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
 var _hostedAgentImageReference = deployHostedAgent ? '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}' : ''
 var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
+var _logAnalyticsDataReaderRoleId = '3b03c2da-16b3-4a49-8834-0f8130efdd3b'
+var _privilegedMonitoringDataReaderRoleId = 'dbc9c667-e97f-4491-aee6-90b9cf960190'
 var _hostedAgentContainerRegistryPullRoleId = deployContainerRegistry || hostedAgentContainerRegistryRoleAssignmentMode == 'rbac'
   ? const.roles.AcrPull.guid
   : _containerRegistryRepositoryReaderRoleId
@@ -2370,7 +2378,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${resourceNames.vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
     _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
     _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${resourceNames.vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
+    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure-automation.net', virtualNetworkLinkName: '${resourceNames.vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
   ) : []
 ) : []
 
@@ -2642,7 +2650,7 @@ var _dnsZoneAcrId             = !empty(existingPrivateDnsZoneAcrResourceId ?? ''
 var _dnsZoneAzureMonitorId    = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')    ? existingPrivateDnsZoneAzureMonitorResourceId!    : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
 var _dnsZoneOmsOpsInsightsId  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOmsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
 var _dnsZoneOdsOpsInsightsId  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOdsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
-var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
+var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure-automation.net')
 
 //AI Foundry Account User Managed Identity
 module aiFoundryUAI 'modules/security/managed-identity.bicep' = if (_useUAI) {
@@ -4118,6 +4126,36 @@ module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep'
     name: 'assignCrossServiceRoles'
     roleAssignments: _crossServiceRoleAssignments
   }
+}
+
+module traceEvaluationValidation 'modules/validation/trace-evaluation.bicep' = if (grantProjectTraceEvaluationReader || grantProjectProtectedTraceContentReader) {
+  name: 'traceEvaluationValidation'
+  params: {
+    grantProjectTraceEvaluationReader: grantProjectTraceEvaluationReader
+    grantProjectProtectedTraceContentReader: grantProjectProtectedTraceContentReader
+    deployAiFoundry: deployAiFoundry
+    deployAfProject: deployAfProject
+    hasEffectiveAppInsights: _hasEffectiveAI
+    hasEffectiveLogAnalytics: _hasEffectiveLaw
+    existingApplicationInsightsResourceId: existingApplicationInsightsResourceId ?? ''
+    existingLogAnalyticsWorkspaceResourceId: existingLogAnalyticsWorkspaceResourceId ?? ''
+  }
+}
+
+module assignProjectTraceEvaluationRoles 'modules/security/project-trace-evaluation-roles.bicep' = if (grantProjectTraceEvaluationReader && deployAiFoundry && deployAfProject && _hasEffectiveAI && _hasEffectiveLaw) {
+  name: 'assignProjectTraceEvaluationRoles'
+  params: {
+    appInsightsResourceId: _appInsightsResourceId
+    workspaceResourceId: _lawResourceId
+    principalId: aiFoundry!.outputs.aiProjectPrincipalId
+    readerRoleGuid: const.roles.Reader.guid
+    logAnalyticsDataReaderRoleGuid: _logAnalyticsDataReaderRoleId
+    privilegedMonitoringDataReaderRoleGuid: _privilegedMonitoringDataReaderRoleId
+    grantProtectedTraceContentReader: grantProjectProtectedTraceContentReader
+  }
+  dependsOn: [
+    traceEvaluationValidation
+  ]
 }
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> ContainerApp

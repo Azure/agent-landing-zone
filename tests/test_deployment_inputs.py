@@ -88,6 +88,39 @@ def test_deploy_model_deployments_rejects_non_boolean_values(invalid):
         compose_inputs(values(), {**ENVIRONMENT, "DEPLOY_MODEL_DEPLOYMENTS": invalid})
 
 
+@pytest.mark.parametrize(
+    "param_name,env_name",
+    [
+        ("grantProjectTraceEvaluationReader", "GRANT_PROJECT_TRACE_EVALUATION_READER"),
+        ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
+    ],
+)
+@pytest.mark.parametrize("raw,expected", [(None, False), ("false", False), ("true", True)])
+def test_trace_evaluation_rbac_flags_survive_both_provider_input_adapters(param_name, env_name, raw, expected):
+    environment = {**ENVIRONMENT}
+    if raw is not None:
+        environment[env_name] = raw
+    terraform = compose_inputs(values(), environment)
+    bicep = substitute_values(compose_parameters(source(), environment), environment)["parameters"]
+    assert terraform[param_name] is expected
+    assert bicep[param_name]["value"] == str(expected).lower()
+    seed = json.loads((ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8"))
+    assert seed["parameters"][param_name] == {"value": f"${{{env_name}=false}}"}
+
+
+@pytest.mark.parametrize(
+    "param_name,env_name",
+    [
+        ("grantProjectTraceEvaluationReader", "GRANT_PROJECT_TRACE_EVALUATION_READER"),
+        ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
+    ],
+)
+@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+def test_trace_evaluation_rbac_flags_reject_non_boolean_values(param_name, env_name, invalid):
+    with pytest.raises(ValueError, match=param_name):
+        compose_inputs(values(), {**ENVIRONMENT, env_name: invalid})
+
+
 def test_embedding_defaults_match_tracked_bicep_seed():
     seed = json.loads(
         (ROOT / "infra/bicep/main.parameters.json").read_text(encoding="utf-8")
@@ -270,7 +303,7 @@ def test_native_types_context_collections_and_no_arm_envelope():
 def test_all_declared_inputs_are_accepted_with_native_types():
     # Test the current executable interface, not a copied baseline inventory.
     declarations = re.findall(r"^param (\w+) ([\w.\[\]?]+)", (ROOT / "infra/bicep/main.bicep").read_text(), re.M)
-    assert len(declarations) == 243
+    assert len(declarations) == 245
     original = values()
     for name, kind in declarations:
         if name in original:

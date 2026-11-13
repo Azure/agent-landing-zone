@@ -58,6 +58,17 @@ actual deployment graph. Mutation tests reject unrelated resource, scope,
 security, subnet, output and manifest drift. **Do not reset fingerprints just
 to make tests pass.**
 
+`PrivateMonitoringTraceRbacNormalization.ps1` checks the bounded AMPLS Azure
+Automation DNS hyphenation fix (`privatelink.agentsvc.azure-automation.net`)
+and opt-in Foundry trace-evaluation RBAC delta (`grantProjectTraceEvaluationReader`,
+`grantProjectProtectedTraceContentReader`) at the front of the normalization
+pipeline before restoring the pre-change representation so historical fixtures
+and downstream normalization digests remain untouched.
+`Test-PrivateMonitoringTraceRbacContract.ps1` verifies the AMPLS private
+endpoint DNS zone group exclusions, default-off trace grants, prerequisite
+validation guards, cross-subscription BYO observability scopes, and exact
+`AppGenAIContent` + `Protected` ABAC v2.0 condition.
+
 `ModelDeploymentsOptionalNormalization.ps1` checks the bounded optional local
 Foundry model deployment gate (`deployModelDeployments`, default `true`) at the
 front of the normalization pipeline before restoring the pre-change

@@ -31,8 +31,26 @@ locals {
   }
   identity_roles = merge(
     jsondecode(file("${path.module}/../shared/roles.json")),
-    # This newer ABAC role is not yet in the incorporated role vocabulary.
-    { ContainerRegistryRepositoryReader = { guid = "b93aa761-3e63-49ed-ac28-beffa264f7ac", key = "ContainerRegistryRepositoryReader" } }
+    # Newer data-plane / ABAC roles not yet in the incorporated role vocabulary.
+    {
+      ContainerRegistryRepositoryReader = { guid = "b93aa761-3e63-49ed-ac28-beffa264f7ac", key = "ContainerRegistryRepositoryReader" }
+      LogAnalyticsDataReader            = { guid = "3b03c2da-16b3-4a49-8834-0f8130efdd3b", key = "LogAnalyticsDataReader" }
+      PrivilegedMonitoringDataReader    = { guid = "dbc9c667-e97f-4491-aee6-90b9cf960190", key = "PrivilegedMonitoringDataReader" }
+    }
+  )
+  protected_trace_abac_condition = trimspace(<<-CONDITION
+    (
+      (
+        !(ActionMatches{'Microsoft.OperationalInsights/workspaces/tables/data/read'})
+      )
+      OR
+      (
+        @Resource[Microsoft.OperationalInsights/workspaces/tables:name] StringEquals 'AppGenAIContent'
+        AND
+        @Resource[Microsoft.OperationalInsights/workspaces/tables:protectionLevel] StringEquals 'Protected'
+      )
+    )
+  CONDITION
   )
   identity_scope_definitions = {
     registry      = { enabled = var.deployContainerRegistry, id = local.registry_context.id }
@@ -189,6 +207,38 @@ locals {
       principal_id = local.foundry_context.project_principal_id
       role         = "StorageBlobDataContributor"
     }
+    project_trace_eval_app_insights_reader = {
+      enabled         = var.grantProjectTraceEvaluationReader && var.deployAiFoundry && var.deployAfProject && local.effective_observability.has_app_insights && local.effective_observability.has_law && local.effective_observability.valid_existing_ids
+      scope           = local.effective_observability.app_insights_id
+      subscription_id = local.effective_observability.app_insights_subscription_id
+      principal_id    = local.foundry_context.project_principal_id
+      role            = "Reader"
+    }
+    project_trace_eval_law_data_reader = {
+      enabled         = var.grantProjectTraceEvaluationReader && var.deployAiFoundry && var.deployAfProject && local.effective_observability.has_app_insights && local.effective_observability.has_law && local.effective_observability.valid_existing_ids
+      scope           = local.effective_observability.law_id
+      subscription_id = local.effective_observability.law_subscription_id
+      principal_id    = local.foundry_context.project_principal_id
+      role            = "LogAnalyticsDataReader"
+    }
+    project_protected_trace_app_insights_reader = {
+      enabled           = var.grantProjectTraceEvaluationReader && var.grantProjectProtectedTraceContentReader && var.deployAiFoundry && var.deployAfProject && local.effective_observability.has_app_insights && local.effective_observability.has_law && local.effective_observability.valid_existing_ids
+      scope             = local.effective_observability.app_insights_id
+      subscription_id   = local.effective_observability.app_insights_subscription_id
+      principal_id      = local.foundry_context.project_principal_id
+      role              = "PrivilegedMonitoringDataReader"
+      condition         = local.protected_trace_abac_condition
+      condition_version = "2.0"
+    }
+    project_protected_trace_law_reader = {
+      enabled           = var.grantProjectTraceEvaluationReader && var.grantProjectProtectedTraceContentReader && var.deployAiFoundry && var.deployAfProject && local.effective_observability.has_app_insights && local.effective_observability.has_law && local.effective_observability.valid_existing_ids
+      scope             = local.effective_observability.law_id
+      subscription_id   = local.effective_observability.law_subscription_id
+      principal_id      = local.foundry_context.project_principal_id
+      role              = "PrivilegedMonitoringDataReader"
+      condition         = local.protected_trace_abac_condition
+      condition_version = "2.0"
+    }
   }
   cross_service_grants = [
     for key, grant in local.cross_service_specs : merge(grant, {
@@ -203,9 +253,9 @@ locals {
       scope              = grant.scope
       principal_id       = grant.principal_id
       principal_type     = grant.principal_type
-      role_definition_id = "/subscriptions/${split("/", grant.scope)[2]}/providers/Microsoft.Authorization/roleDefinitions/${local.identity_roles[grant.role].guid}"
-      condition          = null
-      condition_version  = null
+      role_definition_id = "/subscriptions/${try(grant.subscription_id, split("/", grant.scope)[2], local.deployment_context.subscription_id)}/providers/Microsoft.Authorization/roleDefinitions/${local.identity_roles[grant.role].guid}"
+      condition          = try(grant.condition, null)
+      condition_version  = try(grant.condition_version, null)
     }
   }
 

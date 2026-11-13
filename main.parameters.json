@@ -121,6 +121,8 @@
     "durableTaskSchedulerCapacity":         { "value": "${DURABLE_TASK_SCHEDULER_CAPACITY=1}" },
     "existingPrivateDnsZoneDurableTaskResourceId": { "value": "${EXISTING_PRIVATE_DNS_ZONE_DURABLE_TASK_RESOURCE_ID=}" },
     "grantHostedAgentProjectManager":       { "value": "${GRANT_HOSTED_AGENT_PROJECT_MANAGER=true}" },
+    "grantProjectTraceEvaluationReader":    { "value": "${GRANT_PROJECT_TRACE_EVALUATION_READER=false}" },
+    "grantProjectProtectedTraceContentReader": { "value": "${GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER=false}" },
     "deployHostedAgent":                    { "value": false },
     "hostedAgent":                          { "value": {
       "name": "${HOSTED_AGENT_NAME=agent-app-orchestrator}",

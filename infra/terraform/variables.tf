@@ -775,6 +775,16 @@ variable "grantHostedAgentProjectManager" {
   default  = true
   nullable = false
 }
+variable "grantProjectTraceEvaluationReader" {
+  type     = bool
+  default  = false
+  nullable = false
+}
+variable "grantProjectProtectedTraceContentReader" {
+  type     = bool
+  default  = false
+  nullable = false
+}
 variable "deployHostedAgent" {
   type     = bool
   default  = false

@@ -752,7 +752,7 @@ locals {
     AzureMonitor    = { name = "privatelink.monitor.azure.com", link = "azure-monitor", byo = var.existingPrivateDnsZoneAzureMonitorResourceId, enabled = local.effective_observability.ampls }
     OmsOpsInsights  = { name = "privatelink.oms.opinsights.azure.com", link = "oms-opinsights", byo = var.existingPrivateDnsZoneOmsOpsInsightsResourceId, enabled = local.effective_observability.ampls }
     OdsOpsInsights  = { name = "privatelink.ods.opinsights.azure.com", link = "ods-opinsights", byo = var.existingPrivateDnsZoneOdsOpsInsightsResourceId, enabled = local.effective_observability.ampls }
-    AzureAutomation = { name = "privatelink.agentsvc.azure.automation.net", link = "azure-automation", byo = var.existingPrivateDnsZoneAzureAutomationResourceId, enabled = local.effective_observability.ampls }
+    AzureAutomation = { name = "privatelink.agentsvc.azure-automation.net", link = "azure-automation", byo = var.existingPrivateDnsZoneAzureAutomationResourceId, enabled = local.effective_observability.ampls }
     AppInsights     = { name = "privatelink.applicationinsights.io", link = "appi", byo = var.existingPrivateDnsZoneAppInsightsResourceId, enabled = local.effective_observability.ampls }
   }
   network_managed_dns = {

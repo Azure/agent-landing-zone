@@ -37,7 +37,7 @@ try {
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
     $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
-    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph $actual)).resources.aiFoundry.properties.parameters.aiModelDeployments
+    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))).resources.aiFoundry.properties.parameters.aiModelDeployments
     Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
     Assert-ScopedValue $embeddingRule.after `
         ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `
@@ -71,6 +71,14 @@ try {
         @{ Name = 'model deployments default disabled'; Change = { param($t) $t.parameters.deployModelDeployments.defaultValue = $false } },
         @{ Name = 'model deployments AppConfig canonical gate dropped'; Change = { param($t) ($t.variables.copy | Where-Object name -CEQ '_modelDeploymentNamesSettings').count = "[length(parameters('modelDeploymentList'))]" } },
         @{ Name = 'model deployments AppConfig JSON gate dropped'; Change = { param($t) ($t.variables.copy | Where-Object name -CEQ '_modelDeploymentSettings').count = "[length(parameters('modelDeploymentList'))]" } },
+        @{ Name = 'AzureAutomation DNS zone dot typo restored'; Change = { param($t) $t.variables._dnsZoneAzureAutomationId = $t.variables._dnsZoneAzureAutomationId.Replace('privatelink.agentsvc.azure-automation.net', 'privatelink.agentsvc.azure.automation.net') } },
+        @{ Name = 'trace evaluation reader enabled by default'; Change = { param($t) $t.parameters.grantProjectTraceEvaluationReader.defaultValue = $true } },
+        @{ Name = 'protected trace content reader enabled by default'; Change = { param($t) $t.parameters.grantProjectProtectedTraceContentReader.defaultValue = $true } },
+        @{ Name = 'LogAnalyticsDataReader role GUID drift'; Change = { param($t) $t.variables._logAnalyticsDataReaderRoleId = '00000000-0000-0000-0000-000000000000' } },
+        @{ Name = 'PrivilegedMonitoringDataReader role GUID drift'; Change = { param($t) $t.variables._privilegedMonitoringDataReaderRoleId = '00000000-0000-0000-0000-000000000000' } },
+        @{ Name = 'protected trace ABAC table name widened'; Change = { param($t) $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition = $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition.Replace("'AppGenAIContent'", "'AppTraces'") } },
+        @{ Name = 'protected trace ABAC protectionLevel dropped'; Change = { param($t) $t.resources.assignProjectTraceEvaluationRoles.properties.template.variables.protectedTraceCondition = "@Resource[Microsoft.OperationalInsights/workspaces/tables:name] StringEquals 'AppGenAIContent'" } },
+        @{ Name = 'AMPLS private endpoint attached AppInsights DNS zone'; Change = { param($t) $t.resources.privateEndpointPrivateLinkScope.properties.parameters.privateDnsZoneGroup = "[createObject('value', createObject('name', 'privateLinkDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'appinsightsARecord', 'privateDnsZoneResourceId', 'unexpected'))))]" } },
         @{ Name = 'metadata old policy echo restored'; Change = { param($t) $t.outputs.OBSERVABILITY_MIXED_WORKSPACES_ALLOWED = @{ type = 'bool'; value = $true } } },
         @{ Name = 'MCP vector capability default enabled'; Change = { param($t) $t.parameters.enableCosmosVectorSearch.defaultValue = $true } },
         @{ Name = 'MCP existing capabilities discarded'; Change = { param($t) $t.resources.cosmosDBAccount.properties.parameters.capabilities.value = @('EnableServerless', 'EnableNoSQLVectorSearch') } },
@@ -190,7 +198,8 @@ try {
             }
         }
     }
-    $subnetPaths = @(Get-SubnetDeltaPaths (Get-ModelDeploymentsOptionalProjection)) +
+    $subnetPaths = @(Get-SubnetDeltaPaths (Get-PrivateMonitoringTraceRbacProjection)) +
+        @(Get-SubnetDeltaPaths (Get-ModelDeploymentsOptionalProjection)) +
         @(Get-SubnetDeltaPaths (Get-SubnetConditionalReferencesProjection)) +
         @(Get-SubnetDeltaPaths (Get-ArchitectureSubnetProjection)) +
         @(Get-SubnetDeltaPaths (Get-FirewallBasicProjection)) +

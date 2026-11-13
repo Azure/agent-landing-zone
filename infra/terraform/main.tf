@@ -226,6 +226,25 @@ resource "terraform_data" "root_contract" {
       error_message = "Hosted deployment requires an immutable lowercase sha256 image digest."
     }
     precondition {
+      condition     = !var.grantProjectProtectedTraceContentReader || var.grantProjectTraceEvaluationReader
+      error_message = "grantProjectProtectedTraceContentReader requires grantProjectTraceEvaluationReader=true."
+    }
+    precondition {
+      condition     = !(var.grantProjectTraceEvaluationReader || var.grantProjectProtectedTraceContentReader) || (var.deployAiFoundry && var.deployAfProject)
+      error_message = "Scheduled Foundry trace evaluation permissions require deployAiFoundry=true and deployAfProject=true."
+    }
+    precondition {
+      condition     = !(var.grantProjectTraceEvaluationReader || var.grantProjectProtectedTraceContentReader) || (local.effective_observability.has_app_insights && local.effective_observability.has_law)
+      error_message = "Scheduled Foundry trace evaluation permissions require effective Application Insights and Log Analytics resources."
+    }
+    precondition {
+      condition = !(var.grantProjectTraceEvaluationReader || var.grantProjectProtectedTraceContentReader) || (
+        (local.services_existing_ai == "" || can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Insights/components/[^/]+$", local.services_existing_ai))) &&
+        (local.services_existing_law == "" || can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.OperationalInsights/workspaces/[^/]+$", local.services_existing_law)))
+      )
+      error_message = "Existing Application Insights and Log Analytics resource IDs must be full ARM resource IDs."
+    }
+    precondition {
       condition     = !local.effective_jumpbox || (var.vmAdminPassword == null ? true : var.vmAdminPassword == "" || length(var.vmAdminPassword) >= 12)
       error_message = "An explicit managed-jumpbox admin password must have at least 12 characters; null/empty requests persistent state-owned generation."
     }

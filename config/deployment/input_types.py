@@ -30,6 +30,7 @@ _GROUPS: dict[InputKind, str] = {
         deployContainerRegistry deployContainerEnv deploySubnets deployNsgs
         deployAzureFirewall enableFirewallDnsProxy deployAcrTaskAgentPool
         prepareHostedAgent grantHostedAgentProjectManager deployHostedAgent deployDurableTaskScheduler
+        grantProjectTraceEvaluationReader grantProjectProtectedTraceContentReader
         extendFirewallForJumpboxBootstrap extendFirewallForAcrTaskBuilds
         bastionEnableTunneling enableAcsMediaEgress sideBySideDeploy deploySoftware
         deployAfProject deployAAfAgentSvc aiFoundryDisableLocalAuth enableAgenticRetrieval
