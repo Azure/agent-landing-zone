@@ -45,7 +45,7 @@ from config.appdefinition.binding import APP_ID_ENV, env_file_path
 from config.appdefinition.errors import AppDefinitionError, BindingMismatchError
 from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
 from config.deployment.app_settings import substitute_values as _substitute
-from config.deployment.composition import is_truthy, resolve_mode
+from config.deployment.composition import DeploymentTopologyError, is_truthy, resolve_mode
 from config.deployment.existing_images import apply_existing_images, discover_existing_images
 from config.deployment.input_types import INPUT_TYPES, NULLABLE_BOOLEANS
 from config.deployment.resolution import resolve_parameters
@@ -65,13 +65,14 @@ _VNET_ID = re.compile(
 
 def _native_value(name: str, value: object) -> object:
     kind = INPUT_TYPES[name]
+    error_cls = DeploymentTopologyError if name == "workloadProfiles" else ValueError
     if value is None:
         if (
             kind == "bool" and name not in NULLABLE_BOOLEANS
             or kind == "int" and name != "dbDatabaseThroughput"
             or kind in ("array", "object")
         ):
-            raise ValueError(f"{name} requires a native {kind} value, not null.")
+            raise error_cls(f"{name} requires a native {kind} value, not null.")
         return None
     if kind == "bool":
         if type(value) is bool:
@@ -97,10 +98,10 @@ def _native_value(name: str, value: object) -> object:
             try:
                 value = json.loads(value)
             except ValueError:
-                raise ValueError(f"{name} requires valid JSON for a native {kind}.") from None
+                raise error_cls(f"{name} requires valid JSON for a native {kind}.") from None
         if isinstance(value, expected):
             return value
-    raise ValueError(f"{name} requires a native {kind} value; check its product input or azd setting.")
+    raise error_cls(f"{name} requires a native {kind} value; check its product input or azd setting.")
 
 
 def _uuid(value: str, name: str) -> str:

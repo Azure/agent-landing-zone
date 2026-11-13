@@ -7,7 +7,9 @@ from unittest.mock import patch
 import pytest
 
 from config.deployment import appconfig, native_deploy, private_network
-from config.deployment.composition import compose_parameters, describe_application
+from config.deployment.composition import (
+    DeploymentTopologyError, compose_parameters, custom_container_apps, describe_application,
+)
 from config.deployment.app_settings import substitute_values
 from config.deployment.resolution import resolve_parameters
 
@@ -115,3 +117,68 @@ def test_custom_network_preflight_probes_only_declared_dependencies(host):
     with patch.object(private_network, "check_endpoint") as probe:
         assert private_network.check_stage(env, "pre-deploy") == 0
     probe.assert_called_once_with("APP_CONFIG_ENDPOINT", env["APP_CONFIG_ENDPOINT"])
+
+
+@pytest.mark.parametrize("profiles,expected_profile", [
+    (
+        [
+            {"name": "Consumption", "workloadProfileType": "Consumption"},
+            {"name": "main", "workloadProfileType": "D4", "minimumCount": 0, "maximumCount": 1},
+        ],
+        "main",
+    ),
+    ([{"name": "Consumption", "workloadProfileType": "Consumption"}], "Consumption"),
+    ([], "Consumption"),
+    (
+        [{"name": "dedicated", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 3}],
+        "dedicated",
+    ),
+])
+@pytest.mark.parametrize("via_env", [False, True])
+def test_custom_container_apps_resolve_effective_workload_profile_in_both_providers(
+    profiles, expected_profile, via_env,
+):
+    document = source()
+    env = {
+        **environment("hosted", "conversational", "samples/custom-app/containerapp"),
+        "HOSTED_AGENT_RESOURCE_SCOPE": "https://ai.azure.com/.default",
+    }
+    if via_env:
+        env["WORKLOAD_PROFILES"] = json.dumps(profiles)
+    else:
+        document["parameters"]["workloadProfiles"]["value"] = profiles
+    bicep = compose_parameters(document, env)["parameters"]
+    plain = substitute_values({key: entry["value"] for key, entry in document["parameters"].items()}, env)
+    terraform = resolve_parameters(plain, env)
+    assert bicep["workloadProfiles"]["value"] == terraform["workloadProfiles"] == profiles
+    assert bicep["containerAppsList"]["value"] == terraform["containerAppsList"]
+    web, = terraform["containerAppsList"]
+    assert web["service_name"] == "web"
+    assert web["profile_name"] == expected_profile
+    if via_env:
+        direct, = custom_container_apps(env, [], hosted_orchestration=True)
+        assert direct["profile_name"] == expected_profile
+
+
+def test_custom_container_apps_reject_ambiguous_multi_dedicated_profiles_without_main_or_consumption():
+    ambiguous = [
+        {"name": "dedicated-d4", "workloadProfileType": "D4", "minimumCount": 1, "maximumCount": 2},
+        {"name": "dedicated-d8", "workloadProfileType": "D8", "minimumCount": 1, "maximumCount": 2},
+    ]
+    document = source()
+    document["parameters"]["workloadProfiles"]["value"] = ambiguous
+    env = {
+        **environment("container_apps", "conversational", "samples/custom-app/containerapp"),
+    }
+    with pytest.raises(DeploymentTopologyError, match="workloadProfiles"):
+        compose_parameters(document, env)
+    plain = substitute_values({key: entry["value"] for key, entry in document["parameters"].items()}, env)
+    with pytest.raises(DeploymentTopologyError, match="workloadProfiles"):
+        resolve_parameters(plain, env)
+    # Hosted-only custom definitions have no Container Apps and remain unaffected.
+    hosted_env = {
+        **environment("hosted", "conversational", "samples/custom-app/hosted"),
+        "HOSTED_AGENT_RESOURCE_SCOPE": "https://ai.azure.com/.default",
+    }
+    assert compose_parameters(document, hosted_env)["parameters"]["containerAppsList"]["value"] == []
+
