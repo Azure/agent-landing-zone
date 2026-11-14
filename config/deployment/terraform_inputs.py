@@ -44,7 +44,7 @@ from config import find_repo_root
 from config.appdefinition.binding import APP_ID_ENV, env_file_path
 from config.appdefinition.errors import AppDefinitionError, BindingMismatchError
 from config.appdefinition.loader import DEFINITION_ENV, load_selected_definition
-from config.deployment.app_settings import substitute_values as _substitute
+from config.deployment.app_settings import _PLACEHOLDER, substitute_values as _substitute
 from config.deployment.composition import DeploymentTopologyError, is_truthy, resolve_mode
 from config.deployment.existing_images import apply_existing_images, discover_existing_images
 from config.deployment.input_types import INPUT_TYPES, NULLABLE_BOOLEANS
@@ -104,6 +104,13 @@ def _native_value(name: str, value: object) -> object:
     raise error_cls(f"{name} requires a native {kind} value; check its product input or azd setting.")
 
 
+def _unset_placeholder(value: object, environment: Mapping[str, str]) -> bool:
+    if not isinstance(value, str):
+        return False
+    match = _PLACEHOLDER.fullmatch(value)
+    return bool(match) and match.group(2) is None and match.group(1) not in environment
+
+
 def _uuid(value: str, name: str) -> str:
     try:
         return str(UUID(value))
@@ -137,6 +144,13 @@ def compose_inputs(
     unknown = source.keys() - INPUT_TYPES.keys() - {"aiFoundryLocation"}
     if unknown:
         raise ValueError("Unknown infrastructure input names; compare the product configuration with the foundation interface.")
+    # An unset placeholder without a default is omitted, as azd omits empty
+    # Bicep parameters, so Terraform applies its declared default. A value
+    # explicitly set to an empty string is still validated and rejected.
+    source = {
+        name: value for name, value in source.items()
+        if not _unset_placeholder(value, environment)
+    }
     substituted = _substitute(copy.deepcopy(dict(source)), environment)
     if "aiFoundryLocation" in substituted:
         foundry_location = substituted.pop("aiFoundryLocation")

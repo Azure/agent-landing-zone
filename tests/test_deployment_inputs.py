@@ -69,6 +69,28 @@ def test_application_id_is_a_strict_string_input():
         compose_inputs({"applicationId": 123}, ENVIRONMENT)
 
 
+UNSET_WITHOUT_DEFAULT = {
+    "useUAI": "USE_UAI",
+    "enableAgenticRetrieval": "ENABLE_AGENTIC_RETRIEVAL",
+    "useExistingVNet": "USE_EXISTING_VNET",
+    "sideBySideDeploy": "SIDE_BY_SIDE",
+}
+
+
+def test_unset_inputs_without_default_are_omitted_for_terraform_defaults():
+    environment = {
+        key: value for key, value in ENVIRONMENT.items() if key not in UNSET_WITHOUT_DEFAULT.values()
+    }
+    terraform = compose_inputs(values(), environment)
+    assert not UNSET_WITHOUT_DEFAULT.keys() & terraform.keys()
+
+
+@pytest.mark.parametrize("param_name,env_name", UNSET_WITHOUT_DEFAULT.items())
+def test_inputs_without_default_reject_explicit_empty_values(param_name, env_name):
+    with pytest.raises(ValueError, match=param_name):
+        compose_inputs(values(), {**ENVIRONMENT, env_name: ""})
+
+
 @pytest.mark.parametrize("raw,expected", [(None, True), ("true", True), ("false", False)])
 def test_deploy_model_deployments_survives_both_provider_input_adapters(raw, expected):
     environment = {**ENVIRONMENT}
@@ -316,7 +338,7 @@ def test_all_declared_inputs_are_accepted_with_native_types():
             original[name] = []
         else:
             original[name] = "fixture"
-    result = compose_inputs(original, ENVIRONMENT)
+    result = compose_inputs(original, {**ENVIRONMENT, "EXISTING_VNET_RESOURCE_ID": ""})
     assert {name for name, _ in declarations} <= result.keys()
 
 
