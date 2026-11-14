@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.2] - 2026-11-14
 
 ### Added
 
@@ -15,6 +15,23 @@
 - Terraform provisioning with `NETWORK_ISOLATION=true` now completes: the storage account's `blobServices/default` singleton is updated instead of created (existing state is kept through a `removed` block), model deployments omit unset optional fields, and writes to Foundry account children are serialized with an account lock and a `RequestConflict` retry.
 - Terraform no longer writes App Configuration key-values through ARM when `NETWORK_ISOLATION=true`. With private link delegation, ARM accepts these writes only through Azure Resource Manager Private Link, so they failed with `Forbidden`. This matches Bicep, where `postProvision` publishes the settings from inside the network. Public key-value writes retry transient pass-through RBAC denials, and legacy API key references wait for the App Configuration private endpoint and DNS zone group.
 - Terraform no longer creates the Foundry account capability host when the agent subnet is injected. The service creates that host itself and bound to the subnet, so the explicit request failed with `customerSubnet must match`. This matches Bicep.
+
+### Migration
+
+- No action required. Bicep is unchanged. Terraform environments with `NETWORK_ISOLATION=true` keep publishing App Configuration settings through the data plane in `postProvision`, as Bicep does. For rollback, restore `v7.5.1`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI passed Bicep build and lint, Terraform contracts (`terraform fmt`, `validate` and `test`) and deployment and hook contracts on Linux and Windows for every change in this release.
+- Live validation of the standard scenario with Bicep and Terraform runs through the release validation workflow after publication. The release is promoted to Latest only when both pass.
 
 ## [v7.5.1] - 2026-11-14
 
