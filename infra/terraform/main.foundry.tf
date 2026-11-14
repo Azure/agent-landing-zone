@@ -208,6 +208,14 @@ resource "terraform_data" "foundry_model_contract" {
   }
 }
 
+locals {
+  # The Cognitive Services RP rejects concurrent writes under one account with
+  # 409 RequestConflict. Bicep serializes these children (AVM @batchSize(1) and
+  # explicit dependsOn), so Terraform shares one account lock and retries.
+  foundry_account_locks  = var.deployAiFoundry ? ["${local.services_foundry_rg_id}/providers/Microsoft.CognitiveServices/accounts/${local.resource_names.aiFoundryAccountName}"] : []
+  foundry_conflict_retry = { error_message_regex = ["RequestConflict", "Another operation is (in progress|being performed)"] }
+}
+
 # Direct resources preserve the source account/project-before-PE ordering and
 # allow narrow exclusion of the postProvision-owned model RAI attachment.
 resource "azapi_resource" "foundry_account" {
@@ -246,6 +254,8 @@ resource "azapi_resource" "foundry_project" {
   count     = local.services_project ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects@2025-07-01-preview"
   parent_id = azapi_resource.foundry_account[0].id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.resource_names.aiFoundryProjectName
   location  = local.effective_locations.main
   tags      = var.deploymentTags
@@ -271,6 +281,8 @@ resource "azapi_resource" "model_deployment" {
   for_each  = { for deployment in local.services_model_deployments : deployment.name => deployment if var.deployAiFoundry }
   type      = "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
   parent_id = azapi_resource.foundry_account[0].id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = each.key
   # Unset optional attributes are omitted, not sent as JSON null: the
   # Cognitive Services RP rejects null enum fields such as sku.tier with
@@ -342,6 +354,8 @@ resource "azapi_resource" "project_cosmos_connection" {
   count     = local.services_project && local.services_agent_service ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-07-01-preview"
   parent_id = local.foundry_context.project_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.services_connection_names.associated_cosmos
   body = {
     properties = {
@@ -362,6 +376,8 @@ resource "azapi_resource" "project_storage_connection" {
   count     = local.services_project && local.services_agent_service ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-07-01-preview"
   parent_id = local.foundry_context.project_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.services_connection_names.associated_storage
   body = {
     properties = {
@@ -382,6 +398,8 @@ resource "azapi_resource" "project_search_connection" {
   count     = local.services_project && local.services_agent_service ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-07-01-preview"
   parent_id = local.foundry_context.project_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.services_connection_names.associated_search
   body = {
     properties = {
@@ -402,6 +420,8 @@ resource "azapi_resource" "account_capability_host" {
   count      = local.services_project && local.services_agent_service ? 1 : 0
   type       = "Microsoft.CognitiveServices/accounts/capabilityHosts@2025-07-01-preview"
   parent_id  = local.foundry_context.account_id
+  locks      = local.foundry_account_locks
+  retry      = local.foundry_conflict_retry
   name       = "chagent${replace(local.resource_names.aiFoundryAccountName, "-", "")}"
   body       = { properties = { capabilityHostKind = "Agents", tags = var.deploymentTags } }
   depends_on = [azapi_resource.project_search_connection]
@@ -411,6 +431,8 @@ resource "azapi_resource" "project_capability_host" {
   count     = local.services_project && local.services_agent_service ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects/capabilityHosts@2025-07-01-preview"
   parent_id = local.foundry_context.project_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = "chagent${replace(local.resource_names.aiFoundryProjectName, "-", "")}"
   body = {
     properties = {
@@ -462,6 +484,8 @@ resource "azapi_resource" "account_connection" {
   for_each   = local.services_account_connections
   type       = "Microsoft.CognitiveServices/accounts/connections@2025-06-01"
   parent_id  = local.foundry_context.account_id
+  locks      = local.foundry_account_locks
+  retry      = local.foundry_conflict_retry
   name       = each.value.name
   body       = { properties = each.value.properties }
   depends_on = [terraform_data.foundry_connection_contract]
@@ -471,6 +495,8 @@ resource "azapi_resource" "knowledge_base_connection" {
   count     = local.services_project && var.deploySearchService && var.retrievalBackend == "foundry_iq" ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview"
   parent_id = local.foundry_context.project_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = var.knowledgeBaseConnectionName
   # Foundry supports this auth type through raw ARM, ahead of the typed schema:
   # Azure/azure-dev cli/azd/extensions/azure.ai.connections/internal/cmd/raw_connection.go.
@@ -492,6 +518,8 @@ resource "azapi_resource" "insights_connection" {
   count     = var.deployAiFoundry && (local.services_existing_ai != "" || local.services_create_ai) ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/connections@2025-06-01"
   parent_id = local.foundry_context.account_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.services_connection_names.insights
   body = {
     properties = {
@@ -535,6 +563,8 @@ resource "azapi_resource" "bing_connection" {
   count     = var.deployAiFoundry && var.deployGroundingWithBing ? 1 : 0
   type      = "Microsoft.CognitiveServices/accounts/connections@2025-06-01"
   parent_id = local.foundry_context.account_id
+  locks     = local.foundry_account_locks
+  retry     = local.foundry_conflict_retry
   name      = local.services_connection_names.bing
   body = {
     properties = {

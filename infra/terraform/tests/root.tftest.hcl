@@ -169,6 +169,24 @@ run "model_deployment_body_omits_unset_optional_fields" {
   }
 }
 
+run "foundry_account_children_serialize_writes" {
+  command = plan
+
+  assert {
+    condition = length(local.foundry_account_locks) == 1 && alltrue(concat(
+      [for deployment in azapi_resource.model_deployment : deployment.locks == local.foundry_account_locks],
+      [for project in azapi_resource.foundry_project : project.locks == local.foundry_account_locks],
+      [for connection in azapi_resource.account_connection : connection.locks == local.foundry_account_locks],
+    ))
+    error_message = "Foundry account children must share one account lock, because the RP rejects concurrent writes with RequestConflict."
+  }
+
+  assert {
+    condition     = alltrue([for deployment in azapi_resource.model_deployment : contains(deployment.retry.error_message_regex, "RequestConflict")])
+    error_message = "Foundry account children must retry RequestConflict."
+  }
+}
+
 run "external_ai_gateway_no_local_models" {
   command = plan
 
