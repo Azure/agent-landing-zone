@@ -247,8 +247,9 @@ finish() {
   local rc=$?
   trap - EXIT
   [ -n "$RESULT" ] || RESULT="failed"
+  # The result reflects deploy and smoke test only. Teardown is best effort and
+  # reported separately, because Azure often keeps a resource locked for a while.
   teardown
-  [ "$TEARDOWN" = "failed-forced-cleanup" ] && RESULT="failed"
   STATE="completed"
   STEP="done"
   log "Result: $RESULT (teardown: $TEARDOWN)"

@@ -40,7 +40,7 @@ def build_report(evidence: Path, release: str, run_url: str, values: list[str]) 
         f"# Release validation: {release} (Terraform, NETWORK_ISOLATION=true)",
         "",
         f"- Result: **{result}**",
-        f"- Teardown: {status.get('teardown', 'unknown')}",
+        f"- Teardown (best effort, not part of the result): {status.get('teardown', 'unknown')}",
         f"- Region: {status.get('location', 'unknown')}",
         f"- Started: {status.get('started', 'unknown')}, last update: {status.get('updated', 'unknown')}",
         f"- Workflow run: {run_url}",
@@ -75,7 +75,7 @@ def amend_notes(notes: str, status: dict, run_url: str, asset_url: str) -> str:
         f"- Live Terraform deployment with `NETWORK_ISOLATION=true` in "
         f"`{status.get('location', 'unknown')}` passed on {date}: provision, deferred "
         "data-plane configuration from a VNet-connected host, `azd deploy` with the "
-        "agent smoke test, and teardown. "
+        "agent smoke test. "
         f"Evidence: [workflow run]({run_url}), [commands and transcript]({asset_url}). {MARKER}"
     )
     lines = [line for line in notes.replace("\r\n", "\n").split("\n") if MARKER not in line]

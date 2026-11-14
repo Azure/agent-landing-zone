@@ -13,7 +13,9 @@ deployment and `NETWORK_ISOLATION=true`. It is not part of the shipped product.
 3. The VM clones the tag, creates a fresh spoke, peers it with the hub, runs the
    documented operator commands (`azd provision`, `azd deploy`, smoke test),
    records the sanitized transcript, commands and step results, and always
-   tears the spoke down unless `keep_environment` is set.
+   tears the spoke down unless `keep_environment` is set. The result depends on the
+   deployment and smoke test only. Teardown is best effort and reported
+   separately, because Azure often keeps a resource locked for a while.
 4. `vm-evidence.sh follow` pages the live transcript tail and
    `vm-evidence.sh collect` downloads the evidence, both through Run Command.
 5. `evidence.py report` builds the report. On success,
