@@ -41,3 +41,6 @@ script prints.
 - To run manually, start the VM and invoke `launch.sh` through
   `az vm run-command invoke`, then use `vm-evidence.sh` with `HUB_RG`,
   `HUB_VM` and `RUN_KEY`.
+- To check a fix before cutting a release, set `SOURCE_REF` to the candidate
+  branch when calling `launch.sh`. It deploys that branch instead of the tag.
+  Never publish the evidence of such a run for a release.

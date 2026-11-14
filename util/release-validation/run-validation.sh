@@ -15,7 +15,9 @@
 # Required environment: RELEASE_TAG RUN_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID
 # AZURE_LOCATION EXECUTOR_CLIENT_ID HUB_VNET_ID STORAGE_ACCOUNT
 # STORAGE_RESOURCE_GROUP. Optional: HOSTED_AGENT_RESOURCE_SCOPE, KEEP_ENVIRONMENT,
-# REPOSITORY (default Azure/agent-landing-zone).
+# REPOSITORY (default Azure/agent-landing-zone), SOURCE_REF (maintainer-only: a
+# candidate branch to deploy instead of the tag, for iterating on a fix before
+# release. Evidence from such a run must not be published for the tag).
 set -uo pipefail
 
 for required in RELEASE_TAG RUN_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID AZURE_LOCATION \
@@ -24,6 +26,8 @@ for required in RELEASE_TAG RUN_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID AZURE_L
 done
 [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid RELEASE_TAG" >&2; exit 2; }
 [[ "$RUN_ID" =~ ^[0-9A-Za-z-]{1,40}$ ]] || { echo "Invalid RUN_ID" >&2; exit 2; }
+SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
+[[ "$SOURCE_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || { echo "Invalid SOURCE_REF" >&2; exit 2; }
 
 REPOSITORY="${REPOSITORY:-Azure/agent-landing-zone}"
 HOSTED_AGENT_RESOURCE_SCOPE="${HOSTED_AGENT_RESOURCE_SCOPE:-https://ai.azure.com/.default}"
@@ -69,10 +73,10 @@ write_status() {
   local steps_json
   steps_json="$(printf '%s\n' "${STEPS[@]:-}" | jq -R 'select(length>0) | split("|") | {name:.[0], kind:.[1], exit:(.[2]|tonumber), seconds:(.[3]|tonumber)}' | jq -s '.')"
   jq -n --arg state "$STATE" --arg step "$STEP" --arg result "$RESULT" --arg teardown "$TEARDOWN" \
-    --arg release "$RELEASE_TAG" --arg env "$ENV_NAME" --arg location "$AZURE_LOCATION" \
+    --arg release "$RELEASE_TAG" --arg source_ref "$SOURCE_REF" --arg env "$ENV_NAME" --arg location "$AZURE_LOCATION" \
     --arg started "$STARTED" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson steps "$steps_json" \
-    '{state:$state, step:$step, result:$result, teardown:$teardown, release:$release,
+    '{state:$state, step:$step, result:$result, teardown:$teardown, release:$release, source_ref:$source_ref,
       environment:$env, location:$location, provider:"terraform", network_isolation:true,
       started:$started, updated:$updated, steps:$steps}' > "$OUT/status.json.tmp"
   mv -f "$OUT/status.json.tmp" "$OUT/status.json"
@@ -270,7 +274,7 @@ run harness "azd-ai-agents-extension" bash -c 'azd extension list --installed 2>
 
 log "Get the release"
 cd "$WORK" || fail
-run user "git-clone" git clone --depth 1 --branch "$RELEASE_TAG" "https://github.com/$REPOSITORY.git" agent-landing-zone || fail
+run user "git-clone" git clone --depth 1 --branch "$SOURCE_REF" "https://github.com/$REPOSITORY.git" agent-landing-zone || fail
 REPO_DIR="$WORK/agent-landing-zone"
 note_user "cd agent-landing-zone"
 cd "$REPO_DIR" || fail

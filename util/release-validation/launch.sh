@@ -19,6 +19,8 @@ need STORAGE_ACCOUNT '^[a-z0-9]{3,24}$'
 need HUB_RG '^[A-Za-z0-9._()-]+$'
 REPOSITORY="${GITHUB_REPOSITORY:-Azure/agent-landing-zone}"
 need REPOSITORY '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
+need SOURCE_REF '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$'
 
 payload="$(base64 -w0 "$(dirname "$0")/run-validation.sh")"
 work="/var/lib/relval/$RUN_KEY"
@@ -44,6 +46,7 @@ STORAGE_RESOURCE_GROUP=$HUB_RG
 HOSTED_AGENT_RESOURCE_SCOPE=$HOSTED_SCOPE
 KEEP_ENVIRONMENT=$KEEP_ENVIRONMENT
 REPOSITORY=$REPOSITORY
+SOURCE_REF=$SOURCE_REF
 SELF_DEALLOCATE=true
 PARAMS
 systemd-run --unit "relval-$RUN_KEY" --collect --property=EnvironmentFile="$work/params.env" \
