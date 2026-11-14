@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time, idempotent setup of the persistent release-validation hub used by
-# .github/workflows/release-validation-terraform.yml.
+# .github/workflows/release-validation.yml.
 #
 # Creates, in the current Azure CLI subscription:
 #   - a hub resource group with a hub VNet (10.250.0.0/24), NAT gateway and a
@@ -17,14 +17,19 @@
 # Usage (bash: Azure Cloud Shell, Linux, macOS or Git Bash):
 #   az account set --subscription <subscription-id>
 #   util/release-validation/bootstrap-hub.sh [--location swedencentral] \
-#     [--repo Azure/agent-landing-zone] [--environment release-validation]
+#     [--repo Azure/agent-landing-zone] [--environment release-validation] \
+#     [--name agentlz-relval] [--resource-group rg-agentlz-relval-hub]
+#
+# --name is the prefix of every hub resource name. Rerun against an existing hub
+# with the same --name and --resource-group it was created with.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 LOCATION="swedencentral"
 REPO="Azure/agent-landing-zone"
 GH_ENVIRONMENT="release-validation"
-RG="rg-alz-relval-hub"
+NAME="agentlz-relval"
+RG=""
 VM_SIZE="Standard_D2s_v5"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,10 +37,13 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --environment) GH_ENVIRONMENT="$2"; shift 2 ;;
     --resource-group) RG="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
     --vm-size) VM_SIZE="$2"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+RG="${RG:-rg-$NAME-hub}"
 
 azq() { az "$@" --only-show-errors | tr -d '\r'; }
 log() { printf '\n==> %s\n' "$*"; }
@@ -44,11 +52,11 @@ SUB="$(azq account show --query id -o tsv)"
 TENANT="$(azq account show --query tenantId -o tsv)"
 SUFFIX="$(printf '%s' "$SUB$RG" | sha256sum | cut -c1-10)"
 STORAGE="stalzrv${SUFFIX}"
-VNET="vnet-alz-relval-hub"
+VNET="vnet-$NAME-hub"
 SUBNET="snet-executor"
-VM="vm-alz-relval"
-VM_IDENTITY="id-alz-relval-executor"
-GH_IDENTITY="id-alz-relval-github"
+VM="vm-$NAME"
+VM_IDENTITY="id-$NAME-executor"
+GH_IDENTITY="id-$NAME-github"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 assign_role() { # <principal-object-id> <role> <scope>
@@ -72,16 +80,16 @@ azq group create -n "$RG" -l "$LOCATION" --tags purpose=agent-lz-release-validat
 
 log "Network: hub VNet, NSG without inbound rules, NAT gateway for outbound"
 azq network nsg create -g "$RG" -n "nsg-$SUBNET" -l "$LOCATION" >/dev/null
-azq network public-ip create -g "$RG" -n "pip-nat-alz-relval" -l "$LOCATION" \
+azq network public-ip create -g "$RG" -n "pip-nat-$NAME" -l "$LOCATION" \
   --sku Standard --allocation-method Static >/dev/null
-azq network nat gateway create -g "$RG" -n "nat-alz-relval" -l "$LOCATION" \
-  --public-ip-addresses "pip-nat-alz-relval" >/dev/null
+azq network nat gateway create -g "$RG" -n "nat-$NAME" -l "$LOCATION" \
+  --public-ip-addresses "pip-nat-$NAME" >/dev/null
 if ! az network vnet show -g "$RG" -n "$VNET" >/dev/null 2>&1; then
   azq network vnet create -g "$RG" -n "$VNET" -l "$LOCATION" --address-prefixes 10.250.0.0/24 \
     --subnet-name "$SUBNET" --subnet-prefixes 10.250.0.0/26 >/dev/null
 fi
 azq network vnet subnet update -g "$RG" --vnet-name "$VNET" -n "$SUBNET" \
-  --network-security-group "nsg-$SUBNET" --nat-gateway "nat-alz-relval" >/dev/null
+  --network-security-group "nsg-$SUBNET" --nat-gateway "nat-$NAME" >/dev/null
 VNET_ID="$(azq network vnet show -g "$RG" -n "$VNET" --query id -o tsv)"
 
 log "Identities"

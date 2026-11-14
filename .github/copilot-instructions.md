@@ -107,6 +107,16 @@ When preparing a release branch:
   `v2.8.0`). Never prefix release titles with the product or service name (for
   example, do not use `Agent Landing Zone v2.8.0`, `Agent Landing Zone Orchestrator v2.8.0`, or
   `agent-app-ui v2.8.0`).
+- **Publish every umbrella release as a pre-release** with
+  `gh release create vX.Y.Z --prerelease --title vX.Y.Z`. Never publish it as
+  Latest directly. Then dispatch `.github/workflows/release-validation.yml`
+  for the tag. The release stays a pre-release until the workflow passes the
+  standard scenario (`util/release-validation/scenario.env`) with both Bicep and
+  Terraform. The workflow then attaches the evidence, adds one evidence line per
+  provider under `## Validation` and promotes the release to Latest. "Validated"
+  means the Latest GitHub release. If validation fails, fix on a feature branch
+  and cut a new patch release the same way. Never promote a release by hand
+  without passing evidence for both providers.
 - **MANDATORY for EVERY Agent Landing Zone umbrella release — no exceptions.** The
   published GitHub Release notes (the `gh release create` / `gh release edit`
   body, NOT just the `CHANGELOG.md`) MUST include a `## Component versions`

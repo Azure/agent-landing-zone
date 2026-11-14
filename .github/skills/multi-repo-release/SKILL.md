@@ -35,6 +35,19 @@ are authoritative.
 9. Target the release pull request to `main`.
 10. Re-fetch published release notes and verify headings, lists, tables, and the
     absence of private `gptrag-*` and `rg-gptrag-*` validation names.
+11. Publish the GitHub Release as a pre-release
+    (`gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file ...`),
+    never directly as Latest.
+12. Dispatch `.github/workflows/release-validation.yml` with `release_tag=vX.Y.Z`
+    (`providers=both`, `promote=true`) and follow it. It validates the standard
+    scenario in `util/release-validation/scenario.env` with Bicep and Terraform,
+    one after the other. When both pass it attaches the evidence, adds one
+    evidence line per provider under `## Validation` and promotes the release to
+    Latest. "Validated" means the Latest GitHub release.
+13. If either provider fails, keep the release as a pre-release, analyze the
+    evidence artifact, fix on a feature branch from `develop` and cut the next
+    patch release the same way. Never promote a release by hand without passing
+    evidence for both providers.
 
 Do not publish a tag, release, package, image, or production deployment without
 explicit human approval. Report incompatible pins, missing validation, or

@@ -129,7 +129,8 @@ infra/**
 The native source gate, customer adapter and cross-component tests must address
 the UI's actual inherited Python package, including its packaged schema assets.
 This is not a new product identifier or permission to introduce legacy names
-elsewhere. The scanner accepts only the complete source lines below in their
+elsewhere. The release validation redaction patterns must match legacy private
+environment names so they never reach published evidence. The scanner accepts only the complete source lines below in their
 exact repository-relative files (ignoring indentation); adding
 another token or moving the line to another file still fails.
 
@@ -140,4 +141,6 @@ contracts/examples/inline-presentation/text_only_adapter.py | from gpt_rag_ui.se
 tests/test_presentation_packaging.py | for variable, package in (("INLINE_ORCH_WHEEL", "native"), ("INLINE_UI_WHEEL", "gpt_rag_ui")):
 tests/test_presentation_packaging.py | import gpt_rag_ui.services.native_presentation as implementation
 tests/test_presentation_packaging.py | assert pathlib.Path(implementation.SCHEMA) == package_root / 'gpt_rag_ui/contracts/turn-presentation-v1.schema.json'
+util/release-validation/evidence.py | PRIVATE_ENV = re.compile(r"(rg-)?gptrag-\d{10}")
+util/release-validation/run-validation.sh | -e 's/gptrag-[0-9]{10}/<environment>/g'
 ```

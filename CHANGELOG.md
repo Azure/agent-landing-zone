@@ -4,7 +4,11 @@
 
 ### Added
 
-- Manual `Release validation (Terraform, network isolated)` GitHub Actions workflow (`.github/workflows/release-validation-terraform.yml`). It asks for a release tag, deploys that release live with Terraform and `NETWORK_ISOLATION=true` from an executor VM in a persistent validation hub (`util/release-validation/`), runs the documented operator commands, records the sanitized transcript, commands and step results as evidence, always tears the spoke down and, on success, links the evidence from the release notes. The GitHub-hosted runner signs in with OIDC and reaches the VM only through Azure Run Command. One-time setup: `util/release-validation/bootstrap-hub.sh`.
+- `Release validation (network isolated)` GitHub Actions workflow (`.github/workflows/release-validation.yml`) that deploys a published release live with Bicep and Terraform, one after the other, using the standard scenario in `util/release-validation/scenario.env` (hosted orchestrator, `BUILD_MODE=acr-task`, `NETWORK_ISOLATION=true`). It runs from an executor VM in a persistent validation hub reached only through Azure Run Command with OIDC, runs the documented operator commands, records the sanitized transcript, commands and step results as evidence and always tears the spoke down. When both providers pass, it attaches the evidence, adds one evidence line per provider to the release notes and promotes the release from pre-release to Latest. A weekly run revalidates the Latest release without promotion and opens an issue on failure. One-time setup: `util/release-validation/bootstrap-hub.sh`.
+
+### Changed
+
+- Releases are published as pre-releases and become Latest only after the release validation workflow passes the standard scenario with Bicep and Terraform. "Validated" means the Latest GitHub release.
 
 ## [v7.5.1] - 2026-11-14
 

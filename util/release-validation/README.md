@@ -1,30 +1,68 @@
 # Release validation harness
 
-Maintainer tooling that validates a published release with a live Terraform
-deployment and `NETWORK_ISOLATION=true`. It is not part of the shipped product.
+Maintainer tooling that validates a published release with live Bicep and
+Terraform deployments of the standard scenario with `NETWORK_ISOLATION=true`.
+It is not part of the shipped product.
+
+## Release policy
+
+A release is published as a pre-release (`gh release create --prerelease`). It
+stays a pre-release until `.github/workflows/release-validation.yml` passes the
+standard scenario with both Bicep and Terraform. The workflow then attaches the
+evidence, amends the release notes and makes the release Latest. "Validated"
+means the Latest GitHub release.
+
+## Standard scenario
+
+`scenario.env` holds the `azd` settings of the standard scenario: hosted
+orchestrator, conversational mode, `BUILD_MODE=acr-task` with the ACR Tasks
+agent pool and `NETWORK_ISOLATION=true`. Every other parameter keeps its
+`main.parameters.json` default. Both providers use exactly these settings, so
+change the file only through a reviewed pull request.
 
 ## How it works
 
-1. `.github/workflows/release-validation-terraform.yml` runs manually
-   (`workflow_dispatch`) and asks for the release tag.
-2. The GitHub-hosted runner signs in with OIDC (no stored secret), starts the
-   executor VM in the validation hub and launches `run-validation.sh` on it
-   with `launch.sh` through Azure Run Command. The VM has no public IP.
-3. The VM clones the tag, creates a fresh spoke, peers it with the hub, runs the
-   documented operator commands (`azd provision`, `azd deploy`, smoke test),
-   records the sanitized transcript, commands and step results, and always
-   tears the spoke down unless `keep_environment` is set. The result depends on the
-   deployment and smoke test only. Teardown is best effort and reported
-   separately, because Azure often keeps a resource locked for a while.
-4. `vm-evidence.sh follow` pages the live transcript tail and
+1. The workflow runs manually (`workflow_dispatch`) with:
+   - `release_tag`: the tag to validate. Empty means the Latest release.
+   - `providers`: `both` (default), `bicep` or `terraform`.
+   - `location`, `hosted_agent_resource_scope` and `keep_environment`.
+   - `promote` (default `true`): promote the release when both providers pass.
+2. The `validate` job runs once per provider, one after the other
+   (`max-parallel: 1`). Two spokes would create the same privatelink DNS zone
+   names in the hub, and Terraform runs with `-lock=false` under `azd`.
+3. Each job signs in with OIDC (no stored secret), starts the executor VM in the
+   validation hub and launches `run-validation.sh` on it with `launch.sh`
+   through Azure Run Command. The VM has no public IP.
+4. The VM clones the tag, creates a fresh spoke, peers it with the hub, selects
+   the provider in `azure.yaml` (Terraform also gets a remote state backend),
+   applies `scenario.env`, runs the documented operator commands
+   (`azd provision`, `azd deploy`, smoke test), records the sanitized
+   transcript, commands and step results, and always tears the spoke down
+   unless `keep_environment` is set. The result depends on the deployment and
+   smoke test only. Teardown is best effort and reported separately.
+5. `vm-evidence.sh follow` pages the live transcript tail and
    `vm-evidence.sh collect` downloads the evidence, both through Run Command.
-5. `evidence.py report` builds the report. On success,
-   `evidence.py amend-notes` uploads it as a release asset and adds a marked
-   evidence section to the release notes.
+   `evidence.py report` builds the report, uploaded as the
+   `release-validation-<tag>-<provider>-<run id>` artifact. The job then
+   deallocates the VM and waits, so the next provider can start it.
+6. The `promote` job runs only when `promote` is set, both providers were
+   requested and both passed. It uploads `validation-<tag>-<provider>-<run id>.md`
+   as release assets, adds one marked evidence line per provider under
+   `## Validation` in the release notes (`evidence.py amend-notes`) and runs
+   `gh release edit <tag> --prerelease=false --latest`.
+
+## Weekly revalidation
+
+Every Monday at 03:00 UTC the workflow revalidates the Latest release with both
+providers and without promotion. A failure opens a GitHub issue, or comments on
+the open one. Fix it on a feature branch, cut a patch release as a pre-release
+and validate it.
 
 ## One-time setup
 
-Run `bootstrap-hub.sh` once with an account that can create resources and role
+Run `bootstrap-hub.sh` once (`--name` sets the hub name prefix, default
+`agentlz-relval`. Rerun an existing hub with the `--name` and
+`--resource-group` it was created with) with an account that can create resources and role
 assignments in the subscription. It creates the hub resource group, VNet, NAT
 gateway, executor VM and identities, the private evidence storage account and
 its private endpoint, and the GitHub OIDC federated credential. Then create the
@@ -33,7 +71,8 @@ script prints.
 
 ## Operating notes
 
-- Only one validation runs at a time (workflow concurrency group).
+- Only one validation runs at a time (workflow concurrency group and
+  `max-parallel: 1`). `launch.sh` also refuses to start while a run is active.
 - Run Command allows one command per VM and about 4 KB of output, so evidence
   is transferred in pages.
 - The evidence storage account is private. The executor reaches it through the
@@ -46,8 +85,9 @@ script prints.
 - To check a fix before cutting a release, set `SOURCE_REF` to the candidate
   branch when calling `launch.sh`. It deploys that branch instead of the tag.
   Never publish the evidence of such a run for a release.
-- If teardown leaves resources behind, delete the `rg-relval-<env>` and
-  `rg-relval-<env>-app` groups first, purge the soft-deleted Foundry account
-  (`az cognitiveservices account purge`, about 30 minutes), then delete
-  `rg-relval-<env>-network`. The account holds the agent subnet until it is
-  purged.
+- If teardown leaves resources behind, clean up in this order: delete the
+  environment and app resource groups (`rg-relval-<env>` and
+  `rg-relval-<env>-app`), purge the soft-deleted Foundry account
+  (`az cognitiveservices account purge`, about 30 minutes), then delete the
+  network resource group (`rg-relval-<env>-network`). The account holds the
+  agent subnet until it is purged.

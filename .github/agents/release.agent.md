@@ -15,6 +15,10 @@ GitHub Release notes describe the same combination. Preserve the required
 branch targets, tag format, release title, component table, validation
 evidence, and documentation updates.
 
+Publish releases as pre-releases. Only the release validation workflow
+promotes a release to Latest, after Bicep and Terraform both pass the standard
+scenario.
+
 Never expose personal Azure environment or resource group names. Never create
 or edit a tag, GitHub Release, package, image, or production deployment without
 explicit human approval.
