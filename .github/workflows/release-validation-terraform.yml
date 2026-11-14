@@ -1,0 +1,196 @@
+name: Release validation (Terraform, network isolated)
+
+# Manually validates a published Agent Landing Zone release with a live Azure
+# deployment of the Terraform path and NETWORK_ISOLATION=true.
+#
+# The GitHub-hosted job never reaches private endpoints. It signs in with OIDC
+# (no stored secret), starts the executor VM in the persistent validation hub,
+# launches util/release-validation/run-validation.sh on it through Azure Run
+# Command and follows the evidence the VM uploads. The VM provisions a fresh
+# spoke, connects it to the hub, deploys, runs the agent smoke test and always
+# tears the spoke down. One-time setup: util/release-validation/bootstrap-hub.sh.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to validate (for example v7.5.0)"
+        required: true
+        type: string
+      location:
+        description: "Azure region for the validation landing zone"
+        required: true
+        default: swedencentral
+        type: string
+      hosted_agent_resource_scope:
+        description: "HOSTED_AGENT_RESOURCE_SCOPE for the hosted orchestrator"
+        required: true
+        default: https://ai.azure.com/.default
+        type: string
+      amend_release_notes:
+        description: "On success, add the evidence link to the release notes"
+        required: true
+        default: true
+        type: boolean
+      keep_environment:
+        description: "Keep the validation landing zone instead of tearing it down"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Terraform runs with -lock=false under azd and the hub links DNS zones by
+  # name, so validations must never overlap.
+  group: release-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate ${{ inputs.release_tag }} (Terraform)
+    runs-on: ubuntu-latest
+    environment: release-validation
+    timeout-minutes: 360
+    permissions:
+      contents: write # release asset upload and release notes amendment
+      id-token: write # Azure OIDC
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      AZ_LOCATION: ${{ inputs.location }}
+      HOSTED_SCOPE: ${{ inputs.hosted_agent_resource_scope }}
+      KEEP_ENVIRONMENT: ${{ inputs.keep_environment }}
+      RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+      HUB_RG: ${{ vars.RELVAL_HUB_RESOURCE_GROUP }}
+      HUB_VM: ${{ vars.RELVAL_HUB_VM_NAME }}
+      STORAGE_ACCOUNT: ${{ vars.RELVAL_STORAGE_ACCOUNT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: util/release-validation
+          persist-credentials: false
+
+      - name: Check inputs and release
+        env:
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::release_tag must look like vX.Y.Z"; exit 1; }
+          [[ "$AZ_LOCATION" =~ ^[a-z0-9]+$ ]] || { echo "::error::location must be an Azure region name"; exit 1; }
+          [[ "$HOSTED_SCOPE" =~ ^[A-Za-z0-9:/._-]+/\.default$ ]] || { echo "::error::scope must end with /.default"; exit 1; }
+          for name in RELVAL_AZURE_CLIENT_ID RELVAL_AZURE_TENANT_ID RELVAL_AZURE_SUBSCRIPTION_ID \
+            RELVAL_HUB_RESOURCE_GROUP RELVAL_HUB_VM_NAME RELVAL_HUB_VNET_ID RELVAL_EXECUTOR_CLIENT_ID RELVAL_STORAGE_ACCOUNT; do
+            [ -n "$(jq -r --arg n "$name" '.[$n] // empty' <<< "$VARS_JSON")" ] || { echo "::error::Missing environment variable $name. Run util/release-validation/bootstrap-hub.sh."; exit 1; }
+          done
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft -q '"Release \(.tagName) draft=\(.isDraft)"'
+          echo "::add-mask::${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}"
+          echo "::add-mask::${{ vars.RELVAL_AZURE_TENANT_ID }}"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.RELVAL_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.RELVAL_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start executor VM
+        run: |
+          az vm start -g "$HUB_RG" -n "$HUB_VM" --only-show-errors
+          az vm run-command invoke -g "$HUB_RG" -n "$HUB_VM" --command-id RunShellScript \
+            --scripts @util/release-validation/install-tools.sh --query 'value[0].message' -o tsv --only-show-errors
+
+      - name: Launch validation on the executor
+        env:
+          SUBSCRIPTION_ID: ${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}
+          TENANT_ID: ${{ vars.RELVAL_AZURE_TENANT_ID }}
+          EXECUTOR_CLIENT_ID: ${{ vars.RELVAL_EXECUTOR_CLIENT_ID }}
+          HUB_VNET_ID: ${{ vars.RELVAL_HUB_VNET_ID }}
+        run: |
+          set -euo pipefail
+          bash util/release-validation/launch.sh > launcher.sh
+          az vm run-command invoke -g "$HUB_RG" -n "$HUB_VM" --command-id RunShellScript \
+            --scripts @launcher.sh --query 'value[0].message' -o tsv --only-show-errors | tee launch.out
+          grep -q "launched relval-$RUN_KEY" launch.out
+
+      - name: Follow validation
+        timeout-minutes: 340
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          offset=0
+          last_step=""
+          while true; do
+            sleep 60
+            if az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
+                -n "$RUN_KEY/status.json" -f evidence/status.json --overwrite --only-show-errors >/dev/null 2>&1; then
+              step="$(jq -r '.step' evidence/status.json)"
+              state="$(jq -r '.state' evidence/status.json)"
+              if az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
+                  -n "$RUN_KEY/transcript.log" -f evidence/transcript.log --overwrite --only-show-errors >/dev/null 2>&1; then
+                size="$(stat -c %s evidence/transcript.log)"
+                [ "$size" -gt "$offset" ] && tail -c +"$((offset + 1))" evidence/transcript.log
+                offset="$size"
+              fi
+              [ "$step" != "$last_step" ] && echo "::notice::step: $step" && last_step="$step"
+              [ "$state" = "completed" ] && break
+            fi
+          done
+
+      - name: Collect evidence
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          for blob in status.json transcript.log commands.sh; do
+            az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
+              -n "$RUN_KEY/$blob" -f "evidence/$blob" --overwrite --only-show-errors >/dev/null 2>&1 || true
+          done
+          python3 util/release-validation/evidence.py report \
+            --evidence-dir evidence --release "$RELEASE_TAG" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --redact "${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}" --redact "${{ vars.RELVAL_AZURE_TENANT_ID }}" \
+            --redact "${{ vars.RELVAL_EXECUTOR_CLIENT_ID }}" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-validation-${{ inputs.release_tag }}-terraform-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Check result
+        run: |
+          result="$(jq -r '.result // empty' evidence/status.json 2>/dev/null)"
+          echo "Validation result: ${result:-unknown}"
+          [ "$result" = "passed" ]
+
+      - name: Publish evidence on the release
+        if: inputs.amend_release_notes
+        run: |
+          set -euo pipefail
+          asset="validation-${RELEASE_TAG}-terraform-${GITHUB_RUN_ID}.md"
+          cp evidence/report.md "$asset"
+          gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+          asset_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > notes.md
+          python3 util/release-validation/evidence.py amend-notes --notes notes.md \
+            --status evidence/status.json \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --asset-url "$asset_url"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body | grep -c '^## '
+
+      - name: Stop executor VM
+        if: always()
+        run: |
+          state="$(jq -r '.state // empty' evidence/status.json 2>/dev/null)"
+          if [ "$state" = "completed" ] || [ ! -s evidence/status.json ]; then
+            az vm deallocate -g "$HUB_RG" -n "$HUB_VM" --no-wait --only-show-errors
+          else
+            echo "::warning::Validation still running on the executor; it tears down and deallocates itself."
+          fi
