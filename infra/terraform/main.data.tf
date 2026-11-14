@@ -109,7 +109,10 @@ resource "azapi_resource" "solution_storage" {
   response_export_values = ["properties.primaryEndpoints.blob"]
 }
 
-resource "azapi_resource" "solution_blob_service" {
+# blobServices/default is a singleton the storage account creates implicitly.
+# azapi_resource refuses to create an existing resource, so the properties are
+# applied as an update, matching the idempotent Bicep PUT.
+resource "azapi_update_resource" "solution_blob_service" {
   count     = var.deployStorageAccount ? 1 : 0
   type      = "Microsoft.Storage/storageAccounts/blobServices@2024-01-01"
   parent_id = azapi_resource.solution_storage[0].id
@@ -129,10 +132,19 @@ resource "azapi_resource" "solution_blob_service" {
   }
 }
 
+# A state that adopted the singleton as azapi_resource must not delete the
+# account's blob service when the address changes.
+removed {
+  from = azapi_resource.solution_blob_service
+  lifecycle {
+    destroy = false
+  }
+}
+
 resource "azapi_resource" "solution_blob_container" {
   for_each  = { for container in var.storageAccountContainersList : container.name => container if var.deployStorageAccount }
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2024-01-01"
-  parent_id = azapi_resource.solution_blob_service[0].id
+  parent_id = azapi_update_resource.solution_blob_service[0].id
   name      = each.key
   body      = { properties = { publicAccess = "None" } }
 }
@@ -316,7 +328,8 @@ resource "azapi_resource" "legacy_application_key_reference" {
       contentType = each.value.content_type
     }
   }
-  depends_on = [terraform_data.services_contract, terraform_data.app_config_authorization]
+  retry      = local.app_config_keyvalue_retry
+  depends_on = [terraform_data.services_contract, terraform_data.app_config_authorization, terraform_data.app_config_network]
 }
 
 # The identity owner supplies only the completed executor Data Owner grant.
@@ -326,8 +339,21 @@ resource "terraform_data" "app_config_authorization" {
   input = local.app_config_authorization_ready
 }
 
+# With private link delegation, ARM key-value calls reach the store through its
+# private endpoint. Wait for the endpoint and its DNS zone group before any
+# ARM key-value read or write.
+resource "terraform_data" "app_config_network" {
+  count = var.deployAppConfig && var.appRuntimeConfigurationMode == "appConfig" && var.networkIsolation ? 1 : 0
+  input = compact([
+    try(azapi_resource.network_private_endpoint["appConfig"].id, ""),
+    try(azapi_resource.network_endpoint_dns["appConfig"].id, ""),
+  ])
+}
+
 resource "azapi_resource" "foundation_setting" {
-  for_each  = var.deployAppConfig && var.appRuntimeConfigurationMode == "appConfig" ? nonsensitive(toset(keys(local.services_foundation_settings))) : toset([])
+  # Bicep parity: appConfigPopulate is skipped under network isolation, where
+  # postProvision publishes through the data plane from inside the network.
+  for_each  = var.deployAppConfig && var.appRuntimeConfigurationMode == "appConfig" && !var.networkIsolation ? nonsensitive(toset(keys(local.services_foundation_settings))) : toset([])
   type      = "Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01"
   parent_id = module.application_configuration[0].resource_id
   name = local.services_foundation_settings[each.key].label == "" ? local.services_foundation_settings[each.key].name : format(
@@ -340,6 +366,7 @@ resource "azapi_resource" "foundation_setting" {
     }
   }
   schema_validation_enabled = true
+  retry                     = local.app_config_keyvalue_retry
   depends_on                = [terraform_data.services_contract, terraform_data.app_config_authorization]
 }
 
@@ -592,6 +619,13 @@ locals {
   services_runtime_additional_keys = toset([
     for setting in local.services_runtime_additional_settings : jsonencode([setting.name, setting.label])
   ])
+  # Pass-through key-value access needs the executor Data Owner grant, whose
+  # RBAC propagation can lag its creation. Retry only that transient denial.
+  app_config_keyvalue_retry = {
+    error_message_regex  = ["Forbidden", "Access to the requested resource is forbidden"]
+    interval_seconds     = 15
+    max_interval_seconds = 60
+  }
   services_foundation_settings = merge(local.services_foundation_defaults, {
     for setting in local.services_normalized_additional_settings :
     jsonencode([setting.name, setting.label]) => setting
