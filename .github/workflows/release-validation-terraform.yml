@@ -116,37 +116,13 @@ jobs:
 
       - name: Follow validation
         timeout-minutes: 340
-        run: |
-          set -uo pipefail
-          mkdir -p evidence
-          offset=0
-          last_step=""
-          while true; do
-            sleep 60
-            if az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
-                -n "$RUN_KEY/status.json" -f evidence/status.json --overwrite --only-show-errors >/dev/null 2>&1; then
-              step="$(jq -r '.step' evidence/status.json)"
-              state="$(jq -r '.state' evidence/status.json)"
-              if az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
-                  -n "$RUN_KEY/transcript.log" -f evidence/transcript.log --overwrite --only-show-errors >/dev/null 2>&1; then
-                size="$(stat -c %s evidence/transcript.log)"
-                [ "$size" -gt "$offset" ] && tail -c +"$((offset + 1))" evidence/transcript.log
-                offset="$size"
-              fi
-              [ "$step" != "$last_step" ] && echo "::notice::step: $step" && last_step="$step"
-              [ "$state" = "completed" ] && break
-            fi
-          done
+        run: bash util/release-validation/vm-evidence.sh follow evidence
 
       - name: Collect evidence
         if: always()
         run: |
           set -uo pipefail
-          mkdir -p evidence
-          for blob in status.json transcript.log commands.sh; do
-            az storage blob download --auth-mode login --account-name "$STORAGE_ACCOUNT" -c evidence \
-              -n "$RUN_KEY/$blob" -f "evidence/$blob" --overwrite --only-show-errors >/dev/null 2>&1 || true
-          done
+          bash util/release-validation/vm-evidence.sh collect evidence || echo "::warning::Evidence could not be collected from the executor."
           python3 util/release-validation/evidence.py report \
             --evidence-dir evidence --release "$RELEASE_TAG" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \

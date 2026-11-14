@@ -190,6 +190,11 @@ teardown() {
   local current
   current="$(spoke_groups)"
   [ -n "$current" ] && mapfile -t TRACKED_GROUPS <<< "$current"
+  if [ "${#TRACKED_GROUPS[@]}" -eq 0 ]; then
+    TEARDOWN="nothing-to-remove"
+    log "No resource group was created, nothing to remove"
+    return 0
+  fi
   run harness "disconnect-hub" disconnect_hub
   if run user "azd-down" azd down --force --purge --no-prompt \
       && run harness "verify-removed" verify_removed; then
@@ -212,8 +217,12 @@ finish() {
   publish
   kill "${UPLOADER_PID:-0}" 2>/dev/null || true
   if [ "${SELF_DEALLOCATE:-false}" = "true" ]; then
-    # Give the workflow time to read the final status before the VM stops.
-    sleep 180
+    # Wait until the workflow collected the evidence (it writes the marker),
+    # at most 30 minutes, then stop the VM.
+    for _ in $(seq 1 180); do
+      [ -e "$OUT/collected" ] && break
+      sleep 10
+    done
     az vm deallocate -g "$HUB_RG" -n "$(hostname)" --no-wait --only-show-errors || true
   fi
   exit "$rc"
@@ -234,6 +243,19 @@ run harness "az-login" az login --identity --client-id "$EXECUTOR_CLIENT_ID" --a
 EXECUTOR_PRINCIPAL_ID="$(az identity list -g "$HUB_RG" \
   --query "[?clientId=='$EXECUTOR_CLIENT_ID'].principalId | [0]" -o tsv 2>/dev/null || true)"
 run user "az-account-set" az account set --subscription "$AZURE_SUBSCRIPTION_ID" || fail
+pin_storage_endpoint() {
+  local id ip host
+  id="$(az storage account show -g "$STORAGE_RESOURCE_GROUP" -n "$STORAGE_ACCOUNT" --query id -o tsv)" || return 1
+  ip="$(az network private-endpoint list -g "$STORAGE_RESOURCE_GROUP" \
+    --query "[?privateLinkServiceConnections[0].privateLinkServiceId=='$id'].customDnsConfigs[0].ipAddresses[0] | [0]" -o tsv)" || return 1
+  [ -n "$ip" ] || { echo "no private endpoint for the harness storage account"; return 1; }
+  host="$STORAGE_ACCOUNT.blob.core.windows.net"
+  sed -i "/[[:space:]]$host\$/d" /etc/hosts
+  echo "$ip $host" >> /etc/hosts
+  echo "$host -> $ip"
+}
+run harness "pin-storage-endpoint" pin_storage_endpoint || fail
+publish
 run harness "azd-use-az-cli-auth" azd config set auth.useAzCliAuth true || fail
 run harness "tool-versions" bash -c 'az version --query "\"azure-cli\"" -o tsv; azd version; terraform version | head -n1; python3 --version' || fail
 run harness "azd-ai-agents-extension" bash -c 'azd extension list --installed 2>/dev/null | grep -q azure.ai.agents || azd extension install azure.ai.agents --no-prompt' || fail

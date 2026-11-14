@@ -24,7 +24,7 @@ payload="$(base64 -w0 "$(dirname "$0")/run-validation.sh")"
 work="/var/lib/relval/$RUN_KEY"
 
 cat <<EOF
-set -euo pipefail
+set -eu
 if systemctl list-units --type=service --state=active --no-legend 'relval-*' | grep -q relval-; then
   echo "Another validation is still running on this executor."; exit 1
 fi

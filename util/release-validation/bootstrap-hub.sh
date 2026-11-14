@@ -106,6 +106,16 @@ STORAGE_ID="$(azq storage account show -g "$RG" -n "$STORAGE" --query id -o tsv)
 for container in tfstate evidence; do
   azq storage container-rm create --storage-account "$STORAGE" -g "$RG" -n "$container" >/dev/null
 done
+# Subscription policy may force publicNetworkAccess=Disabled. The executor
+# reaches blob storage (Terraform state, evidence) through this endpoint. The
+# hub does not host a privatelink.blob zone because each validated spoke links
+# its own zone to the hub VNet, so run-validation.sh pins the name in /etc/hosts.
+if [ -z "$(az network private-endpoint list -g "$RG" \
+    --query "[?privateLinkServiceConnections[0].privateLinkServiceId=='$STORAGE_ID'].name | [0]" -o tsv 2>/dev/null)" ]; then
+  azq network private-endpoint create -g "$RG" -n "pe-${STORAGE}-blob" -l "$LOCATION" \
+    --vnet-name "$VNET" --subnet "$SUBNET" --private-connection-resource-id "$STORAGE_ID" \
+    --group-id blob --connection-name "pe-${STORAGE}-blob" >/dev/null
+fi
 
 log "Role assignments"
 assign_role "$VM_PRINCIPAL" Owner "/subscriptions/$SUB"
