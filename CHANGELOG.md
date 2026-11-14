@@ -1,10 +1,27 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.1] - 2026-11-14
 
 ### Fixed
 
 - Terraform provisioning no longer fails with `useUAI requires a native bool value` when optional `azd` settings such as `USE_UAI`, `NETWORK_ISOLATION`, `ENABLE_AGENTIC_RETRIEVAL`, `USE_EXISTING_VNET`, `SIDE_BY_SIDE` or `EXISTING_VNET_RESOURCE_ID` are unset. Unset placeholders without a default are now omitted so Terraform applies its declared defaults, matching how `azd` omits empty Bicep parameters. Values explicitly set to an empty string are still rejected for typed inputs. Bicep is unaffected.
+
+### Migration
+
+- No action required. Environments that set these variables explicitly keep the same inputs. For rollback, restore `v7.5.0` and set every affected variable explicitly before provisioning with Terraform. Runtime component pins and infrastructure provenance are unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI run `43617187557` passed Bicep build and lint, Terraform contracts on Linux and Windows and deployment and hook contracts on Linux and Windows, including new regression tests for unset and explicitly empty inputs.
+- The defect was found by a live Terraform deployment of `v7.5.0` with `NETWORK_ISOLATION=true` that failed in `preprovision`.
 
 ## [v7.5.0] - 2026-11-13
 
