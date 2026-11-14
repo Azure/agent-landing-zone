@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Release validation (network isolated)` GitHub Actions workflow (`.github/workflows/release-validation.yml`) that deploys a published release live with Bicep and Terraform, one after the other, using the standard scenario in `util/release-validation/scenario.env` (hosted orchestrator, `BUILD_MODE=acr-task`, `NETWORK_ISOLATION=true`). It runs from an executor VM in a persistent validation hub reached only through Azure Run Command with OIDC, runs the documented operator commands, records the sanitized transcript, commands and step results as evidence and always tears the spoke down. When both providers pass, it attaches the evidence, adds one evidence line per provider to the release notes and promotes the release from pre-release to Latest. A weekly run revalidates the Latest release without promotion and opens an issue on failure. One-time setup: `util/release-validation/bootstrap-hub.sh`.
+
+### Changed
+
+- Releases are published as pre-releases and become Latest only after the release validation workflow passes the standard scenario with Bicep and Terraform. "Validated" means the Latest GitHub release.
+
 ### Fixed
 
 - Terraform provisioning with `NETWORK_ISOLATION=true` now completes: the storage account's `blobServices/default` singleton is updated instead of created (existing state is kept through a `removed` block), model deployments omit unset optional fields, and writes to Foundry account children are serialized with an account lock and a `RequestConflict` retry.
