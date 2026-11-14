@@ -21,7 +21,7 @@ vm() {
   for attempt in 1 2 3 4 5; do
     if az vm run-command invoke -g "$HUB_RG" -n "$HUB_VM" --command-id RunShellScript \
         --scripts "$script" --query 'value[0].message' -o tsv --only-show-errors 2>/dev/null \
-        | sed -n '/^\[stdout\]$/,/^\[stderr\]$/p' | sed '1d;$d'; then
+        | tr -d '\r' | sed -n '/^\[stdout\]$/,/^\[stderr\]$/p' | sed '1d;$d'; then
       return 0
     fi
     sleep $((attempt * 15))
@@ -29,24 +29,21 @@ vm() {
   return 1
 }
 
+# Prints the transcript lines added since the last poll. When more than one
+# page was added, older lines are skipped (the artifact keeps the full log).
 follow() {
-  local dir="$1" offset=0 last_step="" reply header state step size chunk
+  local dir="$1" offset=0 last_step="" reply header state step size start
   mkdir -p "$dir"
   while true; do
-    reply="$(vm "o=$OUT; s=\$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get(\"state\",\"\"), d.get(\"step\",\"\"))' \$o/status.json 2>/dev/null || echo pending -); n=\$(stat -c %s \$o/transcript.log 2>/dev/null || echo 0); echo \"@@ \$s \$n\"; tail -c +$((offset + 1)) \$o/transcript.log 2>/dev/null | head -c $PAGE")" || reply=""
+    reply="$(vm "o=$OUT; s=\$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get(\"state\") or \"pending\", d.get(\"step\") or \"-\")' \$o/status.json 2>/dev/null || echo pending -); n=\$(stat -c %s \$o/transcript.log 2>/dev/null || echo 0); b=$offset; [ \$((n - b)) -gt $PAGE ] && b=\$((n - $PAGE)); echo \"@@ \$s \$n \$b\"; tail -c +\$((b + 1)) \$o/transcript.log 2>/dev/null | head -c \$((n - b))")" || reply=""
     header="$(printf '%s\n' "$reply" | grep -m1 '^@@ ' || true)"
     if [ -n "$header" ]; then
-      read -r _ state step size <<< "$header"
-      chunk="$(printf '%s\n' "$reply" | sed '1,/^@@ /d')"
-      if [ "$offset" -lt "$size" ]; then
-        [ -n "$chunk" ] && printf '%s\n' "$chunk"
-        offset=$((offset + PAGE))
-        [ "$offset" -gt "$size" ] && offset="$size"
-      fi
+      read -r _ state step size start <<< "$header"
+      [ "$start" -gt "$offset" ] && echo "[... $((start - offset)) bytes skipped, see the evidence artifact ...]"
+      printf '%s\n' "$reply" | awk 'f; /^@@ /{f=1}'
+      offset="$size"
       [ "$step" != "$last_step" ] && echo "::notice::step: $step" && last_step="$step"
-      # Keep paging until the whole transcript was printed.
-      [ "$state" = "completed" ] && [ "$offset" -ge "$size" ] && return 0
-      [ "$offset" -lt "$size" ] && continue
+      [ "$state" = "completed" ] && return 0
     fi
     sleep 60
   done

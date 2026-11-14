@@ -74,16 +74,23 @@ write_status() {
     --argjson steps "$steps_json" \
     '{state:$state, step:$step, result:$result, teardown:$teardown, release:$release,
       environment:$env, location:$location, provider:"terraform", network_isolation:true,
-      started:$started, updated:$updated, steps:$steps}' > "$OUT/status.json"
+      started:$started, updated:$updated, steps:$steps}' > "$OUT/status.json.tmp"
+  mv -f "$OUT/status.json.tmp" "$OUT/status.json"
+}
+
+# Refreshes the sanitized logs and uploads the evidence. Only the main process
+# writes status.json, so the periodic uploader never publishes stale state.
+publish_logs() {
+  sanitize < "$RAW_LOG" > "$OUT/transcript.log.tmp" && mv -f "$OUT/transcript.log.tmp" "$OUT/transcript.log"
+  sanitize < "$RAW_CMDS" > "$OUT/commands.sh.tmp" && mv -f "$OUT/commands.sh.tmp" "$OUT/commands.sh"
+  az storage blob upload-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
+    --destination evidence --destination-path "$RUN_ID" --source "$OUT" --overwrite \
+    --only-show-errors >/dev/null 2>&1 || true
 }
 
 publish() {
   write_status
-  sanitize < "$RAW_LOG" > "$OUT/transcript.log"
-  sanitize < "$RAW_CMDS" > "$OUT/commands.sh"
-  az storage blob upload-batch --auth-mode login --account-name "$STORAGE_ACCOUNT" \
-    --destination evidence --destination-path "$RUN_ID" --source "$OUT" --overwrite \
-    --only-show-errors >/dev/null 2>&1 || true
+  publish_logs
 }
 
 log() { printf '\n### %s\n' "$*" | tee -a "$RAW_LOG" >/dev/null; }
@@ -93,6 +100,7 @@ run() {
   local kind="$1" name="$2"; shift 2
   local started rc
   STEP="$name"
+  write_status
   printf '\n$ %s\n' "$*" >> "$RAW_LOG"
   [ "$kind" = user ] && printf '%s\n' "$*" >> "$RAW_CMDS"
   started="$(date +%s)"
@@ -230,7 +238,7 @@ finish() {
 trap finish EXIT
 
 # Periodic upload so the workflow can follow long Terraform operations.
-( while sleep 60; do publish; done ) &
+( while sleep 60; do publish_logs; done ) &
 UPLOADER_PID=$!
 
 fail() { RESULT="failed"; log "FAILED at step: $STEP"; exit 1; }
