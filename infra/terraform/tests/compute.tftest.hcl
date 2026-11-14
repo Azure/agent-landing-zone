@@ -159,6 +159,14 @@ override_resource {
   }
 }
 override_resource {
+  target          = azapi_resource.solution_storage
+  override_during = plan
+  values = {
+    id     = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-tf-compute/providers/Microsoft.Storage/storageAccounts/sttfcompute"
+    output = { properties = { primaryEndpoints = { blob = "https://sttfcompute.blob.core.windows.net/" } } }
+  }
+}
+override_resource {
   target          = azapi_resource.foundry_cosmos
   override_during = plan
   values = {
@@ -384,11 +392,12 @@ run "isolated_registry_pool_jumpbox_and_uai" {
     condition = (
       local.compute_context.environment_principal_id == azurerm_user_assigned_identity.compute["environment"].principal_id &&
       local.compute_context.environment_principal_id != azapi_resource.container_environment["this"].identity[0].principal_id &&
-      azapi_resource.foundation_setting[jsonencode(["CONTAINER_ENV_PRINCIPAL_ID", "agent-lz"])].body.properties.value == local.compute_context.environment_principal_id &&
+      local.services_foundation_settings[jsonencode(["CONTAINER_ENV_PRINCIPAL_ID", "agent-lz"])].value == local.compute_context.environment_principal_id &&
+      length(azapi_resource.foundation_setting) == 0 &&
       length(local.app_config_authorization_ready) == 1 &&
       one(local.app_config_authorization_ready) == azurerm_role_assignment.app_config_executor["this"].id
     )
-    error_message = "UAI bootstrap must publish the selected environment UAI principal, not the environment's SAMI field or application identities."
+    error_message = "UAI bootstrap must render the selected environment UAI principal, not the environment's SAMI field or application identities. Isolated stores get no ARM key-values."
   }
 }
 

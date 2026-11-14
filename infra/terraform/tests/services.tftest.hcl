@@ -160,6 +160,37 @@ run "serverless_data_and_keyless_defaults" {
   }
 }
 
+run "injected_agent_subnet_uses_service_created_account_capability_host" {
+  command = plan
+  variables {
+    networkIsolation = true
+  }
+  assert {
+    condition = (
+      local.foundry_agent_network_injection &&
+      azapi_resource.foundry_account[0].body.properties.networkInjections[0].scenario == "agent" &&
+      length(azapi_resource.account_capability_host) == 0 &&
+      length(azapi_resource.project_capability_host) == 1
+    )
+    error_message = "With an injected agent subnet the service creates the account capability host. Like Bicep, Terraform must create only the project capability host."
+  }
+}
+
+run "isolated_without_agent_subnet_keeps_account_capability_host" {
+  command = plan
+  variables {
+    networkIsolation      = true
+    deployAiFoundrySubnet = false
+  }
+  assert {
+    condition = (
+      !can(azapi_resource.foundry_account[0].body.properties.networkInjections) &&
+      length(azapi_resource.account_capability_host) == 1
+    )
+    error_message = "Without subnet injection the account capability host is still created explicitly, as Bicep does."
+  }
+}
+
 run "disabled_application_cosmos_preserves_foundry_storage" {
   command = plan
   variables {
@@ -633,6 +664,16 @@ run "foundation_inventory_is_actually_published_with_real_connection_paths" {
     deployGroundingWithBing = true
   }
   assert {
+    condition = (
+      length(terraform_data.app_config_network) == 0 &&
+      alltrue([
+        for setting in azapi_resource.foundation_setting :
+        contains(setting.retry.error_message_regex, "Forbidden")
+      ])
+    )
+    error_message = "Public ARM key-value writes must retry transient pass-through RBAC denials and need no private endpoint gate."
+  }
+  assert {
     # Exact current Bicep publisher inventory, excluding its deploy-owned
     # CONTAINER_APPS collection. Anchoring excludes the commented workspace key.
     condition = (
@@ -779,7 +820,7 @@ run "blob_iq_foundation_settings_preserve_typed_inputs" {
   }
 }
 
-run "isolated_search_index_iq_foundation_uses_arm_proxy" {
+run "isolated_search_index_iq_foundation_skips_arm_key_values" {
   command = plan
   variables {
     networkIsolation                   = true
@@ -795,19 +836,21 @@ run "isolated_search_index_iq_foundation_uses_arm_proxy" {
   }
   assert {
     condition = (
-      length(azapi_resource.foundation_setting) > 0 &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_SEARCH_INDEX_NAME", "agent-lz"])].body.properties.value == "custom-security-index" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME", "agent-lz"])].body.properties.value == "custom-semantic" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_BASE_FILTER", "agent-lz"])].body.properties.value == "tenant_id eq 'test'" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_FILTER_ADD_ON_ENABLED", "agent-lz"])].body.properties.value == "true" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_SECURITY_FIELD_NAME", "agent-lz"])].body.properties.value == "tenant_id" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND", "agent-lz"])].body.properties.value == "searchIndex" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_STORAGE_CONTAINER_NAME", "agent-lz"])].body.properties.value == "" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_IS_ADLS_GEN2", "agent-lz"])].body.properties.value == "false" &&
-      azapi_resource.foundation_setting[jsonencode(["FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS", "agent-lz"])].body.properties.value == "[]" &&
-      azapi_resource.foundation_setting[jsonencode(["NETWORK_ISOLATION", "agent-lz"])].body.properties.value == "true"
+      length(azapi_resource.foundation_setting) == 0 &&
+      length(terraform_data.app_config_network) == 1 &&
+      length(local.services_foundation_settings) > 0 &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_SEARCH_INDEX_NAME", "agent-lz"])].value == "custom-security-index" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME", "agent-lz"])].value == "custom-semantic" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_BASE_FILTER", "agent-lz"])].value == "tenant_id eq 'test'" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_FILTER_ADD_ON_ENABLED", "agent-lz"])].value == "true" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_SECURITY_FIELD_NAME", "agent-lz"])].value == "tenant_id" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND", "agent-lz"])].value == "searchIndex" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_STORAGE_CONTAINER_NAME", "agent-lz"])].value == "" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_IS_ADLS_GEN2", "agent-lz"])].value == "false" &&
+      local.services_foundation_settings[jsonencode(["FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS", "agent-lz"])].value == "[]" &&
+      local.services_foundation_settings[jsonencode(["NETWORK_ISOLATION", "agent-lz"])].value == "true"
     )
-    error_message = "Isolated provision must own the same ARM foundation entries and preserve searchIndex gates, not rely on guessed private hook defaults."
+    error_message = "Isolated provision must not write ARM key-values to the delegated private store (Bicep appConfigPopulate parity), while still rendering searchIndex gates."
   }
 }
 

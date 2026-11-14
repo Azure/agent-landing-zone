@@ -212,8 +212,9 @@ locals {
   # The Cognitive Services RP rejects concurrent writes under one account with
   # 409 RequestConflict. Bicep serializes these children (AVM @batchSize(1) and
   # explicit dependsOn), so Terraform shares one account lock and retries.
-  foundry_account_locks  = var.deployAiFoundry ? ["${local.services_foundry_rg_id}/providers/Microsoft.CognitiveServices/accounts/${local.resource_names.aiFoundryAccountName}"] : []
-  foundry_conflict_retry = { error_message_regex = ["RequestConflict", "Another operation is (in progress|being performed)"] }
+  foundry_account_locks           = var.deployAiFoundry ? ["${local.services_foundry_rg_id}/providers/Microsoft.CognitiveServices/accounts/${local.resource_names.aiFoundryAccountName}"] : []
+  foundry_agent_network_injection = var.networkIsolation && var.deployAiFoundrySubnet
+  foundry_conflict_retry          = { error_message_regex = ["RequestConflict", "Another operation is (in progress|being performed)"] }
 }
 
 # Direct resources preserve the source account/project-before-PE ordering and
@@ -239,7 +240,7 @@ resource "azapi_resource" "foundry_account" {
       # allowedIpRanges exception. Do not silently broaden isolated Foundry.
       publicNetworkAccess = var.networkIsolation ? "Disabled" : "Enabled"
       networkAcls         = { defaultAction = "Allow", bypass = "AzureServices" }
-      }, var.networkIsolation && var.deployAiFoundrySubnet ? {
+      }, local.foundry_agent_network_injection ? {
       networkInjections = [{
         scenario                   = "agent"
         subnetArmId                = local.subnet_ids.agent
@@ -416,8 +417,11 @@ resource "azapi_resource" "project_search_connection" {
   depends_on = [azapi_resource.project_storage_connection]
 }
 
+# Bicep parity (createAccountCapabilityHost): an account with an injected agent
+# subnet gets its capability host from the service, bound to that subnet. A
+# second PUT without customerSubnet fails with "customerSubnet must match".
 resource "azapi_resource" "account_capability_host" {
-  count      = local.services_project && local.services_agent_service ? 1 : 0
+  count      = local.services_project && local.services_agent_service && !local.foundry_agent_network_injection ? 1 : 0
   type       = "Microsoft.CognitiveServices/accounts/capabilityHosts@2025-07-01-preview"
   parent_id  = local.foundry_context.account_id
   locks      = local.foundry_account_locks
