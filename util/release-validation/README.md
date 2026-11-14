@@ -46,3 +46,8 @@ script prints.
 - To check a fix before cutting a release, set `SOURCE_REF` to the candidate
   branch when calling `launch.sh`. It deploys that branch instead of the tag.
   Never publish the evidence of such a run for a release.
+- If teardown leaves resources behind, delete the `rg-relval-<env>` and
+  `rg-relval-<env>-app` groups first, purge the soft-deleted Foundry account
+  (`az cognitiveservices account purge`, about 30 minutes), then delete
+  `rg-relval-<env>-network`. The account holds the agent subnet until it is
+  purged.
