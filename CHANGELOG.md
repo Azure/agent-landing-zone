@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Manual `Release validation (Terraform, network isolated)` GitHub Actions workflow (`.github/workflows/release-validation-terraform.yml`). It asks for a release tag, deploys that release live with Terraform and `NETWORK_ISOLATION=true` from an executor VM in a persistent validation hub (`util/release-validation/`), runs the documented operator commands, records the sanitized transcript, commands and step results as evidence, always tears the spoke down and, on success, links the evidence from the release notes. The GitHub-hosted runner signs in with OIDC and reaches the VM only through Azure Run Command. One-time setup: `util/release-validation/bootstrap-hub.sh`.
+
 ## [v7.5.1] - 2026-11-14
 
 ### Fixed
