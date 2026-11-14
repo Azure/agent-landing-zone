@@ -178,11 +178,36 @@ verify_removed() {
   return "$rc"
 }
 
-force_delete_groups() {
-  local rg
+purge_deleted_accounts() {
+  # A soft-deleted Foundry account keeps its service association link on the
+  # agent subnet, which blocks deleting the network group until it is purged.
+  local rg id name location
   for rg in "${TRACKED_GROUPS[@]:-}"; do
     [ -z "$rg" ] && continue
+    while IFS=$'\t' read -r id name location; do
+      [ -z "$id" ] && continue
+      az cognitiveservices account purge -g "$rg" -n "$name" -l "$location" --only-show-errors \
+        && echo "purged deleted account $name"
+    done < <(az cognitiveservices account list-deleted \
+      --query "[?contains(id, '/resourceGroups/$rg/')].[id, name, location]" -o tsv 2>/dev/null)
+  done
+}
+
+force_delete_groups() {
+  local rg attempt
+  for rg in "${TRACKED_GROUPS[@]:-}"; do
+    [ -z "$rg" ] || [[ "$rg" == *-network ]] && continue
     [ "$(az group exists -n "$rg")" = "true" ] && az group delete -n "$rg" --yes --only-show-errors
+  done
+  purge_deleted_accounts
+  for attempt in 1 2 3; do
+    for rg in "${TRACKED_GROUPS[@]:-}"; do
+      [ -z "$rg" ] && continue
+      [ "$(az group exists -n "$rg")" = "true" ] && az group delete -n "$rg" --yes --only-show-errors
+    done
+    verify_removed && return 0
+    sleep 120
+    purge_deleted_accounts
   done
   verify_removed
 }
@@ -208,7 +233,8 @@ teardown() {
     return 0
   fi
   run harness "disconnect-hub" disconnect_hub
-  if run user "azd-down" azd down --force --purge --no-prompt \
+  if { run user "azd-down" azd down --force --purge --no-prompt \
+        || { sleep 120; run user "azd-down-retry" azd down --force --purge --no-prompt; }; } \
       && run harness "verify-removed" verify_removed; then
     TEARDOWN="succeeded"
   else
