@@ -7,6 +7,7 @@ set -euo pipefail
 
 need() { [[ "${!1:-}" =~ $2 ]] || { echo "Invalid or missing $1" >&2; exit 2; }; }
 need RELEASE_TAG '^v[0-9]+\.[0-9]+\.[0-9]+$'
+need PROVIDER '^(bicep|terraform)$'
 need RUN_KEY '^[0-9A-Za-z-]{1,40}$'
 need AZ_LOCATION '^[a-z0-9]+$'
 need HOSTED_SCOPE '^[A-Za-z0-9:/._-]+/\.default$'
@@ -23,6 +24,7 @@ SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
 need SOURCE_REF '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$'
 
 payload="$(base64 -w0 "$(dirname "$0")/run-validation.sh")"
+scenario="$(base64 -w0 "$(dirname "$0")/scenario.env")"
 work="/var/lib/relval/$RUN_KEY"
 
 cat <<EOF
@@ -33,8 +35,10 @@ fi
 mkdir -p "$work"
 chmod 700 /var/lib/relval "$work"
 echo '$payload' | base64 -d > "$work/run-validation.sh"
+echo '$scenario' | base64 -d > "$work/scenario.env"
 cat > "$work/params.env" <<'PARAMS'
 RELEASE_TAG=$RELEASE_TAG
+PROVIDER=$PROVIDER
 RUN_ID=$RUN_KEY
 AZURE_SUBSCRIPTION_ID=$SUBSCRIPTION_ID
 AZURE_TENANT_ID=$TENANT_ID

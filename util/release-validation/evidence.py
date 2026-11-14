@@ -1,6 +1,6 @@
 """Evidence report and release-notes amendment for live release validation.
 
-Used by .github/workflows/release-validation-terraform.yml. The executor VM
+Used by .github/workflows/release-validation.yml. The executor VM
 already redacts identifiers; this module redacts again before anything is
 published, because release assets and notes are public and permanent.
 """
@@ -14,9 +14,17 @@ import re
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
-MARKER = "<!-- release-validation:terraform -->"
+PROVIDER_TITLES = {"bicep": "Bicep", "terraform": "Terraform"}
 PRIVATE_ENV = re.compile(r"(rg-)?gptrag-\d{10}")
 TRANSCRIPT_TAIL = 400
+
+
+def provider_title(status: dict) -> str:
+    return PROVIDER_TITLES.get(status.get("provider") or "", "Unknown provider")
+
+
+def marker(status: dict) -> str:
+    return f"<!-- release-validation:{status.get('provider') or 'unknown'} -->"
 
 
 def redact(text: str, values: list[str]) -> str:
@@ -37,7 +45,7 @@ def build_report(evidence: Path, release: str, run_url: str, values: list[str]) 
     transcript = redact(_read(evidence / "transcript.log"), values).rstrip()
     result = status.get("result") or "unknown"
     header = [
-        f"# Release validation: {release} (Terraform, NETWORK_ISOLATION=true)",
+        f"# Release validation: {release} ({provider_title(status)}, NETWORK_ISOLATION=true)",
         "",
         f"- Result: **{result}**",
         f"- Teardown (best effort, not part of the result): {status.get('teardown', 'unknown')}",
@@ -69,16 +77,16 @@ def build_report(evidence: Path, release: str, run_url: str, values: list[str]) 
 
 
 def amend_notes(notes: str, status: dict, run_url: str, asset_url: str) -> str:
-    """Add or replace the Terraform live-validation bullet under ## Validation."""
+    """Add or replace the live-validation bullet of this provider under ## Validation."""
     date = (status.get("updated") or "")[:10]
     bullet = (
-        f"- Live Terraform deployment with `NETWORK_ISOLATION=true` in "
+        f"- Live {provider_title(status)} deployment of the standard scenario with `NETWORK_ISOLATION=true` in "
         f"`{status.get('location', 'unknown')}` passed on {date}: provision, deferred "
         "data-plane configuration from a VNet-connected host, `azd deploy` with the "
         "agent smoke test. "
-        f"Evidence: [workflow run]({run_url}), [commands and transcript]({asset_url}). {MARKER}"
+        f"Evidence: [workflow run]({run_url}), [commands and transcript]({asset_url}). {marker(status)}"
     )
-    lines = [line for line in notes.replace("\r\n", "\n").split("\n") if MARKER not in line]
+    lines = [line for line in notes.replace("\r\n", "\n").split("\n") if marker(status) not in line]
     try:
         start = next(i for i, line in enumerate(lines) if line.strip() == "## Validation")
     except StopIteration:

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Release validation executor for the Terraform path with NETWORK_ISOLATION=true.
+# Release validation executor for the standard network-isolated scenario
+# (scenario.env) with the Bicep or Terraform provider.
 #
 # Runs as root on the validation hub VM (started by
-# .github/workflows/release-validation-terraform.yml through Azure Run Command).
+# .github/workflows/release-validation.yml through Azure Run Command).
 # It reproduces the documented operator commands for a released tag, records
 # every command with its output and exit code, and always tears the spoke down
 # unless KEEP_ENVIRONMENT=true.
@@ -14,16 +15,24 @@
 #
 # Required environment: RELEASE_TAG RUN_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID
 # AZURE_LOCATION EXECUTOR_CLIENT_ID HUB_VNET_ID STORAGE_ACCOUNT
-# STORAGE_RESOURCE_GROUP. Optional: HOSTED_AGENT_RESOURCE_SCOPE, KEEP_ENVIRONMENT,
+# STORAGE_RESOURCE_GROUP PROVIDER (bicep|terraform). The scenario settings are
+# read from scenario.env next to this script. Optional: HOSTED_AGENT_RESOURCE_SCOPE, KEEP_ENVIRONMENT,
 # REPOSITORY (default Azure/agent-landing-zone), SOURCE_REF (maintainer-only: a
 # candidate branch to deploy instead of the tag, for iterating on a fix before
 # release. Evidence from such a run must not be published for the tag).
 set -uo pipefail
 
 for required in RELEASE_TAG RUN_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID AZURE_LOCATION \
-  EXECUTOR_CLIENT_ID HUB_VNET_ID STORAGE_ACCOUNT STORAGE_RESOURCE_GROUP; do
+  EXECUTOR_CLIENT_ID HUB_VNET_ID STORAGE_ACCOUNT STORAGE_RESOURCE_GROUP PROVIDER; do
   [ -n "${!required:-}" ] || { echo "Missing required variable $required" >&2; exit 2; }
 done
+[[ "$PROVIDER" =~ ^(bicep|terraform)$ ]] || { echo "Invalid PROVIDER" >&2; exit 2; }
+SCENARIO_FILE="$(dirname "$0")/scenario.env"
+[ -s "$SCENARIO_FILE" ] || { echo "Missing $SCENARIO_FILE" >&2; exit 2; }
+if grep -vE '^(#.*|[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/-]*|)$' "$SCENARIO_FILE" >&2; then
+  echo "Invalid scenario line(s) above" >&2; exit 2
+fi
+case "$PROVIDER" in bicep) PROVIDER_TITLE="Bicep" ;; terraform) PROVIDER_TITLE="Terraform" ;; esac
 [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid RELEASE_TAG" >&2; exit 2; }
 [[ "$RUN_ID" =~ ^[0-9A-Za-z-]{1,40}$ ]] || { echo "Invalid RUN_ID" >&2; exit 2; }
 SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
@@ -44,8 +53,8 @@ RAW_LOG="$WORK/transcript.raw.log"
 RAW_CMDS="$WORK/commands.raw.sh"
 mkdir -p "$OUT"
 : > "$RAW_LOG"
-printf '#!/usr/bin/env bash\n# Operator commands for %s (Terraform, NETWORK_ISOLATION=true), in execution order.\n' \
-  "$RELEASE_TAG" > "$RAW_CMDS"
+printf '#!/usr/bin/env bash\n# Operator commands for %s (%s, NETWORK_ISOLATION=true), in execution order.\n' \
+  "$RELEASE_TAG" "$PROVIDER_TITLE" > "$RAW_CMDS"
 
 export HOME=/root
 export NO_COLOR=1 TF_IN_AUTOMATION=1 AZD_SKIP_UPDATE_CHECK=1 AZURE_CORE_COLLECT_TELEMETRY=no
@@ -74,10 +83,10 @@ write_status() {
   steps_json="$(printf '%s\n' "${STEPS[@]:-}" | jq -R 'select(length>0) | split("|") | {name:.[0], kind:.[1], exit:(.[2]|tonumber), seconds:(.[3]|tonumber)}' | jq -s '.')"
   jq -n --arg state "$STATE" --arg step "$STEP" --arg result "$RESULT" --arg teardown "$TEARDOWN" \
     --arg release "$RELEASE_TAG" --arg source_ref "$SOURCE_REF" --arg env "$ENV_NAME" --arg location "$AZURE_LOCATION" \
-    --arg started "$STARTED" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg started "$STARTED" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg provider "$PROVIDER" \
     --argjson steps "$steps_json" \
     '{state:$state, step:$step, result:$result, teardown:$teardown, release:$release, source_ref:$source_ref,
-      environment:$env, location:$location, provider:"terraform", network_isolation:true,
+      environment:$env, location:$location, provider:$provider, network_isolation:true,
       started:$started, updated:$updated, steps:$steps}' > "$OUT/status.json.tmp"
   mv -f "$OUT/status.json.tmp" "$OUT/status.json"
 }
@@ -274,7 +283,7 @@ UPLOADER_PID=$!
 
 fail() { RESULT="failed"; log "FAILED at step: $STEP"; exit 1; }
 
-log "Release validation $RELEASE_TAG (Terraform, NETWORK_ISOLATION=true) in $AZURE_LOCATION"
+log "Release validation $RELEASE_TAG ($PROVIDER_TITLE, NETWORK_ISOLATION=true) in $AZURE_LOCATION"
 
 log "Sign in (the executor uses its managed identity; operators use az login and azd auth login)"
 run harness "az-login" az login --identity --client-id "$EXECUTOR_CLIENT_ID" --allow-no-subscriptions \
@@ -306,11 +315,14 @@ REPO_DIR="$WORK/agent-landing-zone"
 note_user "cd agent-landing-zone"
 cd "$REPO_DIR" || fail
 
-log "Select the Terraform provider in azure.yaml"
-run user "select-terraform" sed -i -E \
-  -e 's#^(  provider:).*#\1 terraform#' -e 's#^(  path:) infra/bicep.*#\1 infra/terraform#' \
-  -e 's#^(  module:).*#\1 main#' azure.yaml || fail
+if [ "$PROVIDER" = "terraform" ]; then
+  log "Select the Terraform provider in azure.yaml"
+  run user "select-terraform" sed -i -E \
+    -e 's#^(  provider:).*#\1 terraform#' -e 's#^(  path:) infra/bicep.*#\1 infra/terraform#' \
+    -e 's#^(  module:).*#\1 main#' azure.yaml || fail
+fi
 run harness "show-infra-block" bash -c "sed -n '/^infra:/,/^hooks:/p' azure.yaml" || fail
+grep -qE "^  provider: $PROVIDER\b" azure.yaml || { log "azure.yaml does not select $PROVIDER"; fail; }
 
 log "Python environment for the lifecycle hooks"
 run user "python-venv" python3 -m venv .venv || fail
@@ -327,18 +339,16 @@ set_env AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
 set_env AZURE_LOCATION "$AZURE_LOCATION"
 set_env AZURE_RESOURCE_GROUP "rg-$ENV_NAME"
 set_env CREATE_RESOURCE_GROUPS true
-set_env TF_STATE_RESOURCE_GROUP "$STORAGE_RESOURCE_GROUP"
-set_env TF_STATE_STORAGE_ACCOUNT "$STORAGE_ACCOUNT"
-set_env TF_STATE_CONTAINER tfstate
-set_env ORCHESTRATION_HOST hosted
-set_env APPLICATION_MODE conversational
+if [ "$PROVIDER" = "terraform" ]; then
+  set_env TF_STATE_RESOURCE_GROUP "$STORAGE_RESOURCE_GROUP"
+  set_env TF_STATE_STORAGE_ACCOUNT "$STORAGE_ACCOUNT"
+  set_env TF_STATE_CONTAINER tfstate
+fi
 set_env HOSTED_AGENT_RESOURCE_SCOPE "$HOSTED_AGENT_RESOURCE_SCOPE"
-set_env DEPLOY_INGESTION_CONTAINER_APP false
-set_env BUILD_MODE acr-task
-set_env DEPLOY_ACR_TASK_AGENT_POOL true
-set_env NETWORK_ISOLATION true
-set_env DEPLOY_JUMPBOX false
-set_env DEPLOY_BASTION false
+while IFS='=' read -r key value; do
+  [[ -z "$key" || "$key" == \#* ]] && continue
+  set_env "$key" "$value"
+done < "$SCENARIO_FILE"
 set_env HUB_INTEGRATION_HUB_VNET_RESOURCE_ID "$HUB_VNET_ID"
 # The spoke private endpoints are reachable only after provisioning, so the
 # first postprovision run defers data-plane configuration (documented flow).
