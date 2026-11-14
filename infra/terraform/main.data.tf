@@ -109,7 +109,10 @@ resource "azapi_resource" "solution_storage" {
   response_export_values = ["properties.primaryEndpoints.blob"]
 }
 
-resource "azapi_resource" "solution_blob_service" {
+# blobServices/default is a singleton the storage account creates implicitly.
+# azapi_resource refuses to create an existing resource, so the properties are
+# applied as an update, matching the idempotent Bicep PUT.
+resource "azapi_update_resource" "solution_blob_service" {
   count     = var.deployStorageAccount ? 1 : 0
   type      = "Microsoft.Storage/storageAccounts/blobServices@2024-01-01"
   parent_id = azapi_resource.solution_storage[0].id
@@ -129,10 +132,19 @@ resource "azapi_resource" "solution_blob_service" {
   }
 }
 
+# A state that adopted the singleton as azapi_resource must not delete the
+# account's blob service when the address changes.
+removed {
+  from = azapi_resource.solution_blob_service
+  lifecycle {
+    destroy = false
+  }
+}
+
 resource "azapi_resource" "solution_blob_container" {
   for_each  = { for container in var.storageAccountContainersList : container.name => container if var.deployStorageAccount }
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2024-01-01"
-  parent_id = azapi_resource.solution_blob_service[0].id
+  parent_id = azapi_update_resource.solution_blob_service[0].id
   name      = each.key
   body      = { properties = { publicAccess = "None" } }
 }

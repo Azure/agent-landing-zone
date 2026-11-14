@@ -115,9 +115,9 @@ run "serverless_data_and_keyless_defaults" {
     condition = (
       !azapi_resource.solution_storage[0].body.properties.allowBlobPublicAccess &&
       azapi_resource.solution_storage[0].body.properties.encryption.requireInfrastructureEncryption &&
-      azapi_resource.solution_blob_service[0].body.properties.automaticSnapshotPolicyEnabled &&
-      azapi_resource.solution_blob_service[0].body.properties.containerDeleteRetentionPolicy.days == 10 &&
-      azapi_resource.solution_blob_service[0].body.properties.deleteRetentionPolicy.days == 7 &&
+      azapi_update_resource.solution_blob_service[0].body.properties.automaticSnapshotPolicyEnabled &&
+      azapi_update_resource.solution_blob_service[0].body.properties.containerDeleteRetentionPolicy.days == 10 &&
+      azapi_update_resource.solution_blob_service[0].body.properties.deleteRetentionPolicy.days == 7 &&
       length(azapi_resource.legacy_application_key) == 0 &&
       local.app_config_bootstrap.label == "agent-lz" &&
       local.app_config_bootstrap.owner == "terraform" &&

@@ -152,6 +152,23 @@ run "empty_model_list_metadata_uses_native_defaults" {
   }
 }
 
+run "model_deployment_body_omits_unset_optional_fields" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for deployment in azapi_resource.model_deployment : (
+        !contains([for value in values(deployment.body.sku) : value == null], true) &&
+        !contains([for value in values(deployment.body.properties.model) : value == null], true) &&
+        !can(deployment.body.sku.tier) &&
+        !can(deployment.body.properties.model.source) &&
+        deployment.body.sku.capacity == 100
+      )
+    ])
+    error_message = "Model deployment bodies must not send null optional fields, which the Cognitive Services RP rejects."
+  }
+}
+
 run "external_ai_gateway_no_local_models" {
   command = plan
 

@@ -272,17 +272,20 @@ resource "azapi_resource" "model_deployment" {
   type      = "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
   parent_id = azapi_resource.foundry_account[0].id
   name      = each.key
+  # Unset optional attributes are omitted, not sent as JSON null: the
+  # Cognitive Services RP rejects null enum fields such as sku.tier with
+  # InvalidRequestContent, while Bicep never submits them.
   body = {
-    sku = each.value.sku
+    sku = { for key, value in each.value.sku : key => value if value != null }
     properties = merge({
-      model         = each.value.model
+      model         = { for key, value in each.value.model : key => value if value != null }
       raiPolicyName = try(each.value.raiPolicyName, null) == null ? "Microsoft.Default" : each.value.raiPolicyName
       }, {
       for key, value in {
         versionUpgradeOption    = try(each.value.versionUpgradeOption, null)
         spilloverDeploymentName = try(each.value.spilloverDeploymentName, null)
-        scaleSettings           = try(each.value.scaleSettings, null)
-        capacitySettings        = try(each.value.capacitySettings, null)
+        scaleSettings           = try(each.value.scaleSettings, null) == null ? null : { for k, v in each.value.scaleSettings : k => v if v != null }
+        capacitySettings        = try(each.value.capacitySettings, null) == null ? null : { for k, v in each.value.capacitySettings : k => v if v != null }
       } : key => value if value != null
     })
   }
