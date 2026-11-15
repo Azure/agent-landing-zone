@@ -105,6 +105,18 @@ azq identity federated-credential create -g "$RG" --identity-name "$GH_IDENTITY"
   --issuer "https://token.actions.githubusercontent.com" \
   --subject "repo:${REPO}:environment:${GH_ENVIRONMENT}" \
   --audiences "api://AzureADTokenExchange" >/dev/null
+# Organizations with immutable subject claims present owner and repository IDs
+# (repo:Owner@<id>/name@<id>:...), so trust that subject too.
+if command -v gh >/dev/null 2>&1 && ids="$(gh api "repos/$REPO" --jq '"\(.owner.id) \(.id)"' 2>/dev/null)"; then
+  read -r OWNER_NUM REPO_NUM <<< "$ids"
+  azq identity federated-credential create -g "$RG" --identity-name "$GH_IDENTITY" \
+    -n "github-${GH_ENVIRONMENT}-ids" \
+    --issuer "https://token.actions.githubusercontent.com" \
+    --subject "repo:${REPO%%/*}@${OWNER_NUM}/${REPO#*/}@${REPO_NUM}:environment:${GH_ENVIRONMENT}" \
+    --audiences "api://AzureADTokenExchange" >/dev/null
+else
+  echo "gh unavailable: add the ID-based federated credential manually if your organization uses immutable subject claims" >&2
+fi
 
 log "Storage account $STORAGE (Entra ID only, no shared keys)"
 azq storage account create -g "$RG" -n "$STORAGE" -l "$LOCATION" --sku Standard_LRS \
