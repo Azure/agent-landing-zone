@@ -867,3 +867,12 @@ print(json.dumps(calls))
         assert not any(command[1:2] == ["appconfig"] for command in calls)
         observed.append(calls)
     assert observed[0] == observed[1]
+
+
+def test_bicep_passthrough_and_cosmos_metadata_stay_arm_safe():
+    source = (ROOT / "infra" / "bicep" / "main.bicep").read_text(encoding="utf-8")
+    # ARM re-evaluates copy-loop variable values, so a literal setting such as '[]' would fail.
+    assert not re.search(r"^var \w+ = \[\s*for \w+ in additionalAppConfigurationSettings", source, re.M)
+    # Cross-RG conditional module: output references need an explicit API version.
+    metadata_output = source[source.index("output DEPLOYMENT_METADATA"):]
+    assert "cosmosDBAccount.outputs" not in metadata_output
