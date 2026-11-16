@@ -1,5 +1,28 @@
 # Changelog
 
+## [v7.5.6] - 2026-11-16
+
+### Fixed
+
+- Post-provision metadata verification no longer fails with `selection: Invalid declared inputs or environment binding` when a parameter placeholder without a default, such as `ENABLE_AGENTIC_RETRIEVAL`, is unset. The parameter is now omitted, as azd does, so the foundation default applies.
+- Terraform private endpoints retry the intermittent Azure `InternalServerError`, seen on the Container Apps environment endpoint. For Bicep, rerun `azd provision`, which is idempotent. The release validation workflow reruns it once after that error.
+
+### Migration
+
+- No action required. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.5`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Live validation runs through the release validation workflow with Bicep and Terraform.
+
 ## [v7.5.5] - 2026-11-16
 
 ### Fixed
