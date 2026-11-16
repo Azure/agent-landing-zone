@@ -30,6 +30,9 @@ OBSOLETE_SELECTION_KEYS = frozenset({
     "USE_FOUNDRY_HOSTED_AGENTS", "PREPARE_HOSTED_AGENT",
     "DEPLOY_HOSTED_AGENT", "DEPLOY_DURABLE_TASK_SCHEDULER", "HOSTED_AGENT_PREPARED",
 })
+# Both foundations publish these as outputs, and azd persists outputs in the
+# environment. They are reported state that no input reads, not selections.
+FOUNDATION_OUTPUT_KEYS = frozenset({"DEPLOY_HOSTED_AGENT", "HOSTED_AGENT_PREPARED"})
 
 
 def boolean(environment: Mapping[str, str], key: str, default: bool = False) -> bool:
@@ -65,7 +68,7 @@ class NativeApplication:
 def resolve_application(environment: Mapping[str, str]) -> NativeApplication:
     mode = environment.get("APPLICATION_MODE", "conversational").strip().lower()
     host = environment.get("ORCHESTRATION_HOST", "hosted").strip().lower()
-    obsolete = sorted(OBSOLETE_SELECTION_KEYS.intersection(environment))
+    obsolete = sorted((OBSOLETE_SELECTION_KEYS - FOUNDATION_OUTPUT_KEYS).intersection(environment))
     if obsolete:
         raise ValueError(
             "Obsolete native deployment settings: " + ", ".join(obsolete)
