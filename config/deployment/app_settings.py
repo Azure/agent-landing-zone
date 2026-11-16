@@ -43,7 +43,9 @@ def substitute_values(value: object, environment: Mapping[str, str]) -> object:
         match = _PLACEHOLDER.fullmatch(value)
         if match:
             name, default = match.groups()
-            return environment.get(name, default if default is not None else "")
+            # azd (drone/envsubst) applies ${NAME=default} when NAME is unset or empty.
+            resolved = environment.get(name, "")
+            return default if resolved == "" and default is not None else resolved
     elif isinstance(value, list):
         return [substitute_values(item, environment) for item in value]
     elif isinstance(value, dict):

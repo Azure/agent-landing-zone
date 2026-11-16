@@ -44,6 +44,14 @@ def test_enablement_is_strict(selection):
         pg.resolve_inputs({}, {"DEPLOY_POSTGRESQL": selection})
 
 
+@pytest.mark.parametrize("source", [{}, {"postgreSqlDatabaseName": "${POSTGRESQL_DATABASE_NAME=agentlz}"}])
+def test_empty_terraform_database_output_does_not_override_input(source):
+    # Terraform emits POSTGRESQL_DATABASE_NAME="" when disabled and azd persists it.
+    env = {"POSTGRESQL_DATABASE_NAME": ""}
+    assert pg.resolve_inputs(source, env) == pg.resolve_inputs(source, {})
+    assert pg.resolve_inputs(source, env)["postgreSqlDatabaseName"] == "agentlz"
+
+
 def test_inputs_resolve_env_and_defaults_once():
     result = pg.resolve_inputs(INPUTS, {"POSTGRESQL_STORAGE_SIZE_GB": "64"})
     assert result["postgreSqlStorageSizeGb"] == 64
