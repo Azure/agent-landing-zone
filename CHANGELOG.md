@@ -1,5 +1,26 @@
 # Changelog
 
+## [v7.5.8] - 2026-11-16
+
+### Fixed
+
+- Post-provision metadata verification no longer fails with `provider/access: Read unavailable or invalid JSON` after a successful Bicep provision. ARM can return the `DEPLOYMENT_METADATA` output with different casing, such as `deploymenT_METADATA`. The output name is now matched case-insensitively, as azd does (#918).
+- Terraform private endpoints do not recover by themselves when Azure ends the operation with `InternalServerError`. The azapi retry covers only individual requests, not a failed long-running operation. For both providers, rerun `azd provision`, which is idempotent. The release validation workflow now detects this error correctly and reruns provisioning up to two times (#919).
+- The release validation workflow stops executor units left by finished workflow runs (#917).
+
+### Migration
+
+- No action required. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.7`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 ## [v7.5.7] - 2026-11-16
 
 ### Fixed

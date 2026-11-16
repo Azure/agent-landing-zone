@@ -98,12 +98,38 @@ def test_command_errors_are_redacted(monkeypatch, failure):
     assert "canary" not in str(error.value)
 
 
-def test_bicep_requests_only_named_output_and_success(candidate):
+@pytest.mark.parametrize("failure,reason", [
+    (subprocess.CompletedProcess(["az"], 0, "\n", ""), "returned no output"),
+    (subprocess.CompletedProcess(["az"], 0, "{bad", ""), "returned invalid JSON"),
+    (subprocess.CompletedProcess(["az"], 3, "", "secret"), "failed (exit 3)"),
+    (subprocess.TimeoutExpired(["az"], 1), "timed out"),
+])
+def test_command_errors_name_category_and_shape_without_values(monkeypatch, failure, reason):
+    def run(*args, **kwargs):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+    monkeypatch.setattr(metadata.subprocess, "run", run)
+    command = [r"C:\az\wbin\az.CMD", "deployment", "group", "show", "--name", "private-name", "--query", "keys(x)"]
+    with pytest.raises(metadata.MetadataError) as error:
+        metadata.run_json(command)
+    assert reason in str(error.value)
+    assert "az deployment group show --query keys(x)" in str(error.value)
+    assert "private-name" not in str(error.value) and "secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("output_name", ["DEPLOYMENT_METADATA", "deploymenT_METADATA"])
+def test_bicep_requests_only_named_output_and_success(candidate, output_name):
     calls = []
 
     def run(command, **kwargs):
         calls.append(command)
-        return "Succeeded" if command[command.index("--query") + 1] == "properties.provisioningState" else candidate
+        query = command[command.index("--query") + 1]
+        if query == "properties.provisioningState":
+            return "Succeeded"
+        if query.startswith("keys("):
+            return ["AZURE_RESOURCE_GROUP", output_name]
+        return candidate
 
     environment = {
         "AZURE_SUBSCRIPTION_ID": candidate["context"]["subscriptionId"],
@@ -111,11 +137,28 @@ def test_bicep_requests_only_named_output_and_success(candidate):
         "DEPLOYMENT_NAME": "example-foundation",
     }
     assert metadata.read_bicep(environment, run) == candidate
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert {command[command.index("--query") + 1] for command in calls} == {
-        "properties.provisioningState", "properties.outputs.DEPLOYMENT_METADATA.value",
+        "properties.provisioningState", "keys(properties.outputs || `{}`)",
+        f'properties.outputs."{output_name}".value',
     }
     assert all("--subscription" in command and "--resource-group" in command for command in calls)
+
+
+@pytest.mark.parametrize("names", [[], ["OTHER"], ["DEPLOYMENT_METADATA", "deployment_metadata"], ['deployment_metadata"x'], None])
+def test_bicep_missing_or_ambiguous_output_is_rejected(names):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return "Succeeded" if command[-1] == "properties.provisioningState" else names
+
+    with pytest.raises(metadata.MetadataError, match="source: Missing DEPLOYMENT_METADATA"):
+        metadata.read_bicep({
+            "AZURE_SUBSCRIPTION_ID": "22222222-2222-2222-2222-222222222222",
+            "AZURE_RESOURCE_GROUP": "rg-example", "DEPLOYMENT_NAME": "example-foundation",
+        }, run)
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("state", ["Failed", "Running", "Accepted", None])
@@ -835,7 +878,9 @@ def run(command, **kwargs):
     if command[0] == "terraform":
         return saved["document"] if command[1] == "output" else None
     if command[1:4] == ["deployment", "group", "show"]:
-        return "Succeeded" if command[-1] == "properties.provisioningState" else saved["document"]
+        if command[-1] == "properties.provisioningState":
+            return "Succeeded"
+        return ["deploymenT_METADATA"] if command[-1].startswith("keys(") else saved["document"]
     context = saved["document"]["context"]
     if command[1:3] == ["account", "show"]:
         return {"id": context["subscriptionId"], "tenantId": context["tenantId"]}
@@ -860,7 +905,7 @@ print(json.dumps(calls))
         calls = json.loads(result.stdout)
         named = [
             command for command in calls
-            if command[-1] == "properties.outputs.DEPLOYMENT_METADATA.value"
+            if command[-1] == 'properties.outputs."deploymenT_METADATA".value'
             or command[:4] == ["terraform", "output", "-json", "DEPLOYMENT_METADATA"]
         ]
         assert len(named) == 1

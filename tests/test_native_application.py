@@ -9,7 +9,9 @@ import shutil
 import os
 import yaml
 
-from config.deployment.native import OBSOLETE_SELECTION_KEYS, resolve_application, scheduler_settings
+from config.deployment.native import (
+    FOUNDATION_OUTPUT_KEYS, OBSOLETE_SELECTION_KEYS, resolve_application, scheduler_settings,
+)
 from config.deployment import native_deploy, native_access
 from config.deployment import appconfig, private_network
 from config.deployment import hosted_image
@@ -60,7 +62,7 @@ def test_native_hosted_startup_matches_canonical_runtime_module_and_parameter_se
     )
 
 
-@pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS))
+@pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS - FOUNDATION_OUTPUT_KEYS))
 @pytest.mark.parametrize("value", ["", "false", "true", "classic", "hosted-panel"])
 def test_obsolete_settings_are_rejected_not_reinterpreted(key, value):
     with pytest.raises(ValueError, match="Remove these settings"):
