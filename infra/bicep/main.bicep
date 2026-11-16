@@ -3252,12 +3252,12 @@ var _containerRuntimeEnv = [
 // on a name collision (the base bootstrap entry is dropped) to keep the same
 // precedence as the App Configuration passthrough. With the default empty array
 // this is a no-op and the emitted env block is byte-identical.
-var _additionalContainerEnv = [
-  for s in additionalAppConfigurationSettings: {
-    name: s.name
-    value: s.value
-  }
-]
+// map() instead of a for-expression: ARM re-evaluates copy-loop variable values,
+// so a literal setting value such as '[]' would be parsed as a template expression.
+var _additionalContainerEnv = map(additionalAppConfigurationSettings, s => {
+  name: s.name
+  value: s.value
+})
 var _additionalContainerEnvNames = map(_additionalContainerEnv, e => e.name)
 var _containerRuntimeEnvWithAdditional = concat(
   filter(_containerRuntimeEnv, e => !contains(_additionalContainerEnvNames, e.name)),
@@ -4332,14 +4332,13 @@ module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration
 }
 
 // Normalize accelerator-supplied App Configuration passthrough entries so every item carries a label and contentType. The app-configuration module reads both unconditionally, so a missing label defaults to appConfigLabel and a missing contentType defaults to text/plain.
-var _normalizedAdditionalAppConfigSettings = [
-  for s in additionalAppConfigurationSettings: {
-    name: s.name
-    value: s.value
-    label: s.?label ?? appConfigLabel
-    contentType: s.?contentType ?? 'text/plain'
-  }
-]
+// Uses map() so literal values such as '[]' are not re-evaluated as ARM expressions.
+var _normalizedAdditionalAppConfigSettings = map(additionalAppConfigurationSettings, s => {
+  name: s.name
+  value: s.value
+  label: s.?label ?? appConfigLabel
+  contentType: s.?contentType ?? 'text/plain'
+})
 
 // Collision keys for the passthrough, derived exactly how the app-configuration module names each key-value resource (name$label, or name when the label is empty). Used to drop any landing-zone key the passthrough overrides, so the passthrough always wins without emitting a duplicate resource name.
 var _additionalAppConfigKeys = map(_normalizedAdditionalAppConfigSettings, s => empty(s.label) ? s.name : '${s.name}$${s.label}')
@@ -4604,6 +4603,11 @@ output CONTAINER_APP_INTERNAL_FQDN string = (_deployContainerApps && length(cont
 
 // Independently versioned discovery contract. Only public, selected resource
 // leaves belong here, never module response bags or runtime settings.
+var _cosmosDeploymentOutputs = reference(
+  resourceId(_applicationResourceGroupName, 'Microsoft.Resources/deployments', 'CosmosDBAccount'),
+  '2022-09-01'
+).outputs
+
 output DEPLOYMENT_METADATA object = {
   schemaVersion: 1
   context: {
@@ -4679,10 +4683,12 @@ output DEPLOYMENT_METADATA object = {
     }
     cosmos: {
       status: deployCosmosDb ? 'managed' : 'disabled'
+      // The module is cross-resource-group and conditional, so ARM preflight requires an
+      // explicit API version on the output reference when Cosmos DB is not deployed.
       resource: deployCosmosDb ? {
-        resourceId: cosmosDBAccount.outputs.resourceId
-        name: cosmosDBAccount.outputs.name
-        endpoint: cosmosDBAccount.outputs.endpoint
+        resourceId: _cosmosDeploymentOutputs.resourceId.value
+        name: _cosmosDeploymentOutputs.name.value
+        endpoint: _cosmosDeploymentOutputs.endpoint.value
       } : null
     }
     containerEnvironment: {
@@ -4732,7 +4738,7 @@ output DEPLOYMENT_METADATA object = {
     storageContainers: _deploymentMetadataStorageBindings
     cosmosDatabases: deployCosmosDb ? [{
       canonicalName: 'DATABASE_NAME'
-      resourceId: '${cosmosDBAccount.outputs.resourceId}/sqlDatabases/${resourceNames.dbDatabaseName}'
+      resourceId: '${_cosmosDeploymentOutputs.resourceId.value}/sqlDatabases/${resourceNames.dbDatabaseName}'
       name: resourceNames.dbDatabaseName
     }] : []
     cosmosContainers: _deploymentMetadataCosmosBindings
@@ -4777,7 +4783,7 @@ var _deploymentMetadataStorageBindings = map(deployStorageAccount ? storageAccou
 })
 var _deploymentMetadataCosmosBindings = map(deployCosmosDb ? databaseContainersList : [], container => {
   canonicalName: container.canonical_name
-  resourceId: '${cosmosDBAccount.outputs.resourceId}/sqlDatabases/${resourceNames.dbDatabaseName}/containers/${container.name}'
+  resourceId: '${_cosmosDeploymentOutputs.resourceId.value}/sqlDatabases/${resourceNames.dbDatabaseName}/containers/${container.name}'
   name: container.name
 })
 

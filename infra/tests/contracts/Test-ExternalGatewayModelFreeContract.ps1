@@ -194,7 +194,7 @@ try {
     Assert-Equal 'Default seed publishes CHAT_DEPLOYMENT_NAME and EMBEDDING_DEPLOYMENT_NAME' @($explicitSeedMode.modelDeploymentNamesSettings | ForEach-Object { $_.name }) @('CHAT_DEPLOYMENT_NAME', 'EMBEDDING_DEPLOYMENT_NAME')
 
     # 4. Verify inverse normalization restores historical graph and rejects mutations.
-    $restored = ConvertTo-PreModelDeploymentsOptionalGraph $t
+    $restored = ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PreArmLiteralSafetyGraph $t)
     Assert-Equal 'Inverse removes deployModelDeployments parameter' $restored.parameters.ContainsKey('deployModelDeployments') $false
     Assert-Equal 'Inverse restores historical _deploymentMetadataModels' $restored.variables._deploymentMetadataModels $projection.changes.variables.changes._deploymentMetadataModels.before
 
@@ -217,7 +217,7 @@ try {
         }
     )
     foreach ($case in $mutationCases) {
-        $mutated = $rawJson | ConvertFrom-Json -AsHashtable -Depth 100
+        $mutated = ConvertTo-PreArmLiteralSafetyGraph ($rawJson | ConvertFrom-Json -AsHashtable -Depth 100)
         & $case.Mutate $mutated
         Assert-Rejected "Reject $($case.Name)" { ConvertTo-PreModelDeploymentsOptionalGraph $mutated }
     }

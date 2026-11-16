@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Bicep provisioning no longer fails preflight with `Unable to parse language expression ''`. ARM re-evaluated App Configuration passthrough values built in copy-loop variables, so a literal value such as `NATIVE_TOOL_SECRET_NAMES=[]` was parsed as a template expression. The passthrough variables now use `map()`, which keeps literal values.
+- Bicep provisioning with Cosmos DB disabled (the default) no longer fails preflight with `The template output reference to 'Microsoft.Resources/deployments/CosmosDBAccount' requires an API version`. `DEPLOYMENT_METADATA` now reads the conditional, cross-resource-group Cosmos DB module through an explicit versioned reference.
+
 ## [v7.5.2] - 2026-11-14
 
 ### Added

@@ -92,11 +92,14 @@ try {
         Assert ($seed.postgreSqlAllowedIpRanges.value -is [array] -and $seed.postgreSqlAllowedIpRanges.value.Count -eq 0) 'Typed operator ranges.'
     }
     $actual = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))
+    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph (ConvertTo-PreArmLiteralSafetyGraph $actual)))
     $before = ConvertTo-PrivateMonitoringTraceRbacPrePostgreSqlGraph (ConvertTo-ModelDeploymentsOptionalPrePostgreSqlGraph (ConvertTo-DeterministicSubnetPrePostgreSqlGraph (ConvertTo-PrePostgreSqlGraph $preSubnet)))
     Assert ((Get-PostgreSqlDigest 'Enabled') -cne (Get-PostgreSqlDigest 'enabled')) 'Digest caching must not swallow case-only mutations.'
     [IO.File]::WriteAllText($beforeFile, (ConvertTo-Json -InputObject $before -Depth 100 -Compress))
-    & python (Join-Path $PSScriptRoot 'postgresql_disabled_ast.py') $compiled $beforeFile
+    # Compare against the already reviewed ARM literal-safety inverse.
+    $armSafeFile = "$compiled.armsafe.json"
+    [IO.File]::WriteAllText($armSafeFile, (ConvertTo-Json -InputObject (ConvertTo-PreArmLiteralSafetyGraph $actual) -Depth 100 -Compress))
+    & python (Join-Path $PSScriptRoot 'postgresql_disabled_ast.py') $armSafeFile $beforeFile
     Assert ($LASTEXITCODE -eq 0) 'Disabled preexisting graph equivalence failed.'
     # Every deploying field accepted by the inverse gets a rejection mutation.
     # Original fingerprints additionally reject untouched/unrelated drift.
@@ -120,4 +123,4 @@ try {
     }
     Write-Host "PostgreSQL compiled contracts passed: $(@(Get-PostgreSqlDelta).Count) exact delta mutations rejected (offline, not deployed parity)."
 }
-finally { Remove-Item $compiled, $beforeFile -Force -ErrorAction SilentlyContinue }
+finally { Remove-Item $compiled, $beforeFile, "$compiled.armsafe.json" -Force -ErrorAction SilentlyContinue }
