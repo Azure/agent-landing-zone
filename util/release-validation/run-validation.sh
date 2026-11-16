@@ -366,8 +366,16 @@ set_env RUN_FROM_JUMPBOX false
 
 log "Provision the foundation"
 PROVISIONED=true
+PROVISION_LOG_START="$(wc -c < "$RAW_LOG")"
 run user "azd-provision" azd provision --no-prompt
 PROVISION_RC=$?
+# Azure intermittently fails private endpoint operations with a bare
+# InternalServerError. azd provision is idempotent, so the operator reruns it.
+if [ "$PROVISION_RC" -ne 0 ] && tail -c +"$((PROVISION_LOG_START + 1))" "$RAW_LOG" | grep -q 'InternalServerError'; then
+  log "Rerun provisioning after a transient Azure InternalServerError"
+  run user "azd-provision-retry" azd provision --no-prompt
+  PROVISION_RC=$?
+fi
 mapfile -t TRACKED_GROUPS < <(spoke_groups)
 [ "$PROVISION_RC" -eq 0 ] || fail
 
