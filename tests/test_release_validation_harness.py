@@ -1,8 +1,10 @@
 """Transient provision failure detection in util/release-validation/run-validation.sh."""
 
 import re
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,12 +25,16 @@ PLAN = (
 
 def transient(tmp_path: Path, log: str, offset: int = 0) -> bool:
     raw = tmp_path / "transcript.raw.log"
-    raw.write_text(log, encoding="utf-8")
-    script = f"set -euo pipefail\nRAW_LOG={raw}\n{_FUNCTION}provision_failed_transiently {offset}\n"
-    return subprocess.run(["bash", "-c", script], check=False).returncode == 0
+    raw.write_bytes(log.encode("utf-8"))
+    script = f"set -euo pipefail\n{_FUNCTION}provision_failed_transiently {offset}\n"
+    env = {**os.environ, "RAW_LOG": str(raw)}
+    return subprocess.run(["bash", "-c", script], env=env, check=False).returncode == 0
 
 
-pytestmark = pytest.mark.skipif(not shutil.which("bash") or not shutil.which("awk"), reason="bash and awk required")
+# The harness runs only on the Linux validation executor.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32" or not shutil.which("bash") or not shutil.which("awk"), reason="Linux harness"
+)
 
 
 def test_terraform_plan_retry_settings_are_not_a_transient_failure(tmp_path):
