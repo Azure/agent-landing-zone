@@ -351,6 +351,49 @@ def test_live_boundary_accepts_pre_registry_setup_app(candidate, live_boundary):
     metadata.verify_live(candidate, parameters, run)
 
 
+def _az_projection(run):
+    """Apply the az --query multiselect semantics: every selected key is returned, null when absent."""
+    def projected(command, **kwargs):
+        row = run(command, **kwargs)
+        if command[1:3] != ["resource", "show"]:
+            return row
+        query = command[command.index("--query") + 1]
+        properties = row.get("properties") or {}
+        configuration = properties.get("configuration") or {}
+        result = {key: row.get(key) for key in re.findall(r"(?<=[{,])(\w+):\1(?=[,}])", query)}
+        result["properties"] = {}
+        for key, path in re.findall(r"(\w+):properties\.([\w.]+)", query):
+            if path.startswith("configuration."):
+                result["properties"].setdefault("configuration", {})[key] = configuration.get(path.split(".", 1)[1])
+            else:
+                result["properties"][key] = properties.get(path)
+        return result
+    return projected
+
+
+def test_live_reads_accept_null_projected_properties(candidate, live_boundary):
+    parameters, rows, run = live_boundary
+    for row in rows.values():
+        if row["type"] == "Microsoft.CognitiveServices/accounts/deployments":
+            row["properties"]["model"] = {**row["properties"]["model"], "publisher": "OpenAI"}
+    metadata.verify_live(candidate, parameters, _az_projection(run))
+
+    registry = candidate["resources"]["registry"]["resource"]["resourceId"].lower()
+    rows[registry]["properties"].pop("loginServer")
+    with pytest.raises(metadata.MetadataError, match="resources.registry.endpoint"):
+        metadata.verify_live(candidate, parameters, _az_projection(run))
+
+
+def test_unexpected_internal_error_reports_category_without_values(monkeypatch, tmp_path):
+    def fail(root, name):
+        raise TypeError("secret-value")
+
+    monkeypatch.setattr(metadata, "selected_environment", fail)
+    with pytest.raises(metadata.MetadataError, match=r"\(TypeError in fail:\d+\)") as error:
+        metadata.load_metadata({"AZURE_ENV_NAME": "example"}, project_root=tmp_path)
+    assert "secret-value" not in str(error.value)
+
+
 def test_generated_app_name_cannot_redirect_verified_arm_id(candidate, live_boundary):
     parameters, _, run = live_boundary
     parameters["containerAppsList"][0]["name"] = None

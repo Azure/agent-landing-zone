@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import traceback
 from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 
@@ -634,8 +635,10 @@ def verify_live(
         live[slot] = row
         properties = row.get("properties") or {}
         domain = properties.get("customSubDomainName")
+        # az --query projections return every selected key, so absent properties arrive as null.
+        login_server = properties.get("loginServer")
         actual_endpoint = {
-            "registry": "https://" + properties.get("loginServer", ""),
+            "registry": f"https://{login_server}" if login_server else None,
             "appConfig": properties.get("endpoint"),
             "keyVault": properties.get("vaultUri"),
             "storage": (properties.get("primaryEndpoints") or {}).get("blob"),
@@ -661,7 +664,11 @@ def verify_live(
         if not foundry or model["resourceId"].casefold() != (foundry["resourceId"] + "/deployments/" + model["name"]).casefold():
             raise MetadataError("modelDeployments: Model is not a child of the selected account.")
         observed = read({"resourceId": model["resourceId"]})
-        if observed["properties"].get("model") != model["model"]:
+        live_model = (observed.get("properties") or {}).get("model") or {}
+        # Newer ARM API versions can add read-only model fields such as publisher or source.
+        if not isinstance(live_model, dict) or any(
+            live_model.get(field) != value for field, value in model["model"].items()
+        ):
             raise MetadataError("modelDeployments.model: Live model differs from the declared mapping.")
         if endpoint(model["endpoint"]) != f"https://{foundry['name'].lower()}.openai.azure.com":
             raise MetadataError("modelDeployments.endpoint: Model endpoint is not bound to the selected account.")
@@ -758,8 +765,13 @@ def load_metadata(
         live = verify_live(document, parameters, runner)
     except MetadataError:
         raise
-    except (OSError, ValueError, KeyError, TypeError):
-        raise MetadataError("selection: Invalid declared inputs or environment binding. Restore original selection and retry.") from None
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        # Report only the failure category and location because exception text can contain resolved values.
+        raise MetadataError(
+            "selection: Invalid declared inputs or environment binding "
+            f"({type(exc).__name__} in {frame.name}:{frame.lineno}). Restore original selection and retry."
+        ) from None
     return VerifiedMetadata(document, selected, parameters, live)
 
 
