@@ -1,5 +1,26 @@
 # Changelog
 
+## [v7.5.10] - 2026-11-16
+
+### Fixed
+
+- Terraform deployments with PostgreSQL disabled no longer fail post-provision, or a later `azd provision`, with `selection: Invalid declared inputs or environment binding` or `Invalid application database name`. azd stores Terraform outputs in the azd environment, and disabled features emit an empty value for keys that are also inputs, such as `POSTGRESQL_DATABASE_NAME`. Defaulted inputs (`${NAME=default}`) now use their default when the value is empty, as azd does for Bicep. An explicit empty value for a defaulted Terraform input therefore resolves to the default instead of being rejected (#926).
+- The release validation workflow no longer reruns a failed Terraform provision as a transient Azure `InternalServerError` because of the azapi retry setting printed in the Terraform plan (#926).
+
+### Migration
+
+- No action required. Existing Terraform environments that already hold empty `POSTGRESQL_DATABASE_NAME`, `KNOWLEDGE_BASE_NAME` or `FOUNDRY_IQ_KNOWLEDGE_SOURCE_*` values work without changes. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.9`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.9] - 2026-11-16
 
 ### Fixed
