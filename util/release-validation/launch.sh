@@ -29,6 +29,20 @@ work="/var/lib/relval/$RUN_KEY"
 
 cat <<EOF
 set -eu
+# A cancelled or deleted workflow run leaves its unit running and blocks the
+# executor. Units named after a workflow run id are stopped once GitHub reports
+# that run as completed or missing. Other units, such as manual runs, are kept.
+for unit in \$(systemctl list-units --type=service --state=active --no-legend --plain 'relval-*' | awk '{print \$1}'); do
+  owner="\${unit#relval-}"; owner="\${owner%%-*}"
+  case "\$owner" in ''|*[!0-9]*) continue ;; esac
+  code="\$(curl -sS --max-time 20 -o /tmp/relval-owner.json -w '%{http_code}' \
+    "https://api.github.com/repos/$REPOSITORY/actions/runs/\$owner" || true)"
+  state="\$(jq -r '.status // empty' /tmp/relval-owner.json 2>/dev/null || true)"
+  if [ "\$code" = 404 ] || { [ "\$code" = 200 ] && [ "\$state" = completed ]; }; then
+    echo "Stopping \$unit: workflow run \$owner is no longer running."
+    systemctl stop "\$unit" || true
+  fi
+done
 if systemctl list-units --type=service --state=active --no-legend 'relval-*' | grep -q relval-; then
   echo "Another validation is still running on this executor."; exit 1
 fi
