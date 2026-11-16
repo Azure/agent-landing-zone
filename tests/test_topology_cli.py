@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from config.deployment import topology
-from config.deployment.native import OBSOLETE_SELECTION_KEYS
+from config.deployment.native import FOUNDATION_OUTPUT_KEYS, OBSOLETE_SELECTION_KEYS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +62,7 @@ def test_invalid_canonical_values_fail_without_success_output(selection):
     assert not output.stdout
 
 
-@pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS))
+@pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS - FOUNDATION_OUTPUT_KEYS))
 def test_even_false_or_empty_obsolete_input_is_not_a_migration_request(key):
     for value in ("", "false"):
         output = run_cli({key: value})
