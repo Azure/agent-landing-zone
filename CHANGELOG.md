@@ -1,5 +1,25 @@
 # Changelog
 
+## [v7.5.9] - 2026-11-16
+
+### Fixed
+
+- Post-provision metadata verification no longer fails with `selection: Invalid declared inputs or environment binding` after a successful provision. The `az resource show --query` projection returns every selected property, with `null` when a resource does not have it, and the registry endpoint check concatenated that `null`. This affected every deployment with both providers. Live model checks now compare only the declared format, name and version, so read-only fields added by newer ARM API versions are accepted. Unexpected internal errors in this check now report the error type and code location, never values (#922).
+
+### Migration
+
+- No action required. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.8`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.8] - 2026-11-16
 
 ### Fixed
