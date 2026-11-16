@@ -242,6 +242,16 @@ teardown() {
     return 0
   fi
   run harness "disconnect-hub" disconnect_hub
+  if [ "${WAIT_FOR_TEARDOWN:-false}" != "true" ]; then
+    # Deletion often hangs on locked resources, so start it and do not wait.
+    local rg
+    for rg in "${TRACKED_GROUPS[@]}"; do
+      [ -n "$rg" ] && az group delete -n "$rg" --yes --no-wait --only-show-errors || true
+    done
+    TEARDOWN="started-no-wait"
+    log "Deletion started without waiting for: ${TRACKED_GROUPS[*]}"
+    return 0
+  fi
   if { run user "azd-down" azd down --force --purge --no-prompt \
         || { sleep 120; run user "azd-down-retry" azd down --force --purge --no-prompt; }; } \
       && run harness "verify-removed" verify_removed; then
