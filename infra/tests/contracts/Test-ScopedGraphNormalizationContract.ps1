@@ -37,7 +37,7 @@ try {
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
     $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
-    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))).resources.aiFoundry.properties.parameters.aiModelDeployments
+    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph (ConvertTo-PreArmLiteralSafetyGraph $actual)))).resources.aiFoundry.properties.parameters.aiModelDeployments
     Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
     Assert-ScopedValue $embeddingRule.after `
         ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `
@@ -207,6 +207,12 @@ try {
         @(Get-SubnetDeltaPaths (Get-KnowledgeToolboxProjection))
     if ($subnetPaths.Count -eq 0) { throw 'Subnet normalization has no exact deploying delta assertions.' }
     foreach ($path in $subnetPaths) {
+        # Projection paths use the pre-literal-safety copy indexes (10 and 19 removed).
+        if ($path.Count -ge 3 -and $path[0] -ceq 'variables' -and $path[1] -ceq 'copy') {
+            $original = [int]$path[2]
+            $path = @($path)
+            $path[2] = [string]$(if ($original -lt 10) { $original } elseif ($original -lt 19) { $original - 1 } else { $original - 2 })
+        }
         $changed = $json | ConvertFrom-Json -AsHashtable -Depth 100
         $parent = $changed
         foreach ($segment in $path[0..($path.Count - 2)]) {

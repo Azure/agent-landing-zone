@@ -1,5 +1,30 @@
 # Changelog
 
+## [v7.5.3] - 2026-11-15
+
+### Fixed
+
+- Bicep provisioning no longer fails preflight with `Unable to parse language expression ''`. ARM re-evaluated App Configuration passthrough values built in copy-loop variables, so a literal value such as `NATIVE_TOOL_SECRET_NAMES=[]` was parsed as a template expression. The passthrough variables now use `map()`, which keeps literal values.
+- Bicep provisioning with Cosmos DB disabled (the default) no longer fails preflight with `The template output reference to 'Microsoft.Resources/deployments/CosmosDBAccount' requires an API version`. `DEPLOYMENT_METADATA` now reads the conditional, cross-resource-group Cosmos DB module through an explicit versioned reference.
+- The release validation workflow signs in to Azure again. `bootstrap-hub.sh` now adds a federated credential for the immutable GitHub OIDC subject claim, so the workflow no longer fails at `azure/login` with `AADSTS700213`.
+
+### Migration
+
+- No action required. Bicep deployments that failed preflight on `v7.5.2` succeed after upgrading. Deployed resources and App Configuration settings are unchanged. Terraform is unchanged. For rollback, restore `v7.5.2`. Runtime component pins and infrastructure provenance are unchanged.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Feature CI passed Bicep build and lint, offline foundation contracts, Terraform contracts and deployment and hook contracts on Linux and Windows. The composed standard scenario passed `az deployment group validate`.
+- Live validation of the standard scenario with Bicep and Terraform runs through the release validation workflow after publication. The release is promoted to Latest only when both pass.
+
 ## [v7.5.2] - 2026-11-14
 
 ### Added
