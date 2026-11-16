@@ -218,6 +218,19 @@ def test_wrong_environment_binding_and_malformed_source_fail(tmp_path):
         intent.resolve_intent(path, ENVIRONMENT)
 
 
+def test_unset_placeholders_without_default_are_omitted_like_azd(tmp_path):
+    unset = ("ENABLE_AGENTIC_RETRIEVAL", "USE_EXISTING_VNET", "SIDE_BY_SIDE")
+    environment = {key: value for key, value in ENVIRONMENT.items() if key not in unset}
+    resolved_parameters = intent.resolve_declared_parameters(declaration(tmp_path, []), environment)
+    assert "enableAgenticRetrieval" not in resolved_parameters or isinstance(
+        resolved_parameters["enableAgenticRetrieval"], bool
+    )
+    with pytest.raises(ValueError, match="enableAgenticRetrieval requires a native bool"):
+        intent.resolve_declared_parameters(
+            declaration(tmp_path, []), {**environment, "ENABLE_AGENTIC_RETRIEVAL": ""},
+        )
+
+
 def test_single_inventory_is_consumed_by_terraform_and_python():
     source = (ROOT / "infra/terraform/main.data.tf").read_text(encoding="utf-8")
     assert "config/deployment/appconfig_ownership.json" in source
