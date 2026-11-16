@@ -80,6 +80,10 @@ script prints.
 
 - Only one validation runs at a time (workflow concurrency group and
   `max-parallel: 1`). `launch.sh` also refuses to start while a run is active.
+  It first stops units left by a cancelled or deleted workflow run, without
+  teardown. Delete their resource groups by hand. Give manual runs a `RUN_KEY`
+  whose first segment is not a number, such as `manual-1`, so they are never
+  stopped.
 - Run Command allows one command per VM and about 4 KB of output, so evidence
   is transferred in pages.
 - The evidence storage account is private. The executor reaches it through the
