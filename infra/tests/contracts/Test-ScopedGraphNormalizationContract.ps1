@@ -37,7 +37,7 @@ try {
     # rather than normalizing all occurrences of Standard/GlobalStandard.
     # This is bounded compiled-expression evidence, not live ARM evaluation.
     $embeddingRule = (Get-EmbeddingDefaultProjection).changes.resources.changes.aiFoundry.changes.properties.changes.parameters.changes.aiModelDeployments
-    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))).resources.aiFoundry.properties.parameters.aiModelDeployments
+    $selection = (ConvertTo-PreDeploymentMetadataGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph (ConvertTo-PreArmLiteralSafetyGraph $actual)))).resources.aiFoundry.properties.parameters.aiModelDeployments
     Assert-ScopedValue $selection $embeddingRule.after '/embedding/nativeListSelection'
     Assert-ScopedValue $embeddingRule.after `
         ($embeddingRule.before.Replace("'Standard', 'capacity', 10", "'GlobalStandard', 'capacity', 10")) `

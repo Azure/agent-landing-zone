@@ -92,7 +92,7 @@ try {
         Assert ($seed.postgreSqlAllowedIpRanges.value -is [array] -and $seed.postgreSqlAllowedIpRanges.value.Count -eq 0) 'Typed operator ranges.'
     }
     $actual = Get-Content $compiled -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph $actual))
+    $preSubnet = ConvertTo-PreSubnetConditionalReferencesGraph (ConvertTo-PreModelDeploymentsOptionalGraph (ConvertTo-PrePrivateMonitoringTraceRbacGraph (ConvertTo-PreArmLiteralSafetyGraph $actual)))
     $before = ConvertTo-PrivateMonitoringTraceRbacPrePostgreSqlGraph (ConvertTo-ModelDeploymentsOptionalPrePostgreSqlGraph (ConvertTo-DeterministicSubnetPrePostgreSqlGraph (ConvertTo-PrePostgreSqlGraph $preSubnet)))
     Assert ((Get-PostgreSqlDigest 'Enabled') -cne (Get-PostgreSqlDigest 'enabled')) 'Digest caching must not swallow case-only mutations.'
     [IO.File]::WriteAllText($beforeFile, (ConvertTo-Json -InputObject $before -Depth 100 -Compress))
