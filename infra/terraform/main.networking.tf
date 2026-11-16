@@ -951,7 +951,7 @@ resource "azapi_resource" "network_private_endpoint" {
   }
   locks = [local.network_vnet_id]
   retry = {
-    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned"]
+    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned", "InternalServerError"]
   }
   response_export_values = ["properties.customDnsConfigs", "properties.networkInterfaces"]
   depends_on             = [terraform_data.network_contract, module.network_subnet, module.network_private_dns]
@@ -997,7 +997,7 @@ resource "azapi_resource" "network_foundry_private_endpoint" {
   }
   locks = [local.network_vnet_id]
   retry = {
-    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned"]
+    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned", "InternalServerError"]
   }
   response_export_values = ["properties.customDnsConfigs", "properties.networkInterfaces"]
   depends_on             = [terraform_data.network_contract, module.network_subnet, module.network_private_dns]
