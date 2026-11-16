@@ -18,7 +18,7 @@ from config.deployment.input_types import INPUT_TYPES
 from config.deployment.resolution import resolve_parameters
 from config.deployment.resource_groups import resolve_resource_groups
 from config.deployment.presentation_settings import KEY as PRESENTATION_KEY, validate_settings
-from config.deployment.terraform_inputs import _native_value, _substitute
+from config.deployment.terraform_inputs import _native_value, _substitute, _unset_placeholder
 
 OWNERSHIP_PATH = Path(__file__).with_name("appconfig_ownership.json")
 
@@ -102,7 +102,12 @@ def resolve_declared_parameters(
         not isinstance(entry, dict) or "value" not in entry for entry in entries.values()
     ):
         raise ValueError("Declared runtime source must be a parameter document with value entries.")
-    source = _substitute({name: entry["value"] for name, entry in entries.items()}, environment)
+    # azd omits a parameter whose placeholder is unset and has no default, so
+    # the foundation applies its declared default. Resolve the same way.
+    source = _substitute({
+        name: entry["value"] for name, entry in entries.items()
+        if not _unset_placeholder(entry["value"], environment)
+    }, environment)
     if source.keys() - INPUT_TYPES.keys() - {"aiFoundryLocation"}:
         raise ValueError("Unknown infrastructure input in the declared runtime source.")
     alias = source.pop("aiFoundryLocation", "")
