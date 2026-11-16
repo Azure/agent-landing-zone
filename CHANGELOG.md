@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Bicep provisioning no longer fails with `DeploymentNotFound: Deployment 'CosmosDBAccount' could not be found`. The versioned reference added in `v7.5.3` blocked the Cosmos DB module deployment. `DEPLOYMENT_METADATA` now derives the Cosmos DB resource ID, name and endpoint from the resource names, so it has no reference to the module.
+- The release validation workflow no longer waits for the validation landing zones to be deleted. Teardown starts the resource group deletions and returns. Set `WAIT_FOR_TEARDOWN=true` on the executor to run the full `azd down`.
+
 ## [v7.5.3] - 2026-11-15
 
 ### Fixed

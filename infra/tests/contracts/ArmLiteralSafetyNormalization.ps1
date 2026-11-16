@@ -1,8 +1,8 @@
 # Exact bounded inverse of the ARM literal-safety fix (Bicep 0.42.1):
 # - additionalAppConfigurationSettings passthrough moved from variable copy
 #   loops to map() so ARM keeps values such as "[]" literal;
-# - DEPLOYMENT_METADATA reads the conditional cross-RG Cosmos deployment with an
-#   explicit apiVersion so preflight accepts deployCosmosDb=false.
+# - DEPLOYMENT_METADATA derives Cosmos values from names, because a reference()
+#   to the conditional cross-RG deployment fails preflight or the deployment.
 # Only these compiled values are restored. Historical fingerprints still verify
 # every other resource, variable and output.
 function Get-ArmLiteralSafetyProjection {
@@ -34,6 +34,8 @@ function Get-ArmLiteralSafetyProjection {
         cosmosAfter = "reference(resourceId(variables('_applicationResourceGroupName'), 'Microsoft.Resources/deployments', 'CosmosDBAccount'), '2022-09-01')"
         cosmosBefore = "reference('cosmosDBAccount')"
         cosmosUses = [ordered]@{ cosmosResource = 3; cosmosDatabases = 1; cosmosContainers = 1 }
+        cosmosIdDerived = "[format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.DocumentDB/databaseAccounts/{2}', subscription().subscriptionId, variables('_applicationResourceGroupName'), variables('resourceNames').dbAccountName)]"
+        cosmosResourceDerived = "[if(parameters('deployCosmosDb'), createObject('resourceId', variables('_cosmosMetadataResourceId'), 'name', variables('resourceNames').dbAccountName, 'endpoint', format('https://{0}.documents.azure.com:443/', variables('resourceNames').dbAccountName)), null())]"
     }
 }
 
@@ -58,6 +60,28 @@ function ConvertTo-PreArmLiteralSafetyGraph {
     $null = $copy.variables.Remove('_normalizedAdditionalAppConfigSettings')
 
     $metadata = $copy.outputs.DEPLOYMENT_METADATA.value
+    # Cosmos metadata is derived from names. Restore the deployment-output form
+    # first, then the shared inverse below restores the historical reference.
+    $idRef = "variables('_cosmosMetadataResourceId')"
+    $nameRef = "variables('resourceNames').dbAccountName"
+    $out = "$($rule.cosmosAfter).outputs"
+    Assert-ScopedValue $copy.variables._cosmosMetadataResourceId $rule.cosmosIdDerived '/variables/_cosmosMetadataResourceId'
+    Assert-ScopedValue $metadata.resources.cosmos.resource $rule.cosmosResourceDerived '/outputs/DEPLOYMENT_METADATA/cosmosResource'
+    Assert-ScopedValue $metadata.dataResources.cosmosContainers "[variables('_deploymentMetadataCosmosBindings')]" '/outputs/DEPLOYMENT_METADATA/cosmosContainers'
+    $bindings = [string]$copy.variables._deploymentMetadataCosmosBindings
+    $databases = [string]$metadata.dataResources.cosmosDatabases
+    if ([regex]::Matches($bindings, [regex]::Escape($idRef)).Count -ne 1 -or
+        [regex]::Matches($databases, [regex]::Escape($idRef)).Count -ne 1) {
+        throw 'SCOPED: unreviewed derived Cosmos metadata reference.'
+    }
+    $metadata.resources.cosmos.resource = $rule.cosmosResourceDerived.
+        Replace("'resourceId', $idRef", "'resourceId', $out.resourceId.value").
+        Replace("'name', $nameRef, 'endpoint', format('https://{0}.documents.azure.com:443/', $nameRef)", "'name', $out.name.value, 'endpoint', $out.endpoint.value")
+    $metadata.dataResources.cosmosDatabases = $databases.Replace($idRef, "$out.resourceId.value")
+    $metadata.dataResources.cosmosContainers = $bindings.Replace($idRef, "$out.resourceId.value")
+    $null = $copy.variables.Remove('_cosmosMetadataResourceId')
+    $null = $copy.variables.Remove('_deploymentMetadataCosmosBindings')
+
     $targets = [ordered]@{
         cosmosResource   = @{ Parent = $metadata.resources.cosmos; Key = 'resource' }
         cosmosDatabases  = @{ Parent = $metadata.dataResources; Key = 'cosmosDatabases' }
