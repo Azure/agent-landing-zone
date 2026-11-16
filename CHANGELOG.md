@@ -1,5 +1,24 @@
 # Changelog
 
+## [v7.5.7] - 2026-11-16
+
+### Fixed
+
+- Post-provision metadata verification and re-provision no longer fail with `selection: Invalid declared inputs or environment binding` after a successful provision. The foundation outputs `DEPLOY_HOSTED_AGENT` and `HOSTED_AGENT_PREPARED`, which azd persists in the environment, are no longer rejected as obsolete selections. Declaring them in App Configuration settings is still rejected.
+
+### Migration
+
+- No action required. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.6`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 ## [v7.5.6] - 2026-11-16
 
 ### Fixed
