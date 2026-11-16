@@ -59,7 +59,9 @@ def test_direct_role_entry_rejects_invalid_native_metadata_before_assignment(fai
 
     def run(command, **kwargs):
         assert command[1:4] == ["deployment", "group", "show"]
-        return "Succeeded" if command[-1] == "properties.provisioningState" else document
+        if command[-1] == "properties.provisioningState":
+            return "Succeeded"
+        return ["DEPLOYMENT_METADATA"] if command[-1].startswith("keys(") else document
 
     with (
         patch.dict(os.environ, selected, clear=True),

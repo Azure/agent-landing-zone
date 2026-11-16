@@ -138,25 +138,50 @@ class VerifiedMetadata:
     live_resources: Mapping[str, dict[str, Any]]
 
 
+def describe_command(command: list[str]) -> str:
+    """Return the command shape without argument values, which may identify private resources."""
+    words = [Path(command[0]).stem.lower()] if command else ["command"]
+    for part in command[1:4]:
+        if part.startswith("-"):
+            break
+        words.append(part)
+    if "--query" in command[:-1]:
+        words.append(f"--query {command[command.index('--query') + 1]}")
+    return " ".join(words)
+
+
 def run_json(
     command: list[str], *, cwd: Path | None = None,
     environment: Mapping[str, str] | None = None, decode_json: bool = True,
 ) -> Any:
+    # Output content is never echoed because it can contain secrets. Only the failure category is reported.
+    shape = describe_command(command)
     try:
         result = subprocess.run(
             command, cwd=cwd, env=environment, capture_output=True, text=True, timeout=90, check=False,
         )
+    except subprocess.TimeoutExpired:
+        reason = "timed out"
+    except (OSError, subprocess.SubprocessError):
+        reason = "could not start"
+    else:
         if result.returncode:
             raise MetadataError(
-                "provider/access: Read failed. Restore selected provider permissions, "
-                "backend and runner connectivity, then retry."
+                f"provider/access: Read failed (exit {result.returncode}) for {shape}. Restore selected "
+                "provider permissions, backend and runner connectivity, then retry."
             )
-        return json.loads(result.stdout) if decode_json else None
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        raise MetadataError(
-            "provider/access: Read unavailable or invalid JSON. Restore provider/backend "
-            "access and connectivity, then retry."
-        ) from None
+        if not decode_json:
+            return None
+        if not result.stdout.strip():
+            reason = "returned no output"
+        else:
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError:
+                reason = "returned invalid JSON"
+    raise MetadataError(
+        f"provider/access: Read {reason} for {shape}. Restore provider/backend access and connectivity, then retry."
+    )
 
 
 def validate_shape(document: object) -> None:
@@ -366,7 +391,14 @@ def read_bicep(environment: Mapping[str, str], runner: JsonRunner = run_json) ->
     ]
     if runner([*command, "properties.provisioningState"]) != "Succeeded":
         raise MetadataError("provision: Selected deployment did not succeed. Complete same-provider provisioning first.")
-    value = runner([*command, "properties.outputs.DEPLOYMENT_METADATA.value"])
+    # ARM does not preserve output-name casing (for example deploymenT_METADATA), and JMESPath is case-sensitive.
+    names = runner([*command, "keys(properties.outputs || `{}`)"])
+    matches = [
+        item for item in names if isinstance(item, str) and item.casefold() == "deployment_metadata"
+    ] if isinstance(names, list) else []
+    if len(matches) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", matches[0]):
+        raise MetadataError("source: Missing DEPLOYMENT_METADATA. Reprovision the selected foundation.")
+    value = runner([*command, f'properties.outputs."{matches[0]}".value'])
     if not isinstance(value, dict):
         raise MetadataError("source: Missing DEPLOYMENT_METADATA. Reprovision the selected foundation.")
     return value
