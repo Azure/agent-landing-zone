@@ -29,21 +29,50 @@ vm() {
   return 1
 }
 
+power_state() {
+  az vm get-instance-view -g "$HUB_RG" -n "$HUB_VM" --only-show-errors -o tsv \
+    --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" 2>/dev/null || echo unknown
+}
+
 # Prints the transcript lines added since the last poll. When more than one
 # page was added, older lines are skipped (the artifact keeps the full log).
+# Fails fast when the executor stops before the run completes, for example
+# when subscription governance deallocates the VM, instead of polling until the
+# step timeout.
 follow() {
-  local dir="$1" offset=0 last_step="" reply header state step size start
+  local dir="$1" offset=0 last_step="" reply header state step size start unit
+  local dead=0 unreachable=0 power
   mkdir -p "$dir"
   while true; do
-    reply="$(vm "o=$OUT; s=\$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get(\"state\") or \"pending\", d.get(\"step\") or \"-\")' \$o/status.json 2>/dev/null || echo pending -); n=\$(stat -c %s \$o/transcript.log 2>/dev/null || echo 0); b=$offset; [ \$((n - b)) -gt $PAGE ] && b=\$((n - $PAGE)); echo \"@@ \$s \$n \$b\"; tail -c +\$((b + 1)) \$o/transcript.log 2>/dev/null | head -c \$((n - b))")" || reply=""
+    reply="$(vm "o=$OUT; s=\$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get(\"state\") or \"pending\", d.get(\"step\") or \"-\")' \$o/status.json 2>/dev/null || echo pending -); n=\$(stat -c %s \$o/transcript.log 2>/dev/null || echo 0); b=$offset; [ \$((n - b)) -gt $PAGE ] && b=\$((n - $PAGE)); u=\$(systemctl is-active relval-$RUN_KEY 2>/dev/null || true); echo \"@@ \$s \$n \$b \${u:-unknown}\"; tail -c +\$((b + 1)) \$o/transcript.log 2>/dev/null | head -c \$((n - b))")" || reply=""
     header="$(printf '%s\n' "$reply" | grep -m1 '^@@ ' || true)"
     if [ -n "$header" ]; then
-      read -r _ state step size start <<< "$header"
+      unreachable=0
+      read -r _ state step size start unit <<< "$header"
       [ "$start" -gt "$offset" ] && echo "[... $((start - offset)) bytes skipped, see the evidence artifact ...]"
       printf '%s\n' "$reply" | awk 'f; /^@@ /{f=1}'
       offset="$size"
       [ "$step" != "$last_step" ] && echo "::notice::step: $step" && last_step="$step"
       [ "$state" = "completed" ] && return 0
+      # The status is written before the unit exits, so a stopped unit without
+      # a completed status means the run was interrupted (VM restart or kill).
+      case "$unit" in
+        active|activating|deactivating|reloading) dead=0 ;;
+        *) dead=$((dead + 1)) ;;
+      esac
+      if [ "$dead" -ge 2 ]; then
+        echo "::error::The executor unit relval-$RUN_KEY is '$unit' but the run never completed (last step: $step). The VM was probably restarted or deallocated during the run."
+        return 1
+      fi
+    else
+      unreachable=$((unreachable + 1))
+      if [ "$unreachable" -ge 3 ]; then
+        power="$(power_state)"
+        if [ "$power" != "PowerState/running" ]; then
+          echo "::error::The executor VM $HUB_VM is in '$power' before the run completed (last step: ${last_step:-unknown}). Something outside the workflow, such as a subscription governance shutdown, stopped it. Check the VM activity log and redispatch the validation."
+          return 1
+        fi
+      fi
     fi
     sleep 60
   done

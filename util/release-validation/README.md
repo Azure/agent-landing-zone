@@ -53,10 +53,17 @@ change the file only through a reviewed pull request.
 
 ## Weekly revalidation
 
-Every Monday at 03:00 UTC the workflow revalidates the Latest release with both
+Every Monday at 09:00 UTC the workflow revalidates the Latest release with both
 providers and without promotion. A failure opens a GitHub issue, or comments on
 the open one. Fix it on a feature branch, cut a patch release as a pre-release
 and validate it.
+
+Some subscriptions run a governance automation (for example
+`MCAPSGovernance-AutomationApp`) that deallocates VMs at night, at about
+03:00-04:00 UTC. A run that overlaps that window loses the executor. The
+`Follow validation` step detects a stopped executor and fails within minutes
+with an explicit error instead of waiting for its timeout. Dispatch manual runs
+outside that window and redispatch when this error appears.
 
 ## One-time setup
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## [v7.5.5] - 2026-11-16
+
+### Fixed
+
+- The release validation workflow fails fast when the executor VM or the validation unit stops outside the workflow, for example when a subscription governance automation deallocates the VM. Before, the follow step retried until it timed out after 340 minutes.
+- The weekly release revalidation runs on Monday at 09:00 UTC, outside the nightly governance window.
+
+### Migration
+
+- No action required. Deployed resources, outputs and App Configuration settings are unchanged. Bicep and Terraform are unchanged. For rollback, restore `v7.5.4`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Live validation runs through the release validation workflow with Bicep and Terraform.
+
 ## [v7.5.4] - 2026-11-15
 
 ### Fixed
