@@ -70,9 +70,14 @@ def test_private_files_select_only_frontend_metadata_not_ingestion(host, mode):
 
 def test_unset_defaults_are_native_and_obsolete_booleans_are_rejected():
     assert resolve_mode({}) is OrchestrationHost.HOSTED
-    with pytest.raises(ValueError, match="Obsolete.*DEPLOY_HOSTED_AGENT"):
-        resolve_mode({"DEPLOY_HOSTED_AGENT": "false"})
+    with pytest.raises(ValueError, match="Obsolete.*PREPARE_HOSTED_AGENT"):
+        resolve_mode({"PREPARE_HOSTED_AGENT": "false"})
     assert resolve_mode({"ORCHESTRATION_HOST": "container_apps"}) is OrchestrationHost.CONTAINER_APPS
+
+
+def test_foundation_outputs_persisted_by_azd_do_not_block_reprovision():
+    persisted = {"DEPLOY_HOSTED_AGENT": "false", "HOSTED_AGENT_PREPARED": "true"}
+    assert resolve_mode(persisted) is OrchestrationHost.HOSTED
 
 
 @pytest.mark.parametrize("key", sorted(OBSOLETE_SELECTION_KEYS))
