@@ -52,6 +52,9 @@ ENVIRONMENT_KEYS = {
 }
 # CamelCase acronym splitting above intentionally overridden for the public contract.
 ENVIRONMENT_KEYS["postgreSqlAdministratorObjectId"] = "POSTGRESQL_ADMINISTRATOR_OBJECT_ID"
+# Input keys that Terraform also emits as outputs; azd persists their disabled
+# value "" after provision, so an empty value is unset rather than an override.
+PROVIDER_OUTPUT_KEYS = frozenset({"POSTGRESQL_DATABASE_NAME"})
 
 
 def boolean(value: object, name: str) -> bool:
@@ -95,6 +98,7 @@ def firewall_ranges(value: object) -> list[tuple[str, str]]:
 
 def resolve_inputs(source: Mapping[str, object], env: Mapping[str, str]) -> dict[str, object]:
     """Resolve whole-value source placeholders once and explicit env overrides."""
+    env = {key: value for key, value in env.items() if not (key in PROVIDER_OUTPUT_KEYS and value == "")}
     values = substitute_values({name: source[name] for name in DEFAULTS if name in source}, env)
     result = {**copy.deepcopy(DEFAULTS), **values}
     for name, key in ENVIRONMENT_KEYS.items():

@@ -373,8 +373,12 @@ PROVISION_RC=$?
 # InternalServerError. azd provision is idempotent, so the operator reruns it.
 # grep reads a process substitution, not a pipe: grep -q exits on the first
 # match, tail then gets SIGPIPE, and pipefail would turn the match into a miss.
+# Terraform plans list "InternalServerError" in the azapi retry settings, so a
+# bare quoted list item is not an error. awk reads the whole input (no SIGPIPE).
 provision_failed_transiently() {
-  grep -q 'InternalServerError' < <(tail -c +"$(($1 + 1))" "$RAW_LOG")
+  awk '{ gsub("\033\\[[0-9;?]*[A-Za-z]|\r", "") }
+    /InternalServerError/ && !/^[[:space:]]*[-+~]?[[:space:]]*"InternalServerError",?[[:space:]]*$/ { found = 1 }
+    END { exit !found }' < <(tail -c +"$(($1 + 1))" "$RAW_LOG")
 }
 PROVISION_RETRY=0
 while [ "$PROVISION_RC" -ne 0 ] && [ "$PROVISION_RETRY" -lt 2 ] \

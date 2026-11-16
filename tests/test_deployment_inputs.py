@@ -91,7 +91,7 @@ def test_inputs_without_default_reject_explicit_empty_values(param_name, env_nam
         compose_inputs(values(), {**ENVIRONMENT, env_name: ""})
 
 
-@pytest.mark.parametrize("raw,expected", [(None, True), ("true", True), ("false", False)])
+@pytest.mark.parametrize("raw,expected", [(None, True), ("", True), ("true", True), ("false", False)])
 def test_deploy_model_deployments_survives_both_provider_input_adapters(raw, expected):
     environment = {**ENVIRONMENT}
     if raw is not None:
@@ -104,7 +104,7 @@ def test_deploy_model_deployments_survives_both_provider_input_adapters(raw, exp
     assert seed["parameters"]["deployModelDeployments"] == {"value": "${DEPLOY_MODEL_DEPLOYMENTS=true}"}
 
 
-@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+@pytest.mark.parametrize("invalid", ["yes", "1", "invalid"])
 def test_deploy_model_deployments_rejects_non_boolean_values(invalid):
     with pytest.raises(ValueError, match="deployModelDeployments"):
         compose_inputs(values(), {**ENVIRONMENT, "DEPLOY_MODEL_DEPLOYMENTS": invalid})
@@ -117,7 +117,7 @@ def test_deploy_model_deployments_rejects_non_boolean_values(invalid):
         ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
     ],
 )
-@pytest.mark.parametrize("raw,expected", [(None, False), ("false", False), ("true", True)])
+@pytest.mark.parametrize("raw,expected", [(None, False), ("", False), ("false", False), ("true", True)])
 def test_trace_evaluation_rbac_flags_survive_both_provider_input_adapters(param_name, env_name, raw, expected):
     environment = {**ENVIRONMENT}
     if raw is not None:
@@ -137,10 +137,26 @@ def test_trace_evaluation_rbac_flags_survive_both_provider_input_adapters(param_
         ("grantProjectProtectedTraceContentReader", "GRANT_PROJECT_PROTECTED_TRACE_CONTENT_READER"),
     ],
 )
-@pytest.mark.parametrize("invalid", ["", "yes", "1", "invalid"])
+@pytest.mark.parametrize("invalid", ["yes", "1", "invalid"])
 def test_trace_evaluation_rbac_flags_reject_non_boolean_values(param_name, env_name, invalid):
     with pytest.raises(ValueError, match=param_name):
         compose_inputs(values(), {**ENVIRONMENT, env_name: invalid})
+
+
+def test_empty_terraform_outputs_persisted_by_azd_do_not_override_defaulted_inputs():
+    # azd persists Terraform outputs into the environment; disabled features
+    # emit "" for keys that are also defaulted input placeholders.
+    terraform = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "infra/terraform").glob("*.tf"))
+    outputs = set(re.findall(r'^output\s+"([A-Z0-9_]+)"', terraform, re.M))
+    emits_empty = set(re.findall(r'^\s*(?:output\s+"|)([A-Z0-9_]+)"?\s*(?:\{\s*value\s*)?=[^\n]*:\s*""\s*$', terraform, re.M))
+    defaulted = dict(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)=([^}]+)\}", json.dumps(source())))
+    collisions = outputs & emits_empty & defaulted.keys()
+    assert {"POSTGRESQL_DATABASE_NAME", "KNOWLEDGE_BASE_NAME"} <= collisions
+    provisioned = {**ENVIRONMENT, **{key: "" for key in collisions}}
+    assert compose_inputs(values(), provisioned) == compose_inputs(values(), ENVIRONMENT)
+    assert substitute_values(compose_parameters(source(), provisioned), provisioned) == substitute_values(
+        compose_parameters(source(), ENVIRONMENT), ENVIRONMENT
+    )
 
 
 def test_embedding_defaults_match_tracked_bicep_seed():
