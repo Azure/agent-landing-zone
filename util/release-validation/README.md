@@ -85,6 +85,8 @@ script prints.
 - To check a fix before cutting a release, set `SOURCE_REF` to the candidate
   branch when calling `launch.sh`. It deploys that branch instead of the tag.
   Never publish the evidence of such a run for a release.
+- Teardown starts the resource group deletions and does not wait for them.
+  Set `WAIT_FOR_TEARDOWN=true` to run the full `azd down` with verification.
 - If teardown leaves resources behind, clean up in this order: delete the
   environment and app resource groups (`rg-relval-<env>` and
   `rg-relval-<env>-app`), purge the soft-deleted Foundry account

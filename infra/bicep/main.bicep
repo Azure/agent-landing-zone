@@ -4603,10 +4603,9 @@ output CONTAINER_APP_INTERNAL_FQDN string = (_deployContainerApps && length(cont
 
 // Independently versioned discovery contract. Only public, selected resource
 // leaves belong here, never module response bags or runtime settings.
-var _cosmosDeploymentOutputs = reference(
-  resourceId(_applicationResourceGroupName, 'Microsoft.Resources/deployments', 'CosmosDBAccount'),
-  '2022-09-01'
-).outputs
+// Cosmos values are derived from names because a reference() to the conditional
+// cross-RG module either fails preflight or blocks the module deployment.
+var _cosmosMetadataResourceId = '/subscriptions/${subscription().subscriptionId}/resourceGroups/${_applicationResourceGroupName}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
 
 output DEPLOYMENT_METADATA object = {
   schemaVersion: 1
@@ -4683,12 +4682,10 @@ output DEPLOYMENT_METADATA object = {
     }
     cosmos: {
       status: deployCosmosDb ? 'managed' : 'disabled'
-      // The module is cross-resource-group and conditional, so ARM preflight requires an
-      // explicit API version on the output reference when Cosmos DB is not deployed.
       resource: deployCosmosDb ? {
-        resourceId: _cosmosDeploymentOutputs.resourceId.value
-        name: _cosmosDeploymentOutputs.name.value
-        endpoint: _cosmosDeploymentOutputs.endpoint.value
+        resourceId: _cosmosMetadataResourceId
+        name: resourceNames.dbAccountName
+        endpoint: 'https://${resourceNames.dbAccountName}.documents.azure.com:443/'
       } : null
     }
     containerEnvironment: {
@@ -4738,7 +4735,7 @@ output DEPLOYMENT_METADATA object = {
     storageContainers: _deploymentMetadataStorageBindings
     cosmosDatabases: deployCosmosDb ? [{
       canonicalName: 'DATABASE_NAME'
-      resourceId: '${_cosmosDeploymentOutputs.resourceId.value}/sqlDatabases/${resourceNames.dbDatabaseName}'
+      resourceId: '${_cosmosMetadataResourceId}/sqlDatabases/${resourceNames.dbDatabaseName}'
       name: resourceNames.dbDatabaseName
     }] : []
     cosmosContainers: _deploymentMetadataCosmosBindings
@@ -4783,7 +4780,7 @@ var _deploymentMetadataStorageBindings = map(deployStorageAccount ? storageAccou
 })
 var _deploymentMetadataCosmosBindings = map(deployCosmosDb ? databaseContainersList : [], container => {
   canonicalName: container.canonical_name
-  resourceId: '${_cosmosDeploymentOutputs.resourceId.value}/sqlDatabases/${resourceNames.dbDatabaseName}/containers/${container.name}'
+  resourceId: '${_cosmosMetadataResourceId}/sqlDatabases/${resourceNames.dbDatabaseName}/containers/${container.name}'
   name: container.name
 })
 

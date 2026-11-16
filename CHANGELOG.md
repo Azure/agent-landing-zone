@@ -1,5 +1,28 @@
 # Changelog
 
+## [v7.5.4] - 2026-11-15
+
+### Fixed
+
+- Bicep provisioning no longer fails with `DeploymentNotFound: Deployment 'CosmosDBAccount' could not be found`. The versioned reference added in `v7.5.3` blocked the Cosmos DB module deployment. `DEPLOYMENT_METADATA` now derives the Cosmos DB resource ID, name and endpoint from the resource names, so it has no reference to the module.
+- The release validation workflow no longer waits for the validation landing zones to be deleted. Teardown starts the resource group deletions and returns. Set `WAIT_FOR_TEARDOWN=true` on the executor to run the full `azd down`.
+
+### Migration
+
+- No action required. Bicep deployments that failed with `DeploymentNotFound` on `v7.5.3` succeed after upgrading. Deployed resources, outputs and App Configuration settings are unchanged. Terraform is unchanged. For rollback, restore `v7.5.3`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+- Bicep build passed and the foundation contract adapter normalizes the new template to the previous reviewed graph. Live validation runs through the release validation workflow.
+
 ## [v7.5.3] - 2026-11-15
 
 ### Fixed
