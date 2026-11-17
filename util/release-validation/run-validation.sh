@@ -41,7 +41,9 @@ SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
 REPOSITORY="${REPOSITORY:-Azure/agent-landing-zone}"
 HOSTED_AGENT_RESOURCE_SCOPE="${HOSTED_AGENT_RESOURCE_SCOPE:-https://ai.azure.com/.default}"
 KEEP_ENVIRONMENT="${KEEP_ENVIRONMENT:-false}"
-ENV_NAME="relval-$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | tail -c 12)"
+# Abbreviate the provider before truncating so both providers keep enough
+# run-id digits; the env name keys the Terraform state and must not collide.
+ENV_NAME="relval-$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | sed 's/bicep$/b/;s/terraform$/t/' | tr -cd 'a-z0-9' | tail -c 12)"
 HUB_RG="$(printf '%s' "$HUB_VNET_ID" | awk -F/ '{print $5}')"
 HUB_VNET="$(printf '%s' "$HUB_VNET_ID" | awk -F/ '{print $9}')"
 HUB_LINK="relval-hub-link"

@@ -191,9 +191,11 @@ class RoleAssignmentTests(unittest.TestCase):
                         identity = {"principalId": "principal"} if system else {
                             "userAssignedIdentities": {f"{SUB}/uai": {"principalId": "principal"}}
                         }
-                        return json.dumps([{"name": "ca-web", "identity": identity}])
+                        return json.dumps([{"id": f"{SUB}/ca-web", "name": "ca-web", "identity": identity}])
                     self.assertEqual(
-                        ["ad", "sp", "show", "--id", "principal", "--query", "appId"] if system else
+                        ["rest", "--method", "get", "--url",
+                         f"{SUB}/ca-web/providers/Microsoft.ManagedIdentity/identities/default"
+                         "?api-version=2023-01-31", "--query", "properties.clientId"] if system else
                         ["identity", "show", "--ids", f"{SUB}/uai", "--query", "clientId"],
                         arguments[:-3],
                     )
