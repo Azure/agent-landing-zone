@@ -202,6 +202,29 @@ purge_deleted_accounts() {
   done
 }
 
+release_search_services() {
+  # A Search shared private link to the storage account fails the group delete
+  # with LockedSPLResourceFound, which rolls the group back and leaks one unit
+  # of the standard Search service quota per run. Remove the links, then the
+  # services, before deleting the groups.
+  local rg svc spl rc=0
+  for rg in "${TRACKED_GROUPS[@]:-}"; do
+    [ -z "$rg" ] && continue
+    while read -r svc; do
+      [ -z "$svc" ] && continue
+      while read -r spl; do
+        [ -z "$spl" ] && continue
+        az search shared-private-link-resource delete -g "$rg" --service-name "$svc" -n "$spl" \
+          --yes --only-show-errors && echo "deleted shared private link $spl" || rc=1
+      done < <(az search shared-private-link-resource list -g "$rg" --service-name "$svc" \
+        --query "[].name" -o tsv 2>/dev/null)
+      az search service delete -g "$rg" -n "$svc" --yes --only-show-errors \
+        && echo "deleted search service $svc" || rc=1
+    done < <(az search service list -g "$rg" --query "[].name" -o tsv 2>/dev/null)
+  done
+  return "$rc"
+}
+
 force_delete_groups() {
   local rg attempt
   for rg in "${TRACKED_GROUPS[@]:-}"; do
@@ -242,6 +265,7 @@ teardown() {
     return 0
   fi
   run harness "disconnect-hub" disconnect_hub
+  run harness "release-search-services" release_search_services || true
   if [ "${WAIT_FOR_TEARDOWN:-false}" != "true" ]; then
     # Deletion often hangs on locked resources, so start it and do not wait.
     local rg
