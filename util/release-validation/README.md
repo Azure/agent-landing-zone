@@ -96,9 +96,14 @@ script prints.
 - To check a fix before cutting a release, set `SOURCE_REF` to the candidate
   branch when calling `launch.sh`. It deploys that branch instead of the tag.
   Never publish the evidence of such a run for a release.
-- Teardown starts the resource group deletions and does not wait for them.
+- Teardown first removes the Search shared private links and the Search
+  services, then starts the resource group deletions and does not wait for
+  them. The shared private link otherwise blocks the group deletion and leaks
+  one unit of the standard Search quota per run.
   Set `WAIT_FOR_TEARDOWN=true` to run the full `azd down` with verification.
 - If teardown leaves resources behind, clean up in this order: delete the
+  Search shared private links (`az search shared-private-link-resource
+  delete`) and the Search service, delete the
   environment and app resource groups (`rg-relval-<env>` and
   `rg-relval-<env>-app`), purge the soft-deleted Foundry account
   (`az cognitiveservices account purge`, about 30 minutes), then delete the
