@@ -1,5 +1,15 @@
 # Changelog
 
+## [v7.5.11] - 2026-11-17
+
+### Fixed
+
+- Release validation teardown now deletes the Azure AI Search shared private links and Search services before deleting the validation resource groups. The shared private link to storage blocked the group deletion (`LockedSPLResourceFound`), which leaked one standard Search service per run until provisioning failed with `ServiceQuotaExceeded` (#929).
+
+### Migration
+
+- No action required. The change affects only the release validation harness. Deployed resources, outputs and App Configuration settings are unchanged. For rollback, restore `v7.5.10`.
+
 ## [v7.5.10] - 2026-11-16
 
 ### Fixed
