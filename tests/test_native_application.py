@@ -298,6 +298,9 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
     def run(args, **kwargs):
         calls.append((args, kwargs["cwd"]))
         if args[:2] == ["azd", "deploy"]:
+            assert kwargs["env"]["AZD_ALPHA_ENABLE_FOUNDRY_ACR_REUSE"] == "true"
+            config = json.loads((kwargs["cwd"] / ".azure" / "config.json").read_text())
+            assert config["defaultEnvironment"] == env["AZURE_ENV_NAME"]
             publications.append(yaml.safe_load((kwargs["cwd"] / "azure.yaml").read_text())["services"]["publication"])
             if failure and len(publications) == 2:
                 return subprocess.CompletedProcess(args, 1, "", "omitted")

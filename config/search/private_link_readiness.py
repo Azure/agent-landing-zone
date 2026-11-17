@@ -70,6 +70,66 @@ def _resource_id(value: object, resource_type: str, setting: str) -> str:
     return value
 
 
+def _unique_string(*values: str) -> str:
+    """Port of ARM uniqueString (MurmurHash64A, seed 0, base32 13 characters)."""
+    data = "-".join(values).encode("utf-8")
+    mask = 0xFFFFFFFF
+
+    def rotl(value: int, bits: int) -> int:
+        return ((value << bits) | (value >> (32 - bits))) & mask
+
+    def fmix(value: int) -> int:
+        value ^= value >> 16
+        value = (value * 2246822507) & mask
+        value ^= value >> 13
+        value = (value * 3266489909) & mask
+        return value ^ (value >> 16)
+
+    length = len(data)
+    h1 = h2 = index = 0
+    while index + 7 < length:
+        k1 = int.from_bytes(data[index:index + 4], "little")
+        k3 = int.from_bytes(data[index + 4:index + 8], "little")
+        k1 = (rotl((k1 * 597399067) & mask, 15) * 2869860233) & mask
+        h1 = (rotl(h1 ^ k1, 19) + h2) & mask
+        h1 = (h1 * 5 + 1444728091) & mask
+        k3 = (rotl((k3 * 2869860233) & mask, 17) * 597399067) & mask
+        h2 = (rotl(h2 ^ k3, 13) + h1) & mask
+        h2 = (h2 * 5 + 197830471) & mask
+        index += 8
+    tail = length - index
+    if tail:
+        k2 = int.from_bytes(data[index:index + min(tail, 4)], "little")
+        h1 ^= (rotl((k2 * 597399067) & mask, 15) * 2869860233) & mask
+        if tail > 4:
+            k4 = int.from_bytes(data[index + 4:length], "little")
+            h2 ^= (rotl((k4 * 2869860233) & mask, 17) * 597399067) & mask
+    h1 ^= length
+    h2 ^= length
+    h1 = (h1 + h2) & mask
+    h2 = (h2 + h1) & mask
+    h1, h2 = fmix(h1), fmix(h2)
+    h1 = (h1 + h2) & mask
+    h2 = (h2 + h1) & mask
+    value = (h2 << 32) | h1
+    alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+    characters = []
+    for _ in range(13):
+        characters.append(alphabet[value >> 59])
+        value = (value << 5) & 0xFFFFFFFFFFFFFFFF
+    return "".join(characters)
+
+
+def _shared_link_name(search_name: str, group: str) -> str:
+    """Mirror main.bicep / main.foundry.tf Search shared-link naming."""
+    if group == "blob":
+        return f"spl-{search_name}-blob-0"
+    plain = f"spl-{search_name}-{group}-1"
+    if len(plain) <= 60:
+        return plain
+    return f"spl-{search_name[:21]}-{_unique_string(search_name)[:6]}-{group}-1"
+
+
 def _expected_links(context: Mapping[str, Any]) -> tuple[str, tuple[ExpectedLink, ...]]:
     search = _resource_id(
         context.get("SEARCH_SERVICE_RESOURCE_ID"), "Microsoft.Search/searchServices",
@@ -91,19 +151,14 @@ def _expected_links(context: Mapping[str, Any]) -> tuple[str, tuple[ExpectedLink
         except ValueError:
             raise PrivateLinkReadinessError("SEARCH_SHARED_PRIVATE_LINKS must be a JSON array.") from None
     if manifest is None:
-        # Compatibility with the prior template. Do not guess ARM uniqueString
-        # for long names: the new template publishes those exact names.
-        search_name = search.rsplit("/", 1)[1]
+        # Network-isolated deployments cannot publish the manifest to App
+        # Configuration during provisioning, so derive the exact names with the
+        # same deterministic rule as both infrastructure providers.
         manifest = [
-            {"name": f"spl-{search_name}-{group}-{'0' if group == 'blob' else '1'}",
+            {"name": _shared_link_name(search.rsplit("/", 1)[1], group),
              "groupId": group, "privateLinkResourceId": target}
             for group, target in targets.items()
         ]
-        if any(len(item["name"]) > 60 for item in manifest):
-            raise PrivateLinkReadinessError(
-                "Exact bounded shared-link names are missing. Re-provision with the updated "
-                "template to publish SEARCH_SHARED_PRIVATE_LINKS (agent-lz); do not approve by prefix."
-            )
     if not isinstance(manifest, list) or len(manifest) != len(targets):
         raise PrivateLinkReadinessError("SEARCH_SHARED_PRIVATE_LINKS must describe the four deployment-owned links.")
     links = []
