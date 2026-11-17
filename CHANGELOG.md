@@ -1,5 +1,12 @@
 # Changelog
 
+## [v7.5.12] - 2026-11-17
+
+### Fixed
+
+- Platform outputs discovery reads system-assigned Container App client IDs from ARM instead of Microsoft Graph, so deployers without Graph read can publish `AGENTLZ_PLATFORM_OUTPUTS`.
+- Release validation environment names keep enough run-id digits for both providers, preventing Terraform state collisions.
+
 ## [v7.5.11] - 2026-11-17
 
 ### Fixed
