@@ -132,8 +132,16 @@ def render_publication(root: Path, environment: Mapping[str, str], digest: str) 
     return document
 
 
-def _run(arguments: list[str], *, cwd: Path, run: Run) -> subprocess.CompletedProcess:
-    result = run(arguments, cwd=cwd, capture_output=True, text=True, check=False, timeout=1800)
+# azd gates deploying an already-built image (AZD_AGENT_SKIP_ACR / image
+# passthrough) to a Foundry hosted agent behind this preview feature.
+ACR_REUSE_FEATURE = {"AZD_ALPHA_ENABLE_FOUNDRY_ACR_REUSE": "true"}
+
+
+def _run(
+    arguments: list[str], *, cwd: Path, run: Run, env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    options = {} if env is None else {"env": dict(env)}
+    result = run(arguments, cwd=cwd, capture_output=True, text=True, check=False, timeout=1800, **options)
     if result.returncode:
         # Never echo CLI input/output; settings can include reference metadata.
         raise RuntimeError("Native application lifecycle command failed; inspect local CLI diagnostics securely.")
@@ -164,6 +172,10 @@ def deploy_hosted(root: Path, environment: Mapping[str, str], *, run: Run = subp
             if not source.is_dir():
                 raise ValueError("Selected azd environment is missing. Run azd provision first.")
             shutil.copytree(source, project / ".azure" / name)
+            # azd extensions resolve the project's default environment, not --environment.
+            (project / ".azure" / "config.json").write_text(
+                json.dumps({"version": 1, "defaultEnvironment": name}), encoding="utf-8",
+            )
             (project / "azure.yaml").write_text(yaml.safe_dump(
                 render_publication(root, values, digest), sort_keys=False,
             ), encoding="utf-8")
@@ -172,7 +184,10 @@ def deploy_hosted(root: Path, environment: Mapping[str, str], *, run: Run = subp
                 "FOUNDRY_PROJECT_ENDPOINT": required(values, "AZURE_AI_PROJECT_ENDPOINT"),
                 "AZURE_AI_PROJECT_ID": required(values, "AZURE_AI_PROJECT_RESOURCE_ID"),
             }, run)
-            _run(["azd", "deploy", "publication", "--environment", name, "--no-prompt"], cwd=project, run=run)
+            _run(
+                ["azd", "deploy", "publication", "--environment", name, "--no-prompt"],
+                cwd=project, run=run, env={**os.environ, **ACR_REUSE_FEATURE},
+            )
             # Publication creates the instance identity. Reuse the verified,
             # exact scope bootstrap before exposing endpoints to UI consumers.
             plan = discover(values)

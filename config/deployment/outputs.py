@@ -30,7 +30,7 @@ from config.deployment.composition import APP_CONFIG_LABEL, is_truthy
 from config.deployment.context import bound_resource_id, context_settings
 from config.deployment.resource_groups import resource_group_for
 from config.deployment.postgresql import discovery_settings
-from config.deployment.metadata import aliases, load_metadata, run_json
+from config.deployment.metadata import VerifiedMetadata, aliases, load_metadata, run_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +66,35 @@ _FIELDS: tuple[tuple[tuple[str, str], str, tuple[str, ...]], ...] = (
      ("KEY_VAULT_URI", "AZURE_KEY_VAULT_ENDPOINT")),
 )
 _OPTIONAL_SECTIONS = frozenset({"search", "cosmos"})
+
+# Under network isolation neither provider writes the foundation keys from
+# outside the network (Bicep appConfigPopulate, Terraform foundation_setting).
+# Publish their verified, derivable subset from inside it. Search setup,
+# governance and the deployment-mode owner keep publishing their own keys.
+_FOUNDATION_KEYS: tuple[str, ...] = (
+    "AZURE_TENANT_ID", "SUBSCRIPTION_ID", "LOCATION", "ENVIRONMENT_NAME", "DEPLOYMENT_NAME",
+    "RESOURCE_TOKEN", "NETWORK_ISOLATION", "USE_UAI", "LOG_LEVEL",
+    "KEY_VAULT_RESOURCE_ID", "STORAGE_ACCOUNT_RESOURCE_ID", "APP_INSIGHTS_RESOURCE_ID",
+    "LOG_ANALYTICS_RESOURCE_ID", "CONTAINER_ENV_RESOURCE_ID", "AI_FOUNDRY_ACCOUNT_RESOURCE_ID",
+    "AI_FOUNDRY_PROJECT_RESOURCE_ID", "SEARCH_SERVICE_UAI_RESOURCE_ID", "SEARCH_SERVICE_RESOURCE_ID",
+    "AZURE_SPEECH_RESOURCE_ID", "COSMOS_DB_ACCOUNT_RESOURCE_ID",
+    "AI_FOUNDRY_ACCOUNT_NAME", "AI_FOUNDRY_PROJECT_NAME", "APP_CONFIG_NAME", "APP_INSIGHTS_NAME",
+    "CONTAINER_ENV_NAME", "CONTAINER_REGISTRY_NAME", "CONTAINER_REGISTRY_LOGIN_SERVER",
+    "DATABASE_ACCOUNT_NAME", "DATABASE_NAME", "SEARCH_SERVICE_NAME", "AZURE_SPEECH_RESOURCE_NAME",
+    "STORAGE_ACCOUNT_NAME",
+    "DEPLOY_APP_CONFIG", "DEPLOY_KEY_VAULT", "DEPLOY_LOG_ANALYTICS", "DEPLOY_APP_INSIGHTS",
+    "DEPLOY_SEARCH_SERVICE", "DEPLOY_SPEECH_SERVICE", "DEPLOY_STORAGE_ACCOUNT", "DEPLOY_COSMOS_DB",
+    "DEPLOY_CONTAINER_APPS", "DEPLOY_CONTAINER_REGISTRY", "DEPLOY_CONTAINER_ENV",
+    "KEY_VAULT_URI", "STORAGE_BLOB_ENDPOINT", "AI_FOUNDRY_ACCOUNT_ENDPOINT",
+    "AI_FOUNDRY_PROJECT_ENDPOINT", "SEARCH_SERVICE_QUERY_ENDPOINT", "AZURE_SPEECH_ENDPOINT",
+    "COSMOS_DB_ENDPOINT", "TOOLBOX_ENDPOINT",
+)
+_FOUNDATION_SOURCES = {
+    "CONTAINER_ENV_RESOURCE_ID": "CONTAINER_ENVIRONMENT_RESOURCE_ID",
+    "CONTAINER_ENV_NAME": "CONTAINER_ENVIRONMENT_NAME",
+    "APP_INSIGHTS_NAME": "APPLICATION_INSIGHTS_NAME",
+}
+_FOUNDATION_DEFAULTS = {"LOG_LEVEL": "INFO", "ENABLE_CONSOLE_LOGGING": "true"}
 
 
 class PlatformOutputsError(ValueError):
@@ -116,15 +145,53 @@ def _first(environment: Mapping[str, str], names: tuple[str, ...]) -> str:
     return ""
 
 
-def load_platform_environment(
+def load_verified(
     environment: Mapping[str, str], *, run_az: Callable[..., str] | None = None,
-) -> dict[str, str]:
-    """Adapt freshly verified provider output, never runtime store values."""
-    verified = (
+) -> VerifiedMetadata:
+    return (
         load_metadata(environment) if run_az is None else
         load_metadata(environment, runner=_metadata_runner(run_az))
     )
+
+
+def load_platform_environment(
+    environment: Mapping[str, str], *, run_az: Callable[..., str] | None = None,
+    verified: VerifiedMetadata | None = None,
+) -> dict[str, str]:
+    """Adapt freshly verified provider output, never runtime store values."""
+    verified = verified or load_verified(environment, run_az=run_az)
     return {**verified.environment, **aliases(verified.document)}
+
+
+def foundation_settings(
+    verified: VerifiedMetadata, repo_root: Path | None = None,
+) -> dict[str, str]:
+    """Verified foundation keys the providers skip under network isolation."""
+    from config.deployment.appconfig_intent import ownership
+    from config.deployment.setup_settings import resolve_setup_settings
+
+    projection = resolve_setup_settings(verified)
+    document = verified.document
+    names = [
+        *_FOUNDATION_KEYS,
+        *(row["canonicalName"] for row in document["modelDeployments"]),
+        *(row["canonicalName"] for rows in document["dataResources"].values() for row in rows),
+    ]
+    policy = ownership()
+    owned = {*policy["controlled"], *policy["retired"], *policy["ownerReferences"]}
+    settings: dict[str, str] = {}
+    for name in names:
+        value = projection.get(_FOUNDATION_SOURCES.get(name, name))
+        if name not in owned and isinstance(value, str) and value.strip():
+            settings[name] = value.strip()
+    for name, value in _FOUNDATION_DEFAULTS.items():
+        settings.setdefault(name, value)
+    manifest = (repo_root or find_repo_root()) / "manifest.json"
+    if manifest.is_file():
+        tag = json.loads(manifest.read_text(encoding="utf-8")).get("tag")
+        if isinstance(tag, str) and tag:
+            settings["RELEASE"] = tag
+    return settings
 
 
 def identity_flat_key(component: str) -> str:
@@ -289,7 +356,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.check_foundation:
             verify_foundation(os.environ)
             return 0
-        environment = load_platform_environment(os.environ)
+        verified = load_verified(os.environ)
+        environment = load_platform_environment(os.environ, verified=verified)
         if environment["APP_RUNTIME_CONFIGURATION_MODE"] != "appConfig":
             LOGGER.info("Runtime publication is not selected for this foundation.")
             return 0
@@ -303,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
         document = build_platform_outputs(environment, identities)
         validate_platform_outputs(document)
         settings = platform_settings(document, environment)
+        if document["network"]["isolated"]:
+            settings = {**foundation_settings(verified), **settings}
         # Read-only verification, including on --dry-run. No PostgreSQL key can
         # be written until the complete resource and independent lock pass.
         settings.update(discovery_settings(environment, find_repo_root() / ".azure"))
