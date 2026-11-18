@@ -149,6 +149,18 @@ class HostedSmokeTests(unittest.TestCase):
             self.assertEqual(0, hosted.main(["--invocations-endpoint", "https://agent.example.test/protocols/invocations"]))
         self.assertEqual("https://agent.example.test/protocols\n", output.getvalue())
 
+    def test_responses_base_url_accepts_only_extension_api_version_query(self):
+        base = "https://foundry.example.test/api/projects/p/agents/a/endpoint/protocols/openai"
+        self.assertEqual(base, hosted.responses_base_url(base + "/responses?api-version=v1"))
+        self.assertEqual(base, hosted.responses_base_url(base + "/responses"))
+        for value in (
+            base + "/responses?api-version=v1&x=1", base + "/responses?api-version=",
+            base + "/responses?other=1", base + "/responses?api-version=v1#f",
+            "http://foundry.example.test/openai/responses", "", base,
+        ):
+            with self.assertRaises(ValueError):
+                hosted.responses_base_url(value)
+
 
 if __name__ == "__main__":
     unittest.main()
