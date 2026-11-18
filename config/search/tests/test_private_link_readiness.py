@@ -346,6 +346,29 @@ class PrivateLinkReadinessTests(unittest.TestCase):
         self.assertTrue(all(len(name) <= 60 for name in names.values()))
         self.run_gate(MockArm(context), context=context)
 
+    def test_terraform_azapi_hashed_names_accepted_when_manifest_absent(self):
+        search_name = "srch-ce01d2-relval43154615401t-swc-001"
+        self.assertEqual(readiness._unique_string(search_name)[:6], "adnroo")
+        self.assertEqual(readiness._unique_string(search_name, azapi=True)[:6], "vvmyml")
+        context = {**CONTEXT, "SEARCH_SERVICE_RESOURCE_ID": PREFIX + "Microsoft.Search/searchServices/" + search_name}
+        arm = MockArm(context)
+        search, links = readiness._expected_links(context)
+        hashed = {link.group: link for link in links}["cognitiveservices_account"]
+        self.assertEqual(hashed.alternate, "spl-srch-ce01d2-relval431-vvmyml-cognitiveservices_account-1")
+        source = arm.sources.pop(hashed.resource_id(search))
+        source["name"] = hashed.alternate
+        source["id"] = hashed.resource_id(search, hashed.alternate)
+        arm.sources[source["id"]] = source
+        base = arm.request
+
+        def request(method, url, **kwargs):
+            if urlsplit(url).path == hashed.resource_id(search):
+                return response(status=404)
+            return base(method, url, **kwargs)
+
+        arm.request = request
+        self.run_gate(arm, context=context)
+
     def test_valid_resource_groups_include_parentheses_and_unicode_without_target_reads(self):
         for group in ("prod(east)", "équipe(東京)_١", "İstanbul(Prod)", "_team", "x" * 90):
             with self.subTest(group=group):

@@ -45,9 +45,11 @@ class ExpectedLink:
     name: str
     target: str
     group: str
+    # Terraform name for a hashed link when azapi unique_string differs from ARM.
+    alternate: str | None = None
 
-    def resource_id(self, search_id: str) -> str:
-        return f"{search_id}/sharedPrivateLinkResources/{self.name}"
+    def resource_id(self, search_id: str, name: str | None = None) -> str:
+        return f"{search_id}/sharedPrivateLinkResources/{name or self.name}"
 
 
 def _same(value: object, expected: str) -> bool:
@@ -70,8 +72,13 @@ def _resource_id(value: object, resource_type: str, setting: str) -> str:
     return value
 
 
-def _unique_string(*values: str) -> str:
-    """Port of ARM uniqueString (MurmurHash64A, seed 0, base32 13 characters)."""
+def _unique_string(*values: str, azapi: bool = False) -> str:
+    """Port of ARM uniqueString (MurmurHash64A, seed 0, base32 13 characters).
+
+    With azapi=True, reproduce terraform-provider-azapi unique_string, which
+    takes the absolute value of the signed 5..7 byte tail product and therefore
+    differs from ARM for some inputs.
+    """
     data = "-".join(values).encode("utf-8")
     mask = 0xFFFFFFFF
 
@@ -103,7 +110,10 @@ def _unique_string(*values: str) -> str:
         h1 ^= (rotl((k2 * 597399067) & mask, 15) * 2869860233) & mask
         if tail > 4:
             k4 = int.from_bytes(data[index + 4:length], "little")
-            h2 ^= (rotl((k4 * 2869860233) & mask, 17) * 597399067) & mask
+            product = (k4 * 2869860233) & mask
+            if azapi and product & 0x80000000:
+                product = (0x100000000 - product) & mask
+            h2 ^= (rotl(product, 17) * 597399067) & mask
     h1 ^= length
     h2 ^= length
     h1 = (h1 + h2) & mask
@@ -120,14 +130,14 @@ def _unique_string(*values: str) -> str:
     return "".join(characters)
 
 
-def _shared_link_name(search_name: str, group: str) -> str:
-    """Mirror main.bicep / main.foundry.tf Search shared-link naming."""
+def _shared_link_name(search_name: str, group: str, *, azapi: bool = False) -> str:
+    """Mirror main.bicep (ARM) / main.foundry.tf (azapi) Search shared-link naming."""
     if group == "blob":
         return f"spl-{search_name}-blob-0"
     plain = f"spl-{search_name}-{group}-1"
     if len(plain) <= 60:
         return plain
-    return f"spl-{search_name[:21]}-{_unique_string(search_name)[:6]}-{group}-1"
+    return f"spl-{search_name[:21]}-{_unique_string(search_name, azapi=azapi)[:6]}-{group}-1"
 
 
 def _expected_links(context: Mapping[str, Any]) -> tuple[str, tuple[ExpectedLink, ...]]:
@@ -150,12 +160,15 @@ def _expected_links(context: Mapping[str, Any]) -> tuple[str, tuple[ExpectedLink
             manifest = json.loads(manifest)
         except ValueError:
             raise PrivateLinkReadinessError("SEARCH_SHARED_PRIVATE_LINKS must be a JSON array.") from None
-    if manifest is None:
+    derived = manifest is None
+    if derived:
         # Network-isolated deployments cannot publish the manifest to App
         # Configuration during provisioning, so derive the exact names with the
         # same deterministic rule as both infrastructure providers.
+        search_name = search.rsplit("/", 1)[1]
         manifest = [
-            {"name": _shared_link_name(search.rsplit("/", 1)[1], group),
+            {"name": _shared_link_name(search_name, group),
+             "alternate": _shared_link_name(search_name, group, azapi=True),
              "groupId": group, "privateLinkResourceId": target}
             for group, target in targets.items()
         ]
@@ -177,7 +190,8 @@ def _expected_links(context: Mapping[str, Any]) -> tuple[str, tuple[ExpectedLink
             raise PrivateLinkReadinessError("Shared-link manifest has an unexpected target, group or name.")
         groups.add(group)
         names.add(name.casefold())
-        links.append(ExpectedLink(name, targets[group], group))
+        alternate = item.get("alternate") if derived else None
+        links.append(ExpectedLink(name, targets[group], group, alternate if alternate != name else None))
     return search, tuple(links)
 
 
@@ -252,13 +266,18 @@ def _reconcile_link(arm: _Arm, search: str, link: ExpectedLink) -> bool:
     That example omits id; the requested exact URI, name, target and group
     bind identity. If the provider includes id, it must also match.
     """
+    name = link.name
     source_id = link.resource_id(search)
     source = arm.get(source_id)
+    if source is None and link.alternate:
+        name = link.alternate
+        source_id = link.resource_id(search, name)
+        source = arm.get(source_id)
     if source is None:
         return False
     props = _properties(source)
     if not (
-        ("id" not in source or _same(source["id"], source_id)) and _same(source.get("name"), link.name)
+        ("id" not in source or _same(source["id"], source_id)) and _same(source.get("name"), name)
         and _same(props.get("privateLinkResourceId"), link.target)
         and _same(props.get("groupId"), link.group)
     ):

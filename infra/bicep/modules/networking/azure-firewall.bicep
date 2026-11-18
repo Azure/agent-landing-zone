@@ -73,9 +73,16 @@ param lawResourceId string
 
 // Firewall FQDN allowlist for essential outbound connectivity
 // Essential (shared across subnets, source = '*'): auth, container registry mirror, GitHub
+// The regional Entra endpoints (`{region}.login.microsoft.com` and
+// `*.login.microsoftonline.com`) are required by the Foundry Agent Service
+// delegated agent subnet; live validation showed the firewall denying
+// `swedencentral.login.microsoft.com` from that subnet without them.
 var _firewallEssentialAuthFqdns = [
   #disable-next-line no-hardcoded-env-urls
   'login.microsoftonline.com'
+  #disable-next-line no-hardcoded-env-urls
+  '*.login.microsoftonline.com'
+  '*.login.microsoft.com'
   'login.windows.net'
   #disable-next-line no-hardcoded-env-urls
   'management.azure.com'

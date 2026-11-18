@@ -635,7 +635,7 @@ locals {
   network_runtime_fqdns  = ["www.python.org", "*.python.org", "pypi.org", "*.pypi.org", "files.pythonhosted.org", "*.pythonhosted.org", "bootstrap.pypa.io", "*.pypa.io", "registry.npmjs.org", "*.npmjs.org"]
   network_firewall_rule_specs = {
     AllowMicrosoftContainerRegistry = { sources = ["*"], ports = ["Https"], fqdns = ["mcr.microsoft.com", "*.data.mcr.microsoft.com"] }
-    AllowEntraIdAuth                = { sources = ["*"], ports = ["Https"], fqdns = ["login.microsoftonline.com", "login.windows.net", "management.azure.com", "graph.microsoft.com", "*.applicationinsights.azure.com"] }
+    AllowEntraIdAuth                = { sources = ["*"], ports = ["Https"], fqdns = ["login.microsoftonline.com", "*.login.microsoftonline.com", "*.login.microsoft.com", "login.windows.net", "management.azure.com", "graph.microsoft.com", "*.applicationinsights.azure.com"] }
     AllowGitHub                     = { sources = ["*"], ports = ["Https"], fqdns = ["github.com", "*.github.com", "raw.githubusercontent.com", "codeload.github.com", "objects.githubusercontent.com", "*.githubusercontent.com"] }
     AllowContainerAppsPlatform = {
       sources = ["*"], ports = ["Https"]
