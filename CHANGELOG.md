@@ -5,6 +5,11 @@
 ### Fixed
 
 - Network-isolated Terraform deployments pass the Azure AI Search shared private link readiness check. Terraform names hashed links with azapi `unique_string`, which differs from ARM `uniqueString` for some Search names, so the check now accepts either provider's name for the same target and group.
+- Network-isolated deployments allow the regional Microsoft Entra endpoints `*.login.microsoft.com` and `*.login.microsoftonline.com` through Azure Firewall in both Bicep and Terraform. Foundry Agent Service requires them from the delegated agent subnet, and the firewall denied `{region}.login.microsoft.com` without them.
+
+### Migration
+
+- Existing network-isolated environments pick up the new firewall allow rules on the next `azd provision`. No other action is required.
 
 ## [v7.5.13] - 2026-11-18
 

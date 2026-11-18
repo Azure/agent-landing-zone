@@ -30,6 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $failures = [System.Collections.Generic.List[string]]::new()
+$agentLoginFqdns = @('*.login.microsoft.com', '*.login.microsoftonline.com')
 $compiledFile = Join-Path ([System.IO.Path]::GetTempPath()) "firewall-agent365-observability-contract-$([guid]::NewGuid()).json"
 
 function Add-Failure {
@@ -77,6 +78,17 @@ try {
             Add-Pass "'_firewallEssentialPlatformFqdns' contains the required 'agent365.svc.cloud.microsoft' FQDN."
         }
 
+        # Foundry Agent Service requires the regional Entra endpoints from the
+        # delegated agent subnet; live validation saw `{region}.login.microsoft.com` denied.
+        $authFqdns = @($nestedVariables._firewallEssentialAuthFqdns)
+        $missingAuth = @($agentLoginFqdns | Where-Object { $_ -notin $authFqdns })
+        if ($missingAuth.Count -gt 0) {
+            Add-Failure "'_firewallEssentialAuthFqdns' is missing Foundry Agent Service login FQDN(s): $($missingAuth -join ', ')."
+        }
+        else {
+            Add-Pass "'_firewallEssentialAuthFqdns' contains the Foundry Agent Service regional login FQDNs."
+        }
+
         $defaultRulesExpr = [string]$nestedVariables._firewallDefaultApplicationRules
         if ($defaultRulesExpr -notmatch "'name', 'AllowContainerAppsPlatform'[^)]*'protocols', createArray\(createObject\('protocolType', 'Https', 'port', 443\)\)[^)]*'targetFqdns', variables\('_firewallEssentialPlatformFqdns'\)") {
             Add-Failure "'AllowContainerAppsPlatform' no longer targets '_firewallEssentialPlatformFqdns' over HTTPS (443) only."
@@ -112,6 +124,18 @@ try {
     }
     else {
         Add-Pass "modules/networking/azure-firewall.bicep declares the literal 'agent365.svc.cloud.microsoft' FQDN (no typo/rename)."
+    }
+
+    $terraformFile = Join-Path (Split-Path -Parent (Split-Path -Parent $MainFile)) 'terraform\main.networking.tf'
+    $terraformSource = Get-Content -LiteralPath $terraformFile -Raw
+    $authLine = (Get-Content -LiteralPath $terraformFile | Where-Object { $_ -match '^\s*AllowEntraIdAuth\s*=' }) -join "`n"
+    $missingTerraform = @($agentLoginFqdns | Where-Object { -not $authLine.Contains("`"$_`"") })
+    if (-not $terraformSource.Contains('"agent365.svc.cloud.microsoft"')) { $missingTerraform += 'agent365.svc.cloud.microsoft' }
+    if ($missingTerraform.Count -gt 0) {
+        Add-Failure "Terraform firewall rules are missing Foundry Agent Service FQDN(s): $($missingTerraform -join ', ')."
+    }
+    else {
+        Add-Pass 'Terraform firewall rules declare the same Foundry Agent Service FQDNs (parity).'
     }
 }
 finally {
