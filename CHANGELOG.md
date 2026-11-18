@@ -1,16 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.15] - 2026-11-18
 
 ### Fixed
 
-- Hosted-agent deployment accepts the Responses endpoint that the `azure.ai.agents` azd extension publishes. The extension appends `?api-version=v1`, which the deploy step rejected after a successful publication. The step now removes only that query and keeps the OpenAI client base URL that the UI expects.
-- Terraform re-provisioning no longer tries to replace the in-use firewall, Bastion and ingress public IPs when Azure Policy adds platform `ip_tags`. The public IPs are now root `azurerm_public_ip` resources that ignore `ip_tags`, and `moved` blocks keep the existing state. Bicep is not affected.
-- Terraform serializes the Foundry account private endpoint with the Foundry project and model deployment writes, and retries `AccountProvisioningStateInvalid`, so the endpoint no longer fails while the account is in the Accepted state. Bicep already orders the endpoint after the project.
+- Hosted-agent deployment accepts the Responses endpoint that the `azure.ai.agents` azd extension publishes. The extension appends `?api-version=v1`, which the deploy step rejected after a successful publication. The step now removes only that query and keeps the OpenAI client base URL that the UI expects (#947).
+- Terraform re-provisioning no longer tries to replace the in-use firewall, Bastion and ingress public IPs when Azure Policy adds platform `ip_tags`. The public IPs are now root `azurerm_public_ip` resources that ignore `ip_tags`, and `moved` blocks keep the existing state. Bicep is not affected (#947).
+- Terraform serializes the Foundry account private endpoint with the Foundry project and model deployment writes, and retries `AccountProvisioningStateInvalid`, so the endpoint no longer fails while the account is in the Accepted state. Bicep already orders the endpoint after the project (#947).
 
 ### Changed
 
-- Release validation revalidates the Latest release every day instead of every Monday. A new daily cleanup workflow removes validation resource groups older than 48 hours, their Search shared private links, soft-deleted Foundry accounts and orphaned hub peerings, so an interrupted teardown no longer keeps costing money. This is maintainer tooling only and does not change the deployed product.
+- Release validation revalidates the Latest release every day instead of every Monday. A new daily cleanup workflow removes validation resource groups older than 48 hours, their Search shared private links, soft-deleted Foundry accounts and orphaned hub peerings, so an interrupted teardown no longer keeps costing money. This is maintainer tooling only and does not change the deployed product (#946).
+
+### Migration
+
+- Existing Terraform environments move the public IP state automatically on the next `azd provision` through `moved` blocks. The addresses are kept and not replaced. Bicep environments need no action. For rollback, restore `v7.5.14`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.14] - 2026-11-18
 
