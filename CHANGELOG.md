@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Release validation revalidates the Latest release every day instead of every Monday. A new daily cleanup workflow removes validation resource groups older than 48 hours, their Search shared private links, soft-deleted Foundry accounts and orphaned hub peerings, so an interrupted teardown no longer keeps costing money. This is maintainer tooling only and does not change the deployed product.
+
 ## [v7.5.14] - 2026-11-18
 
 ### Fixed

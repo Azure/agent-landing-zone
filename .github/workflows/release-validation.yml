@@ -6,9 +6,9 @@ name: Release validation (network isolated)
 #
 # A release is published as a pre-release. When both providers pass, the
 # promote job attaches the evidence to the release, amends its notes and makes
-# it the Latest release. "Validated" means the Latest release. Every Monday the
+# it the Latest release. "Validated" means the Latest release. Every day the
 # current Latest release is revalidated without promotion, and a failure opens
-# an issue.
+# an issue. release-validation-cleanup.yml removes leftovers daily.
 #
 # The GitHub-hosted jobs never reach private endpoints. They sign in with OIDC
 # (no stored secret), start the executor VM in the persistent validation hub,
@@ -55,10 +55,10 @@ on:
         default: false
         type: boolean
   schedule:
-    # Weekly revalidation of the Latest release, both providers, no promotion.
+    # Daily revalidation of the Latest release, both providers, no promotion.
     # Kept away from the nightly governance shutdown window (about 00:00-05:00
     # UTC) that deallocates the executor VM in some subscriptions.
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * *"
 
 permissions:
   contents: read
@@ -291,7 +291,7 @@ jobs:
           echo "### $RELEASE_TAG validated with Bicep and Terraform and promoted to Latest" >> "$GITHUB_STEP_SUMMARY"
 
   report-failure:
-    name: Open issue for failed weekly revalidation
+    name: Open issue for failed scheduled revalidation
     needs: [prepare, validate]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -305,7 +305,7 @@ jobs:
       - name: Open or update issue
         run: |
           set -euo pipefail
-          title="Weekly release validation failed for ${RELEASE_TAG:-the Latest release}"
+          title="Scheduled release validation failed for ${RELEASE_TAG:-the Latest release}"
           body="The scheduled revalidation of the standard scenario failed: $RUN_URL
 
           Check the evidence artifacts of the run. Fix on a feature branch from develop, cut a patch release as a pre-release and run the release validation workflow for it."
