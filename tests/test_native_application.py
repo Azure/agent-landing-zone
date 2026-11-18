@@ -304,7 +304,8 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
             publications.append(yaml.safe_load((kwargs["cwd"] / "azure.yaml").read_text())["services"]["publication"])
             if failure and len(publications) == 2:
                 return subprocess.CompletedProcess(args, 1, "", "omitted")
-        output = json.dumps({"AGENT_PUBLICATION_RESPONSES_ENDPOINT": f"https://test.example/{len(publications)}/responses"})
+        # The azd agents extension publishes the REST URL including api-version.
+        output = json.dumps({"AGENT_PUBLICATION_RESPONSES_ENDPOINT": f"https://test.example/{len(publications)}/openai/responses?api-version=v1"})
         return subprocess.CompletedProcess(args, 0, output, "")
     env = {**environment(mode="both"), "ENABLE_PRIVATE_ATTACHMENTS": str(private_attachments).lower()}
     with patch.object(native_deploy, "prepare_environment", side_effect=prepare), \
@@ -316,7 +317,7 @@ def test_hosted_both_renders_separate_native_publications_then_publishes_outputs
                 native_deploy.deploy_hosted(tmp_path, env, run=run)
         else:
             result = native_deploy.deploy_hosted(tmp_path, env, run=run)
-            assert result == {"HOSTED_AGENT_BASE_URL": "https://test.example/1", "HOSTED_WORKFLOW_BASE_URL": "https://test.example/2"}
+            assert result == {"HOSTED_AGENT_BASE_URL": "https://test.example/1/openai", "HOSTED_WORKFLOW_BASE_URL": "https://test.example/2/openai"}
     assert prepared[0]["ENABLE_PRIVATE_ATTACHMENTS"] == str(private_attachments).lower()
     assert prepared[1]["ENABLE_PRIVATE_ATTACHMENTS"] == "false"
     assert env["ENABLE_PRIVATE_ATTACHMENTS"] == str(private_attachments).lower()
