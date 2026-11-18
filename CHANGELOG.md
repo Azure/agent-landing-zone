@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Network-isolated Terraform deployments pass the Azure AI Search shared private link readiness check. Terraform names hashed links with azapi `unique_string`, which differs from ARM `uniqueString` for some Search names, so the check now accepts either provider's name for the same target and group.
+
 ## [v7.5.13] - 2026-11-18
 
 ### Fixed
