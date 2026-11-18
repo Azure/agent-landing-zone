@@ -37,9 +37,54 @@ def _schema() -> dict:
 @pytest.fixture
 def platform_cli(monkeypatch):
     # Resource and source verification is exercised by test_deployment_metadata.
-    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment: {
+    monkeypatch.setattr(outputs, "load_verified", lambda environment: mock.sentinel.verified)
+    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment, **_: {
         **environment, "APP_RUNTIME_CONFIGURATION_MODE": "appConfig",
     })
+    monkeypatch.setattr(outputs, "foundation_settings", lambda verified: {
+        "CONTAINER_REGISTRY_NAME": "crtest", "AZURE_RESOURCE_GROUP": "stale",
+    })
+
+
+def _metadata(isolated: bool):
+    from config.deployment.metadata import VerifiedMetadata
+
+    document = json.loads(
+        (REPO_ROOT / "tests" / "fixtures" / "deployment-metadata-v1.json").read_text(encoding="utf-8")
+    )
+    return VerifiedMetadata(document, {"AZURE_ENV_NAME": "example"}, {
+        "networkIsolation": isolated, "deployAgentAppMcp": False, "resourceToken": "tok123",
+        "applicationMode": "conversational", "additionalAppConfigurationSettings": [],
+    }, {})
+
+
+def test_isolated_foundation_publishes_keys_runtime_consumers_require():
+    settings = outputs.foundation_settings(_metadata(True), REPO_ROOT)
+    # agent-app-ui deploy.sh and the hosted orchestrator require these, with no fallback.
+    assert settings["CONTAINER_REGISTRY_NAME"] == "exampleacr"
+    assert settings["CONTAINER_REGISTRY_LOGIN_SERVER"] == "exampleacr.azurecr.io"
+    assert settings["AI_FOUNDRY_PROJECT_ENDPOINT"].endswith("/api/projects/example-project")
+    assert settings["CHAT_DEPLOYMENT_NAME"] == "chat"
+    assert settings["CONTAINER_ENV_NAME"] == "example-environment"
+    assert settings["RESOURCE_TOKEN"] == "tok123"
+    assert settings["NETWORK_ISOLATION"] == "true"
+    assert settings["RELEASE"] == json.loads((REPO_ROOT / "manifest.json").read_text())["tag"]
+    # Other owners keep their keys: deployment mode, Search setup and app routing.
+    for owned in ("APPLICATION_MODE", "CONTAINER_APPS", "MODEL_DEPLOYMENTS", "RETRIEVAL_BACKEND"):
+        assert owned not in settings
+    assert all(isinstance(value, str) and value for value in settings.values())
+
+
+def test_cli_publishes_foundation_only_under_network_isolation(monkeypatch, platform_cli):
+    for key, value in ENVIRONMENT.items():
+        monkeypatch.setenv(key, value)
+    for isolated in ("true", "false"):
+        monkeypatch.setenv("NETWORK_ISOLATION", isolated)
+        with mock.patch.object(outputs, "publish") as publish:
+            assert outputs.main([]) == 0
+        settings = publish.call_args.args[1]
+        assert ("CONTAINER_REGISTRY_NAME" in settings) is (isolated == "true")
+        assert settings["AZURE_RESOURCE_GROUP"] == "rg-test"
 
 
 def test_document_validates_against_published_schema():
@@ -212,7 +257,8 @@ def test_pg_publication_uses_real_cli_exit_status_not_stdout(monkeypatch, exit_c
 def test_store_free_foundation_does_not_publish_runtime(monkeypatch, mode):
     monkeypatch.setenv("AZURE_RESOURCE_GROUP", "rg-test")
     monkeypatch.delenv("APP_CONFIG_ENDPOINT", raising=False)
-    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment: {
+    monkeypatch.setattr(outputs, "load_verified", lambda environment: mock.sentinel.verified)
+    monkeypatch.setattr(outputs, "load_platform_environment", lambda environment, **_: {
         **environment, "APP_RUNTIME_CONFIGURATION_MODE": mode,
     })
     with mock.patch.object(outputs, "publish") as publish, \

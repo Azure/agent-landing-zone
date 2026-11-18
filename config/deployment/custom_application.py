@@ -157,9 +157,13 @@ def deploy_service(definition_path: str, name: str, environment: Mapping[str, st
             path.write_text(yaml.safe_dump(rendered, sort_keys=False), encoding="utf-8")
         if image:
             LOGGER.info("Deploying custom service %s with immutable image %s", name, image)
+        feature = (
+            {"AZD_ALPHA_ENABLE_FOUNDRY_ACR_REUSE": "true"}
+            if image and components[0]["kind"] == KIND_HOSTED_AGENT else {}
+        )
         subprocess.run(
             ["azd", "deploy", name, "--environment", env_name, "--no-prompt"],
-            cwd=definition.folder, env={**os.environ, **environment}, check=True,
+            cwd=definition.folder, env={**os.environ, **environment, **feature}, check=True,
         )
     finally:
         if overlay:

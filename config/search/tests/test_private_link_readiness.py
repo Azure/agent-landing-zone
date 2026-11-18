@@ -322,8 +322,29 @@ class PrivateLinkReadinessTests(unittest.TestCase):
         ])
         self.run_gate(MockArm(context), context=context)
         del context["SEARCH_SHARED_PRIVATE_LINKS"]
-        with self.assertRaisesRegex(readiness.PrivateLinkReadinessError, "bounded"):
-            readiness.ensure_native_blob_private_links(DEFINITIONS, context, self.credential)
+        _, derived = readiness._expected_links(context)
+        self.assertEqual(
+            {link.group: link.name for link in derived}["cognitiveservices_account"],
+            "spl-application-search-lo-2njwhb-cognitiveservices_account-1",
+        )
+
+    def test_long_names_derived_with_arm_unique_string_when_manifest_absent(self):
+        # Values evaluated by ARM uniqueString() in a live template deployment.
+        for value, expected in (
+            ("a", "eveiun73364hy"), ("ab", "twldla3s3qb3q"), ("abcde", "5a3qs7ylzrs64"),
+            ("abcdef", "rmkkamh3kazwq"), ("abcdefg", "logmp4qgzfm46"), ("abcdefgh", "q7ncvd5x2rx4e"),
+            ("srch-relval-40867860721b-abcdefghijklm", "trrdebvxnqbis"),
+        ):
+            self.assertEqual(readiness._unique_string(value), expected)
+        search_name = "srch-relval-40867860721b-abcdefghijklm"
+        context = {**CONTEXT, "SEARCH_SERVICE_RESOURCE_ID": PREFIX + "Microsoft.Search/searchServices/" + search_name}
+        _, links = readiness._expected_links(context)
+        names = {link.group: link.name for link in links}
+        self.assertEqual(names["blob"], f"spl-{search_name}-blob-0")
+        self.assertEqual(names["foundry_account"], f"spl-{search_name}-foundry_account-1")
+        self.assertEqual(names["cognitiveservices_account"], "spl-srch-relval-408678607-trrdeb-cognitiveservices_account-1")
+        self.assertTrue(all(len(name) <= 60 for name in names.values()))
+        self.run_gate(MockArm(context), context=context)
 
     def test_valid_resource_groups_include_parentheses_and_unicode_without_target_reads(self):
         for group in ("prod(east)", "équipe(東京)_١", "İstanbul(Prod)", "_team", "x" * 90):

@@ -159,6 +159,37 @@ connect_hub() {
   done
 }
 
+# Search shared private links create Pending connections on their targets
+# (storage blob, Foundry). The product never approves them; the target
+# administrator does, as documented. In this throwaway environment the operator
+# is that administrator.
+approve_search_links() {
+  local rg search target conn found tries
+  for rg in $(spoke_groups); do
+    for search in $(az resource list -g "$rg" --resource-type Microsoft.Search/searchServices --query '[].id' -o tsv); do
+      for target in $(az rest --method get \
+          --url "https://management.azure.com${search}/sharedPrivateLinkResources?api-version=2025-05-01" \
+          --query 'value[].properties.privateLinkResourceId' -o tsv | sort -u); do
+        found=""
+        for tries in $(seq 1 30); do
+          found="$(az network private-endpoint-connection list --id "$target" \
+            --query "[?contains(['Pending','Approved'], (properties.privateLinkServiceConnectionState.status || privateLinkServiceConnectionState.status))].id" -o tsv)"
+          [ -n "$found" ] && break
+          sleep 20
+        done
+        [ -n "$found" ] || { echo "No shared private link connection appeared on $target."; return 1; }
+        for conn in $(az network private-endpoint-connection list --id "$target" \
+            --query "[?(properties.privateLinkServiceConnectionState.status || privateLinkServiceConnectionState.status)=='Pending'].id" -o tsv); do
+          az network private-endpoint-connection approve --id "$conn" \
+            --description "Approved by the target administrator for Search shared private link" \
+            --only-show-errors -o none || return 1
+          echo "approved $conn"
+        done
+      done
+    done
+  done
+}
+
 disconnect_hub() {
   local rg zone rc=0
   for rg in $(spoke_groups); do
@@ -421,6 +452,9 @@ mapfile -t TRACKED_GROUPS < <(spoke_groups)
 log "Connect the validation hub to the spoke (operators use their own VPN or VNet)"
 run harness "connect-hub" connect_hub || fail
 run harness "dns-propagation-wait" sleep 60 || fail
+
+log "Approve the Search shared private links as the target administrator"
+run harness "approve-search-shared-links" approve_search_links || fail
 
 log "Resume the deferred data-plane configuration from the connected host"
 set_env RUN_FROM_JUMPBOX true
