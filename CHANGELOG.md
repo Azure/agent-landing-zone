@@ -1,5 +1,28 @@
 # Changelog
 
+## [v7.5.13] - 2026-11-18
+
+### Fixed
+
+- Network-isolated deployments derive the Azure AI Search shared private link names from the manifest, so the readiness check targets the links that were provisioned (#939).
+- Network-isolated deployments publish the foundation App Configuration keys from the deployment outputs (#939).
+- Hosted-agent deployment of a prebuilt image enables the azd Foundry ACR reuse feature and sets the azd default environment, so azd extensions deploy to the target environment (#939).
+- The release validation harness approves the Search shared private link connections as the target administrator (#939).
+
+### Migration
+
+- No action required. Deployed resources and outputs are unchanged. For rollback, restore `v7.5.12`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.12] - 2026-11-17
 
 ### Fixed
