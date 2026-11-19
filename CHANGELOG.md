@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Post-provision deployment metadata verification waits up to 10 minutes while a target resource is in a transient provisioning state such as `Updating`. Before this fix, a setup step that had just updated a Container App caused `Target is not ready` on the next verification. The shared Python path serves both Bicep and Terraform, and no template changes.
+- Pins `agent-app-orchestrator` `v7.2.1`. Its Linux deploy script dropped an App Configuration value that `az` returned without a trailing newline, so it reported the key as missing.
 ## [v7.5.15] - 2026-11-18
 
 ### Fixed
