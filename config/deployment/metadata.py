@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 import traceback
 from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
@@ -90,6 +91,11 @@ _ALIAS_EQUIVALENTS = {
     "AZURE_SPEECH_ENDPOINT": "SPEECH_SERVICE_ENDPOINT",
 }
 JsonRunner = Callable[..., Any]
+_TRANSIENT_PROVISIONING_STATES = frozenset(
+    {"accepted", "creating", "inprogress", "provisioning", "updating"}
+)
+_TRANSIENT_STATE_ATTEMPTS = 40
+_TRANSIENT_STATE_DELAY_SECONDS = 15.0
 _DEFAULT_MODELS = (
     ("GPT_MODEL", "gpt-5-nano", "2025-08-07"),
     ("EMBEDDING_MODEL", "text-embedding-3-large", "1"),
@@ -504,6 +510,7 @@ def _arm(
 
 def verify_live(
     document: dict[str, Any], parameters: Mapping[str, Any], runner: JsonRunner = run_json,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, dict[str, Any]]:
     context = document["context"]
     subscription = context["subscriptionId"]
@@ -587,6 +594,19 @@ def verify_live(
     def read(resource: Mapping[str, Any]) -> dict[str, Any]:
         if resource.get("name") and resource["resourceId"].rsplit("/", 1)[-1].casefold() != resource["name"].casefold():
             raise MetadataError("resource.name: Resource ID and mapped name disagree.")
+        # Setup steps update resources (for example Container Apps registries)
+        # right before the next verification, so wait out transient states.
+        for attempt in range(_TRANSIENT_STATE_ATTEMPTS):
+            row = show(resource)
+            state = str(row.get("properties", {}).get("provisioningState") or "").casefold()
+            if state not in _TRANSIENT_PROVISIONING_STATES or attempt + 1 == _TRANSIENT_STATE_ATTEMPTS:
+                break
+            sleep(_TRANSIENT_STATE_DELAY_SECONDS)
+        if row.get("properties", {}).get("provisioningState") not in (None, "Succeeded", "succeeded"):
+            raise MetadataError("resource.provisioningState: Target is not ready. Complete provisioning and retry.")
+        return row
+
+    def show(resource: Mapping[str, Any]) -> dict[str, Any]:
         row = az(["resource", "show", "--ids", resource["resourceId"], "--query",
                   "{id:id,name:name,type:type,identity:identity,properties:{"
                   "provisioningState:properties.provisioningState,customSubDomainName:properties.customSubDomainName,"
@@ -600,8 +620,6 @@ def verify_live(
         expected_type = parse_resource_id(resource["resourceId"]).resource_type
         if str(row.get("type", "")).casefold() != expected_type.casefold():
             raise MetadataError("resource.type: Live ARM type differs from the selected target.")
-        if row.get("properties", {}).get("provisioningState") not in (None, "Succeeded", "succeeded"):
-            raise MetadataError("resource.provisioningState: Target is not ready. Complete provisioning and retry.")
         return row
 
     for slot, (kind, area, _) in SLOTS.items():

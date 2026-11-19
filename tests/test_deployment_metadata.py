@@ -351,6 +351,27 @@ def test_live_boundary_accepts_pre_registry_setup_app(candidate, live_boundary):
     metadata.verify_live(candidate, parameters, run)
 
 
+def test_live_reads_wait_for_transient_provisioning_state(candidate, live_boundary):
+    parameters, rows, run = live_boundary
+    app = rows[candidate["containerApps"][0]["resourceId"].lower()]
+    app["properties"]["provisioningState"] = "Updating"
+    sleeps = []
+
+    def settle(seconds):
+        sleeps.append(seconds)
+        app["properties"]["provisioningState"] = "Succeeded"
+
+    metadata.verify_live(candidate, parameters, run, sleep=settle)
+    assert len(sleeps) == 1
+
+    app["properties"]["provisioningState"] = "Updating"
+    with pytest.raises(metadata.MetadataError, match="Target is not ready"):
+        metadata.verify_live(candidate, parameters, run, sleep=lambda _: None)
+    app["properties"]["provisioningState"] = "Failed"
+    with pytest.raises(metadata.MetadataError, match="Target is not ready"):
+        metadata.verify_live(candidate, parameters, run, sleep=lambda _: pytest.fail("no wait for terminal states"))
+
+
 def _az_projection(run):
     """Apply the az --query multiselect semantics: every selected key is returned, null when absent."""
     def projected(command, **kwargs):
