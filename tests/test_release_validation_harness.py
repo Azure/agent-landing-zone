@@ -44,6 +44,8 @@ def test_terraform_plan_retry_settings_are_not_a_transient_failure(tmp_path):
 @pytest.mark.parametrize("error", [
     '  "code": "InternalServerError",\n',
     "\x1b[31m│\x1b[0m Error: creating Private Endpoint: ERROR CODE: InternalServerError\r\n",
+    "ManagedEnvironmentOperationFailed: The managed environment's operation failed due to internal server error,"
+    " please retry later.\n",
 ])
 def test_azure_internal_server_error_is_transient(tmp_path, error):
     assert transient(tmp_path, PLAN + error)
