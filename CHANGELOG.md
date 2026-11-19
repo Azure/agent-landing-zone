@@ -2,11 +2,27 @@
 
 ## [Unreleased]
 
+## [v7.5.16] - 2026-11-19
+
 ### Fixed
 
 - Post-provision deployment metadata verification waits up to 10 minutes while a target resource is in a transient provisioning state such as `Updating`. Before this fix, a setup step that had just updated a Container App caused `Target is not ready` on the next verification. The shared Python path serves both Bicep and Terraform, and no template changes.
 - Pins `agent-app-orchestrator` `v7.2.1`. Its Linux deploy script dropped an App Configuration value that `az` returned without a trailing newline, so it reported the key as missing.
 - Pins `agent-app-ui` `v3.7.1`. Its Linux deploy script had the same App Configuration read defect, which failed the Bicep UI deploy with a missing `CONTAINER_REGISTRY_NAME` key.
+
+### Migration
+
+- None. Drop-in update from `v7.5.15` for both Bicep and Terraform. For rollback, restore `v7.5.15`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.1 |
+| agent-app-orchestrator | v7.2.1 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.15] - 2026-11-18
 
