@@ -52,7 +52,7 @@ def test_pinned_avm_has_explicit_safe_wiring():
 
 def test_nat_is_dedicated_and_explicit_ipv4():
     source = (ROOT / "infra/terraform/main.networking.tf").read_text()
-    module = source.split('module "container_apps_postgresql_nat" {', 1)[1].split('module "network_public_ip"', 1)[0]
+    module = source.split('module "container_apps_postgresql_nat" {', 1)[1].split('resource "azurerm_public_ip" "network"', 1)[0]
     for field, value in (("sku_name", "Standard"), ("sku", "Standard"), ("ip_version", "IPv4"), ("allocation_method", "Static")):
         assert re.search(rf'{field}\s*=\s*"{value}"', module)
     assert "aca-postgresql-" in module

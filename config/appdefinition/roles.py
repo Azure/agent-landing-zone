@@ -214,7 +214,7 @@ def _resolve_identity(
     service: str, resource_group: str, run_az: RunAz, subscription: str = "",
 ) -> tuple[str, str, str]:
     arguments = ["containerapp", "list", "--resource-group", resource_group, "--query",
-                 f"[?tags.\"azd-service-name\"=='{service}'].{{name:name,identity:identity}}"]
+                 f"[?tags.\"azd-service-name\"=='{service}'].{{id:id,name:name,identity:identity}}"]
     if subscription:
         arguments += ["--subscription", subscription]
     apps = _json(run_az, arguments)
@@ -225,7 +225,12 @@ def _resolve_identity(
             f"{resource_group}; found {len(apps)}. Run azd provision for this application first."
         )
     identity = apps[0].get("identity") or {}
-    identities = [(str(identity["principalId"]), "", "")] if identity.get("principalId") else []
+    # A system-assigned identity has no resource of its own; its client ID is
+    # read from the app's ARM identity extension, so no Graph access is needed.
+    identities = [(
+        str(identity["principalId"]), "",
+        f"{apps[0].get('id') or ''}/providers/Microsoft.ManagedIdentity/identities/default",
+    )] if identity.get("principalId") else []
     identities += [
         (str(value["principalId"]), str(value.get("clientId") or ""), str(resource_id))
         for resource_id, value in (identity.get("userAssignedIdentities") or {}).items()
@@ -281,9 +286,10 @@ def discover_component_identities(
         )
         if not client:
             arguments = (
+                ["rest", "--method", "get", "--url", f"{resource_id}?api-version=2023-01-31",
+                 "--query", "properties.clientId"]
+                if resource_id.endswith("/identities/default") else
                 ["identity", "show", "--ids", resource_id, "--query", "clientId"]
-                if resource_id else
-                ["ad", "sp", "show", "--id", principal, "--query", "appId"]
             )
             client = _json(run_az, arguments)
         if not isinstance(client, str) or not client.strip():

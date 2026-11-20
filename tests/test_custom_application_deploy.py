@@ -141,6 +141,7 @@ def test_deployment_consumes_pin_and_restores_original_yaml(tmp_path, failure):
         assert service["image"] == f"private.azurecr.io/web@{DIGEST}"
         assert service["docker"] == {"imagePassthrough": True}
         assert args == ["azd", "deploy", "web", "--environment", "offline", "--no-prompt"]
+        assert "AZD_ALPHA_ENABLE_FOUNDRY_ACR_REUSE" not in kwargs["env"]
         assert kwargs["cwd"] == app
         assert all(kwargs["env"][key] == value for key, value in ENV.items())
         if failure:
@@ -230,6 +231,7 @@ def test_hosted_deployment_reconciles_only_verified_runtime_profiles(tmp_path, f
         assert rendered["services"]["agent"]["image"] == image
         assert rendered["services"]["agent"]["docker"] == {"imagePassthrough": True}
         assert args == ["azd", "deploy", "agent", "--environment", "offline", "--no-prompt"]
+        assert kwargs["env"]["AZD_ALPHA_ENABLE_FOUNDRY_ACR_REUSE"] == "true"
         assert kwargs["cwd"] == app
         assert kwargs["check"] is True
         if failure == "deploy":

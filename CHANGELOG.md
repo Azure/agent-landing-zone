@@ -1,5 +1,110 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
+
+## [v7.5.16] - 2026-11-19
+
+### Fixed
+
+- Post-provision deployment metadata verification waits up to 10 minutes while a target resource is in a transient provisioning state such as `Updating`. Before this fix, a setup step that had just updated a Container App caused `Target is not ready` on the next verification. The shared Python path serves both Bicep and Terraform, and no template changes.
+- Pins `agent-app-orchestrator` `v7.2.1`. Its Linux deploy script dropped an App Configuration value that `az` returned without a trailing newline, so it reported the key as missing.
+- Pins `agent-app-ui` `v3.7.1`. Its Linux deploy script had the same App Configuration read defect, which failed the Bicep UI deploy with a missing `CONTAINER_REGISTRY_NAME` key.
+
+### Migration
+
+- None. Drop-in update from `v7.5.15` for both Bicep and Terraform. For rollback, restore `v7.5.15`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.1 |
+| agent-app-orchestrator | v7.2.1 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.15] - 2026-11-18
+
+### Fixed
+
+- Hosted-agent deployment accepts the Responses endpoint that the `azure.ai.agents` azd extension publishes. The extension appends `?api-version=v1`, which the deploy step rejected after a successful publication. The step now removes only that query and keeps the OpenAI client base URL that the UI expects (#947).
+- Terraform re-provisioning no longer tries to replace the in-use firewall, Bastion and ingress public IPs when Azure Policy adds platform `ip_tags`. The public IPs are now root `azurerm_public_ip` resources that ignore `ip_tags`, and `moved` blocks keep the existing state. Bicep is not affected (#947).
+- Terraform serializes the Foundry account private endpoint with the Foundry project and model deployment writes, and retries `AccountProvisioningStateInvalid`, so the endpoint no longer fails while the account is in the Accepted state. Bicep already orders the endpoint after the project (#947).
+
+### Changed
+
+- Release validation revalidates the Latest release every day instead of every Monday. A new daily cleanup workflow removes validation resource groups older than 48 hours, their Search shared private links, soft-deleted Foundry accounts and orphaned hub peerings, so an interrupted teardown no longer keeps costing money. This is maintainer tooling only and does not change the deployed product (#946).
+
+### Migration
+
+- Existing Terraform environments move the public IP state automatically on the next `azd provision` through `moved` blocks. The addresses are kept and not replaced. Bicep environments need no action. For rollback, restore `v7.5.14`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.14] - 2026-11-18
+
+### Fixed
+
+- Network-isolated Terraform deployments pass the Azure AI Search shared private link readiness check. Terraform names hashed links with azapi `unique_string`, which differs from ARM `uniqueString` for some Search names, so the check now accepts either provider's name for the same target and group (#942).
+- Network-isolated deployments allow the regional Microsoft Entra endpoints `*.login.microsoft.com` and `*.login.microsoftonline.com` through Azure Firewall in both Bicep and Terraform. Foundry Agent Service requires them from the delegated agent subnet, and the firewall denied `{region}.login.microsoft.com` without them (#943).
+
+### Migration
+
+- Existing network-isolated environments pick up the new firewall allow rules on the next `azd provision`. No other action is required. For rollback, restore `v7.5.13`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.13] - 2026-11-18
+
+### Fixed
+
+- Network-isolated deployments derive the Azure AI Search shared private link names from the manifest, so the readiness check targets the links that were provisioned (#939).
+- Network-isolated deployments publish the foundation App Configuration keys from the deployment outputs (#939).
+- Hosted-agent deployment of a prebuilt image enables the azd Foundry ACR reuse feature and sets the azd default environment, so azd extensions deploy to the target environment (#939).
+- The release validation harness approves the Search shared private link connections as the target administrator (#939).
+
+### Migration
+
+- No action required. Deployed resources and outputs are unchanged. For rollback, restore `v7.5.12`.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.0 |
+| agent-app-ui | v3.7.0 |
+| agent-app-orchestrator | v7.2.0 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.12] - 2026-11-17
+
+### Fixed
+
+- Platform outputs discovery reads system-assigned Container App client IDs from ARM instead of Microsoft Graph, so deployers without Graph read can publish `AGENTLZ_PLATFORM_OUTPUTS`.
+- Release validation environment names keep enough run-id digits for both providers, preventing Terraform state collisions.
+
 ## [v7.5.11] - 2026-11-17
 
 ### Fixed

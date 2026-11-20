@@ -480,9 +480,10 @@ module "container_apps_postgresql_nat" {
   depends_on       = [terraform_data.network_contract, terraform_data.postgresql_contract]
 }
 
-module "network_public_ip" {
-  source  = "Azure/avm-res-network-publicipaddress/azurerm"
-  version = "0.2.0"
+# A local resource replaces the AVM 0.2.0 wrapper only to ignore ip_tags:
+# Azure Policy can assign platform tags (for example FirstPartyUsage), which
+# the module would remove by forcing a replacement of an in-use address.
+resource "azurerm_public_ip" "network" {
   for_each = merge(
     local.network_firewall ? { firewall = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.firewall}${local.resource_token}" } : {},
     local.network_basic_management ? { firewallManagement = "${local.network_abbreviations.networking.publicIPAddress}${local.network_abbreviations.networking.firewall}management-${local.resource_token}" } : {},
@@ -495,10 +496,33 @@ module "network_public_ip" {
   allocation_method   = "Static"
   ip_version          = "IPv4"
   sku                 = "Standard"
-  zones               = !contains(["firewall", "firewallManagement"], each.key) && var.useZoneRedundancy ? [1, 2, 3] : []
+  zones               = !contains(["firewall", "firewallManagement"], each.key) && var.useZoneRedundancy ? ["1", "2", "3"] : []
   tags                = local.deployment_context.tags
-  enable_telemetry    = false
   depends_on          = [terraform_data.network_contract]
+
+  lifecycle {
+    ignore_changes = [ip_tags]
+  }
+}
+
+moved {
+  from = module.network_public_ip["firewall"].azurerm_public_ip.this
+  to   = azurerm_public_ip.network["firewall"]
+}
+
+moved {
+  from = module.network_public_ip["firewallManagement"].azurerm_public_ip.this
+  to   = azurerm_public_ip.network["firewallManagement"]
+}
+
+moved {
+  from = module.network_public_ip["bastion"].azurerm_public_ip.this
+  to   = azurerm_public_ip.network["bastion"]
+}
+
+moved {
+  from = module.network_public_ip["ingress"].azurerm_public_ip.this
+  to   = azurerm_public_ip.network["ingress"]
 }
 
 module "network_bastion" {
@@ -515,7 +539,7 @@ module "network_bastion" {
     name                 = "ipconfig"
     subnet_id            = local.subnet_ids.bastion
     create_public_ip     = false
-    public_ip_address_id = module.network_public_ip["bastion"].resource_id
+    public_ip_address_id = azurerm_public_ip.network["bastion"].id
   }
   tags             = local.deployment_context.tags
   enable_telemetry = false
@@ -550,13 +574,13 @@ module "network_firewall" {
   ip_configurations = {
     primary = {
       name                 = "ipconfig1"
-      public_ip_address_id = module.network_public_ip["firewall"].resource_id
+      public_ip_address_id = azurerm_public_ip.network["firewall"].id
       subnet_id            = local.subnet_ids.firewall
     }
   }
   firewall_management_ip_configuration = local.network_basic_management ? {
     name                 = "managementIpconfig"
-    public_ip_address_id = module.network_public_ip["firewallManagement"].resource_id
+    public_ip_address_id = azurerm_public_ip.network["firewallManagement"].id
     subnet_id            = local.subnet_ids.firewallManagement
   } : null
   tags             = local.deployment_context.tags
@@ -635,7 +659,7 @@ locals {
   network_runtime_fqdns  = ["www.python.org", "*.python.org", "pypi.org", "*.pypi.org", "files.pythonhosted.org", "*.pythonhosted.org", "bootstrap.pypa.io", "*.pypa.io", "registry.npmjs.org", "*.npmjs.org"]
   network_firewall_rule_specs = {
     AllowMicrosoftContainerRegistry = { sources = ["*"], ports = ["Https"], fqdns = ["mcr.microsoft.com", "*.data.mcr.microsoft.com"] }
-    AllowEntraIdAuth                = { sources = ["*"], ports = ["Https"], fqdns = ["login.microsoftonline.com", "login.windows.net", "management.azure.com", "graph.microsoft.com", "*.applicationinsights.azure.com"] }
+    AllowEntraIdAuth                = { sources = ["*"], ports = ["Https"], fqdns = ["login.microsoftonline.com", "*.login.microsoftonline.com", "*.login.microsoft.com", "login.windows.net", "management.azure.com", "graph.microsoft.com", "*.applicationinsights.azure.com"] }
     AllowGitHub                     = { sources = ["*"], ports = ["Https"], fqdns = ["github.com", "*.github.com", "raw.githubusercontent.com", "codeload.github.com", "objects.githubusercontent.com", "*.githubusercontent.com"] }
     AllowContainerAppsPlatform = {
       sources = ["*"], ports = ["Https"]
@@ -995,9 +1019,12 @@ resource "azapi_resource" "network_foundry_private_endpoint" {
       }]
     }
   }
-  locks = [local.network_vnet_id]
+  # The account endpoint shares the account lock with its child writers
+  # (projects, model deployments): those return the account to Accepted, and
+  # the PE PUT is rejected with AccountProvisioningStateInvalid meanwhile.
+  locks = concat([local.network_vnet_id], each.key == "foundry" ? local.foundry_account_locks : [])
   retry = {
-    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned", "InternalServerError"]
+    error_message_regex = ["AnotherOperationInProgress", "ReferencedResourceNotProvisioned", "InternalServerError", "AccountProvisioningStateInvalid"]
   }
   response_export_values = ["properties.customDnsConfigs", "properties.networkInterfaces"]
   depends_on             = [terraform_data.network_contract, module.network_subnet, module.network_private_dns]
@@ -1169,7 +1196,7 @@ module "network_ingress" {
   http2_enable                          = true
   app_gateway_waf_policy_resource_id    = azapi_resource.network_ingress_waf[0].id
   create_public_ip                      = false
-  public_ip_resource_id                 = module.network_public_ip["ingress"].resource_id
+  public_ip_resource_id                 = azurerm_public_ip.network["ingress"].id
   frontend_ip_configuration_public_name = "frontend-public"
   gateway_ip_configuration              = { name = "gateway-ip-config", subnet_id = local.subnet_ids.appGateway }
   managed_identities                    = { user_assigned_resource_ids = [local.network_ingress_identity.resource_id] }
@@ -1233,8 +1260,8 @@ locals {
   network_ingress_context = {
     enabled                = local.effective_flags.public_ingress
     live_mode              = local.effective_flags.public_ingress && local.network_ingress_live
-    public_ip              = local.effective_flags.public_ingress ? module.network_public_ip["ingress"].public_ip_address : ""
-    public_ip_resource_id  = local.effective_flags.public_ingress ? module.network_public_ip["ingress"].resource_id : ""
+    public_ip              = local.effective_flags.public_ingress ? azurerm_public_ip.network["ingress"].ip_address : ""
+    public_ip_resource_id  = local.effective_flags.public_ingress ? azurerm_public_ip.network["ingress"].id : ""
     gateway_resource_id    = local.effective_flags.public_ingress ? module.network_ingress[0].resource_id : ""
     gateway_name           = local.effective_flags.public_ingress ? "${local.network_ingress_prefix}-agw" : ""
     nsg_resource_id        = local.effective_flags.public_ingress ? azapi_resource.network_nsg["appGateway"].id : ""

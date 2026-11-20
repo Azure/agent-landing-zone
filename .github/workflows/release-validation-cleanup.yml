@@ -1,0 +1,124 @@
+name: Release validation cleanup
+
+# Daily removal of release validation leftovers, so a failed or interrupted
+# teardown never keeps costing money: validation resource groups (rg-relval-*)
+# older than max_age_hours, their Search shared private links, soft-deleted
+# Foundry accounts and orphaned hub peerings. Locked groups (kept environments)
+# and the hub are never removed. util/release-validation/cleanup.sh does the
+# work on the executor VM, whose managed identity can delete resource groups.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: "Remove validation resource groups created more than this many hours ago"
+        required: true
+        default: "48"
+        type: string
+      dry_run:
+        description: "Only list what would be removed"
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    # After the nightly governance shutdown window (about 00:00-05:00 UTC) and
+    # before the daily validation at 09:00 UTC.
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Shares the validation group, so it never runs while a validation uses the
+  # executor VM or a spoke is being created.
+  group: release-validation
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Remove old validation resources
+    runs-on: ubuntu-latest
+    environment: release-validation
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write # Azure OIDC
+    env:
+      MAX_AGE_HOURS: ${{ inputs.max_age_hours || '48' }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      HUB_RG: ${{ vars.RELVAL_HUB_RESOURCE_GROUP }}
+      HUB_VM: ${{ vars.RELVAL_HUB_VM_NAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: util/release-validation
+          persist-credentials: false
+
+      - name: Check inputs
+        env:
+          SUBSCRIPTION_ID: ${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}
+          EXECUTOR_CLIENT_ID: ${{ vars.RELVAL_EXECUTOR_CLIENT_ID }}
+          HUB_VNET_ID: ${{ vars.RELVAL_HUB_VNET_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$MAX_AGE_HOURS" =~ ^[0-9]{1,4}$ ]] && [ "$MAX_AGE_HOURS" -ge 24 ] \
+            || { echo "::error::max_age_hours must be a whole number of at least 24"; exit 1; }
+          [[ "$SUBSCRIPTION_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::Missing RELVAL_AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [[ "$EXECUTOR_CLIENT_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::Missing RELVAL_EXECUTOR_CLIENT_ID"; exit 1; }
+          [[ "$HUB_VNET_ID" =~ ^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/[A-Za-z0-9._()-]+/providers/Microsoft\.Network/virtualNetworks/[A-Za-z0-9._-]+$ ]] \
+            || { echo "::error::Missing RELVAL_HUB_VNET_ID"; exit 1; }
+          [[ "$HUB_RG" =~ ^[A-Za-z0-9._()-]+$ ]] && [[ "$HUB_VM" =~ ^[A-Za-z0-9._-]+$ ]] \
+            || { echo "::error::Missing RELVAL_HUB_RESOURCE_GROUP or RELVAL_HUB_VM_NAME"; exit 1; }
+          echo "::add-mask::$SUBSCRIPTION_ID"
+          echo "::add-mask::${{ vars.RELVAL_AZURE_TENANT_ID }}"
+          payload="$(base64 -w0 util/release-validation/cleanup.sh)"
+          cat > cleanup-run.sh <<EOF
+          echo '$payload' | base64 -d > /tmp/relval-cleanup.sh
+          SUBSCRIPTION_ID=$SUBSCRIPTION_ID EXECUTOR_CLIENT_ID=$EXECUTOR_CLIENT_ID HUB_VNET_ID=$HUB_VNET_ID \
+            MAX_AGE_HOURS=$MAX_AGE_HOURS DRY_RUN=$DRY_RUN bash /tmp/relval-cleanup.sh 2>&1 | tail -c 3800
+          EOF
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.RELVAL_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.RELVAL_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start executor VM
+        id: vm
+        run: |
+          set -euo pipefail
+          power="$(az vm get-instance-view -g "$HUB_RG" -n "$HUB_VM" \
+            --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" -o tsv)"
+          echo "was=$power" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3 4 5 6; do
+            az vm start -g "$HUB_RG" -n "$HUB_VM" --only-show-errors && break
+            [ "$attempt" -lt 6 ] || exit 1
+            sleep 60
+          done
+
+      - name: Remove old validation resources
+        env:
+          SUBSCRIPTION_ID: ${{ vars.RELVAL_AZURE_SUBSCRIPTION_ID }}
+          TENANT_ID: ${{ vars.RELVAL_AZURE_TENANT_ID }}
+          EXECUTOR_CLIENT_ID: ${{ vars.RELVAL_EXECUTOR_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          az vm run-command invoke -g "$HUB_RG" -n "$HUB_VM" --command-id RunShellScript \
+            --scripts @cleanup-run.sh --query 'value[0].message' -o tsv --only-show-errors \
+            | sed -e "s/$SUBSCRIPTION_ID/<subscription-id>/gI" -e "s/$TENANT_ID/<tenant-id>/gI" \
+              -e "s/$EXECUTOR_CLIENT_ID/<executor-client-id>/gI" | tee cleanup.out
+          {
+            echo "### Release validation cleanup (dry run: $DRY_RUN, older than $MAX_AGE_HOURS h)"
+            echo '```'
+            grep -vE '^\[(stdout|stderr)\]$|^Enable succeeded:?$' cleanup.out || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          failures="$(sed -n 's/^cleanup failures: \([0-9]*\)$/\1/p' cleanup.out | tail -n1)"
+          [ -n "$failures" ] || { echo "::error::The cleanup script did not finish."; exit 1; }
+          [ "$failures" -eq 0 ] || echo "::warning::$failures cleanup actions failed. The next run retries them."
+
+      - name: Stop executor VM
+        if: always() && steps.vm.outputs.was != 'PowerState/running'
+        run: az vm deallocate -g "$HUB_RG" -n "$HUB_VM" --only-show-errors

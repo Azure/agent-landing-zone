@@ -51,12 +51,35 @@ change the file only through a reviewed pull request.
    `## Validation` in the release notes (`evidence.py amend-notes`) and runs
    `gh release edit <tag> --prerelease=false --latest`.
 
-## Weekly revalidation
+## Daily revalidation
 
-Every Monday at 09:00 UTC the workflow revalidates the Latest release with both
+Every day at 09:00 UTC the workflow revalidates the Latest release with both
 providers and without promotion. A failure opens a GitHub issue, or comments on
 the open one. Fix it on a feature branch, cut a patch release as a pre-release
-and validate it.
+and validate it. Each run creates and removes two spokes, so it costs about
+the hourly price of one standard scenario for a few hours a day.
+
+## Daily cleanup
+
+`.github/workflows/release-validation-cleanup.yml` runs every day at 06:00 UTC
+(and on demand, with `max_age_hours` and `dry_run` inputs). It starts the
+executor VM and runs `cleanup.sh` on it through Run Command, because only the VM
+identity can delete resource groups. The script removes, without waiting:
+
+- the Search shared private links and Search services of `rg-relval-*` groups
+  created more than `max_age_hours` (default 48) ago, then those groups, the
+  network group last. A network group left alone after a teardown counts as
+  old after 6 hours, because Azure can report a recent creation time for it
+- every soft-deleted Foundry account of a `rg-relval-*` group (it otherwise
+  holds the agent subnet and blocks the network group deletion)
+- hub peerings `to-spoke-relval-*` whose spoke is gone or being removed
+
+Groups with a management lock (for example a kept environment), the groups of a
+validation running on the executor and the hub are never removed. Failed
+actions show as a warning and are retried the next day.
+The cleanup shares the validation concurrency group, so it never overlaps a
+validation. GitHub keeps one pending run per group, so a cleanup queued behind
+a running validation replaces an older pending run.
 
 Some subscriptions run a governance automation (for example
 `MCAPSGovernance-AutomationApp`) that deallocates VMs at night, at about
@@ -101,7 +124,8 @@ script prints.
   them. The shared private link otherwise blocks the group deletion and leaks
   one unit of the standard Search quota per run.
   Set `WAIT_FOR_TEARDOWN=true` to run the full `azd down` with verification.
-- If teardown leaves resources behind, clean up in this order: delete the
+- If teardown leaves resources behind, the daily cleanup removes them after
+  48 hours. To clean up by hand earlier, go in this order: delete the
   Search shared private links (`az search shared-private-link-resource
   delete`) and the Search service, delete the
   environment and app resource groups (`rg-relval-<env>` and

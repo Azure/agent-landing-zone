@@ -7,7 +7,7 @@ import json
 import logging
 from pathlib import Path
 import sys
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import yaml
 
@@ -175,11 +175,18 @@ def invocations_base_url(endpoint: str) -> str:
 
 
 def responses_base_url(endpoint: str) -> str:
-    """Use the official publication output; OpenAI clients append /responses."""
+    """Use the official publication output; OpenAI clients append /responses.
+
+    The azd agents extension publishes the REST URL with ``?api-version=...``.
+    The OpenAI SDK base URL is the same path without the operation or query.
+    """
     parsed = urlsplit(endpoint.strip())
+    query = parse_qsl(parsed.query, keep_blank_values=True)
     if (
         parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-        or parsed.query or parsed.fragment or not parsed.path.endswith("/responses")
+        or any(key != "api-version" or not value for key, value in query)
+        or (parsed.query and not query)
+        or parsed.fragment or not parsed.path.endswith("/responses")
     ):
         raise ValueError("Native Hosted publication must return an absolute HTTPS Responses endpoint.")
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path[:-len("/responses")], "", ""))

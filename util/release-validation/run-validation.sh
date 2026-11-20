@@ -41,7 +41,9 @@ SOURCE_REF="${SOURCE_REF:-$RELEASE_TAG}"
 REPOSITORY="${REPOSITORY:-Azure/agent-landing-zone}"
 HOSTED_AGENT_RESOURCE_SCOPE="${HOSTED_AGENT_RESOURCE_SCOPE:-https://ai.azure.com/.default}"
 KEEP_ENVIRONMENT="${KEEP_ENVIRONMENT:-false}"
-ENV_NAME="relval-$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | tail -c 12)"
+# Abbreviate the provider before truncating so both providers keep enough
+# run-id digits; the env name keys the Terraform state and must not collide.
+ENV_NAME="relval-$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | sed 's/bicep$/b/;s/terraform$/t/' | tr -cd 'a-z0-9' | tail -c 12)"
 HUB_RG="$(printf '%s' "$HUB_VNET_ID" | awk -F/ '{print $5}')"
 HUB_VNET="$(printf '%s' "$HUB_VNET_ID" | awk -F/ '{print $9}')"
 HUB_LINK="relval-hub-link"
@@ -153,6 +155,37 @@ connect_hub() {
       az network private-dns link vnet create -g "$rg" -z "$zone" -n "$HUB_LINK" \
         --virtual-network "$HUB_VNET_ID" --registration-enabled false --only-show-errors \
         --query virtualNetworkLinkState -o tsv || return 1
+    done
+  done
+}
+
+# Search shared private links create Pending connections on their targets
+# (storage blob, Foundry). The product never approves them; the target
+# administrator does, as documented. In this throwaway environment the operator
+# is that administrator.
+approve_search_links() {
+  local rg search target conn found tries
+  for rg in $(spoke_groups); do
+    for search in $(az resource list -g "$rg" --resource-type Microsoft.Search/searchServices --query '[].id' -o tsv); do
+      for target in $(az rest --method get \
+          --url "https://management.azure.com${search}/sharedPrivateLinkResources?api-version=2025-05-01" \
+          --query 'value[].properties.privateLinkResourceId' -o tsv | sort -u); do
+        found=""
+        for tries in $(seq 1 30); do
+          found="$(az network private-endpoint-connection list --id "$target" \
+            --query "[?contains(['Pending','Approved'], (properties.privateLinkServiceConnectionState.status || privateLinkServiceConnectionState.status))].id" -o tsv)"
+          [ -n "$found" ] && break
+          sleep 20
+        done
+        [ -n "$found" ] || { echo "No shared private link connection appeared on $target."; return 1; }
+        for conn in $(az network private-endpoint-connection list --id "$target" \
+            --query "[?(properties.privateLinkServiceConnectionState.status || privateLinkServiceConnectionState.status)=='Pending'].id" -o tsv); do
+          az network private-endpoint-connection approve --id "$conn" \
+            --description "Approved by the target administrator for Search shared private link" \
+            --only-show-errors -o none || return 1
+          echo "approved $conn"
+        done
+      done
     done
   done
 }
@@ -394,21 +427,23 @@ PROVISION_LOG_START="$(wc -c < "$RAW_LOG")"
 run user "azd-provision" azd provision --no-prompt
 PROVISION_RC=$?
 # Azure intermittently fails private endpoint operations with a bare
-# InternalServerError. azd provision is idempotent, so the operator reruns it.
+# InternalServerError, and Container Apps environment creation with
+# ManagedEnvironmentOperationFailed ("internal server error, please retry
+# later"). azd provision is idempotent, so the operator reruns it.
 # grep reads a process substitution, not a pipe: grep -q exits on the first
 # match, tail then gets SIGPIPE, and pipefail would turn the match into a miss.
 # Terraform plans list "InternalServerError" in the azapi retry settings, so a
 # bare quoted list item is not an error. awk reads the whole input (no SIGPIPE).
 provision_failed_transiently() {
   awk '{ gsub("\033\\[[0-9;?]*[A-Za-z]|\r", "") }
-    /InternalServerError/ && !/^[[:space:]]*[-+~]?[[:space:]]*"InternalServerError",?[[:space:]]*$/ { found = 1 }
+    /InternalServerError|ManagedEnvironmentOperationFailed/ && !/^[[:space:]]*[-+~]?[[:space:]]*"[A-Za-z]+",?[[:space:]]*$/ { found = 1 }
     END { exit !found }' < <(tail -c +"$(($1 + 1))" "$RAW_LOG")
 }
 PROVISION_RETRY=0
 while [ "$PROVISION_RC" -ne 0 ] && [ "$PROVISION_RETRY" -lt 2 ] \
   && provision_failed_transiently "$PROVISION_LOG_START"; do
   PROVISION_RETRY=$((PROVISION_RETRY + 1))
-  log "Rerun provisioning after a transient Azure InternalServerError (retry $PROVISION_RETRY)"
+  log "Rerun provisioning after a transient Azure internal server error (retry $PROVISION_RETRY)"
   PROVISION_LOG_START="$(wc -c < "$RAW_LOG")"
   run user "azd-provision-retry-$PROVISION_RETRY" azd provision --no-prompt
   PROVISION_RC=$?
@@ -419,6 +454,9 @@ mapfile -t TRACKED_GROUPS < <(spoke_groups)
 log "Connect the validation hub to the spoke (operators use their own VPN or VNet)"
 run harness "connect-hub" connect_hub || fail
 run harness "dns-propagation-wait" sleep 60 || fail
+
+log "Approve the Search shared private links as the target administrator"
+run harness "approve-search-shared-links" approve_search_links || fail
 
 log "Resume the deferred data-plane configuration from the connected host"
 set_env RUN_FROM_JUMPBOX true

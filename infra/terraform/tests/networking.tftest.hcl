@@ -88,7 +88,7 @@ run "public_default_has_no_network_resources" {
     error_message = "Public mode must not export a managed Foundry endpoint or ingress NSG."
   }
   assert {
-    condition     = length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 && length(module.network_public_ip) == 0
+    condition     = length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 && length(azurerm_public_ip.network) == 0
     error_message = "Public mode must not create either firewall IP, firewall or policy."
   }
 }
@@ -114,7 +114,7 @@ run "isolated_basic_has_required_subnets_and_dedicated_application_pe" {
       length(module.network_firewall_policy[0].resource.dns) == 0 &&
       length(module.network_firewall[0].resource.management_ip_configuration) == 1 &&
       module.network_firewall[0].resource.management_ip_configuration[0].name == "managementIpconfig" &&
-      toset(keys(module.network_public_ip)) == toset(["firewall", "firewallManagement"])
+      toset(keys(azurerm_public_ip.network)) == toset(["firewall", "firewallManagement"])
     )
     error_message = "Default Basic must use matching policy, no DNS block, both IPs and the pinned AVM management interface."
   }
@@ -168,6 +168,19 @@ run "isolated_basic_has_required_subnets_and_dedicated_application_pe" {
   assert {
     condition     = length(setintersection(toset(keys(local.network_foundry_private_endpoints)), toset(keys(local.network_application_private_endpoints)))) == 0
     error_message = "Foundry readiness must not wait on application/compute endpoint producers."
+  }
+  assert {
+    condition = (
+      length(azapi_resource.network_foundry_private_endpoint["foundry"].locks) == 1 + length(local.foundry_account_locks) &&
+      alltrue([for lock in local.foundry_account_locks : contains(azapi_resource.network_foundry_private_endpoint["foundry"].locks, lock)]) &&
+      length(azapi_resource.network_foundry_private_endpoint["foundrySearch"].locks) == 1 &&
+      contains(azapi_resource.network_foundry_private_endpoint["foundry"].retry.error_message_regex, "AccountProvisioningStateInvalid")
+    )
+    error_message = "The Foundry account PE must serialize with account child writes, which leave the account in Accepted."
+  }
+  assert {
+    condition     = alltrue([for ip in azurerm_public_ip.network : try(length(ip.ip_tags), 0) == 0])
+    error_message = "Public IPs must not declare ip_tags; platform-assigned tags are ignored, never replaced."
   }
 }
 
@@ -270,7 +283,7 @@ run "external_route_table_is_not_owned" {
       !contains(keys(local.managed_subnets), "firewallManagement") &&
       !contains(keys(local.managed_subnets), "gateway") &&
       length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 &&
-      length(module.network_public_ip) == 0
+      length(azurerm_public_ip.network) == 0
     )
     error_message = "External egress must not create unused local firewall or gateway networking."
   }
@@ -486,7 +499,7 @@ run "standard_keeps_dns_proxy_without_management_dependencies" {
       module.network_firewall_policy[0].resource.dns[0].proxy_enabled &&
       length(module.network_firewall[0].resource.management_ip_configuration) == 0 &&
       !contains(keys(local.managed_subnets), "firewallManagement") &&
-      toset(keys(module.network_public_ip)) == toset(["firewall"])
+      toset(keys(azurerm_public_ip.network)) == toset(["firewall"])
     )
     error_message = "Standard preserves selectable DNS proxy and never creates Basic management dependencies, even with an explicit management flag."
   }
@@ -508,7 +521,7 @@ run "integrated_external_hub_with_gateway_has_no_local_reservations" {
       !contains(keys(local.managed_subnets), "firewallManagement") &&
       !contains(keys(local.managed_subnets), "gateway") &&
       length(module.network_firewall) == 0 && length(module.network_firewall_policy) == 0 &&
-      length(module.network_public_ip) == 0
+      length(azurerm_public_ip.network) == 0
     )
     error_message = "A shared hub gateway does not require any local firewall or gateway reservation."
   }
@@ -529,7 +542,7 @@ run "external_hub_without_gateway_allows_explicit_reservations_only" {
     condition = (
       contains(keys(local.managed_subnets), "firewall") && contains(keys(local.managed_subnets), "gateway") &&
       !contains(keys(local.managed_subnets), "firewallManagement") &&
-      length(module.network_public_ip) == 0 && length(module.network_firewall) == 0
+      length(azurerm_public_ip.network) == 0 && length(module.network_firewall) == 0
     )
     error_message = "Explicit data and gateway reservations must not create either service or management networking."
   }
@@ -555,7 +568,7 @@ run "public_ignores_isolated_reservations" {
     deployGatewaySubnet                 = true
   }
   assert {
-    condition     = length(local.managed_subnets) == 0 && length(module.network_public_ip) == 0 && length(module.network_firewall) == 0
+    condition     = length(local.managed_subnets) == 0 && length(azurerm_public_ip.network) == 0 && length(module.network_firewall) == 0
     error_message = "Isolation gates subnet and firewall/IP creation even when reservation flags are true."
   }
 }
@@ -579,16 +592,18 @@ run "basic_management_wiring_keeps_data_private_next_hop" {
       resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/virtualNetworks/vnet/subnets/AzureFirewallManagementSubnet"
     }
   }
-  override_module {
-    target = module.network_public_ip["firewall"]
-    outputs = {
-      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/data"
+  override_resource {
+    target          = azurerm_public_ip.network["firewall"]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/data"
     }
   }
-  override_module {
-    target = module.network_public_ip["firewallManagement"]
-    outputs = {
-      resource_id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/management"
+  override_resource {
+    target          = azurerm_public_ip.network["firewallManagement"]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/rg-network-contract/providers/Microsoft.Network/publicIPAddresses/management"
     }
   }
   override_resource {
@@ -602,9 +617,9 @@ run "basic_management_wiring_keeps_data_private_next_hop" {
   assert {
     condition = (
       module.network_firewall[0].resource.management_ip_configuration[0].subnet_id == local.subnet_ids.firewallManagement &&
-      module.network_firewall[0].resource.management_ip_configuration[0].public_ip_address_id == module.network_public_ip["firewallManagement"].resource_id &&
+      module.network_firewall[0].resource.management_ip_configuration[0].public_ip_address_id == azurerm_public_ip.network["firewallManagement"].id &&
       module.network_firewall[0].resource.ip_configuration[0].subnet_id == local.subnet_ids.firewall &&
-      module.network_firewall[0].resource.ip_configuration[0].public_ip_address_id == module.network_public_ip["firewall"].resource_id &&
+      module.network_firewall[0].resource.ip_configuration[0].public_ip_address_id == azurerm_public_ip.network["firewall"].id &&
       azapi_resource.network_default_route[0].body.properties.nextHopIpAddress == module.network_firewall[0].resource.ip_configuration[0].private_ip_address
     )
     error_message = "The management NIC must use its own subnet/IP; workload UDRs must still use the data-plane private IP."
