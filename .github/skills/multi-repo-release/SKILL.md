@@ -48,6 +48,11 @@ are authoritative.
     evidence artifact, fix on a feature branch from `develop` and cut the next
     patch release the same way. Never promote a release by hand without passing
     evidence for both providers.
+14. After a MINOR or MAJOR release becomes Latest, update the documentation
+    site (`Azure/AI-Landing-Zones`, branch `main`) through a feature branch:
+    add the release to `docs/agent-landing-zone/whats-new.md` under its month,
+    and add or update a one-line milestone for that month in the site-wide
+    `docs/whatisnew.md`, linking to the Agent Landing Zone What's new.
 
 Do not publish a tag, release, package, image, or production deployment without
 explicit human approval. Report incompatible pins, missing validation, or
