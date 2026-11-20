@@ -410,7 +410,10 @@ def approve_terraform_source(directory: Path) -> None:
         declarations = []
         local_values: dict[str, Any] = {}
         for path in directory.glob("*.tf"):
-            document = hcl2.loads(path.read_text(encoding="utf-8"))
+            document = hcl2.loads(
+                path.read_text(encoding="utf-8"),
+                serialization_options=hcl2.SerializationOptions(strip_string_quotes=True),
+            )
             for block in document.get("locals", []):
                 local_values.update(block)
             for block in document.get("output", []):
