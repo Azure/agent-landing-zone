@@ -1,10 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.17] - 2026-11-20
 
 ### Changed
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
+- Updates the Foundry project SDK and pinned GitHub Actions dependencies.
+- Pins the validated patch releases `agent-app-ui` `v3.7.2` and `agent-app-mcp` `v2.0.2`. Orchestrator and ingestion stay on their existing released versions.
+
+### Fixed
+
+- Terraform deployment metadata inspection retains its literal non-sensitive output guard and transitive declassification checks with `python-hcl2` `8.2.0`, using the parser's supported backwards-compatible string serialization.
+
+### Migration
+
+- No deployment parameter or runtime configuration changes. For rollback, restore `v7.5.16` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.2 |
+| agent-app-ui | v3.7.2 |
+| agent-app-orchestrator | v7.2.1 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.16] - 2026-11-19
 
