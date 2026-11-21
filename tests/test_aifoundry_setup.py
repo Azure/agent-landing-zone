@@ -4,7 +4,100 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
+from azure.mgmt.cognitiveservices.models import Deployment, DeploymentProperties, DeploymentModel, Sku
+
 from config.aifoundry import setup
+
+
+class FoundrySdkCompatibilityTests(unittest.TestCase):
+    def test_blocklist_models_preserve_description_pattern_and_regex(self):
+        sdk = CognitiveServicesManagementClient(Mock(), "subscription")
+        self.addCleanup(sdk.close)
+        with (
+            patch.object(sdk.rai_blocklists, "create_or_update") as create,
+            patch.object(sdk.rai_blocklist_items, "list", return_value=[
+                SimpleNamespace(name="old-item"),
+            ]),
+            patch.object(sdk.rai_blocklist_items, "begin_delete") as delete,
+            patch.object(sdk.rai_blocklist_items, "create_or_update") as create_item,
+        ):
+            delete.return_value.result.side_effect = lambda: create_item.assert_not_called()
+            setup.configure_blocklist(sdk, "group", "account", {
+                "description": "Blocked terms",
+                "blocklistItems": [{"pattern": "blocked.*", "isRegex": True}],
+            }, "blocklist")
+        self.assertEqual(
+            create.call_args.kwargs["rai_blocklist"].as_dict(),
+            {"properties": {"description": "Blocked terms"}},
+        )
+        delete.assert_called_once_with(
+            resource_group_name="group", account_name="account",
+            rai_blocklist_name="blocklist", rai_blocklist_item_name="old-item",
+        )
+        delete.return_value.result.assert_called_once_with()
+        self.assertEqual(
+            create_item.call_args.kwargs["rai_blocklist_item"].as_dict(),
+            {"properties": {"pattern": "blocked.*", "isRegex": True}},
+        )
+
+    def test_failed_item_deletion_stops_before_replacement(self):
+        client = Mock()
+        client.rai_blocklist_items.list.return_value = [SimpleNamespace(name="old-item")]
+        client.rai_blocklist_items.begin_delete.return_value.result.side_effect = RuntimeError(
+            "deletion failed"
+        )
+        with self.assertLogs(level="ERROR"), self.assertRaises(SystemExit) as error:
+            setup.configure_blocklist(client, "group", "account", {
+                "blocklistItems": [{"pattern": "replacement"}],
+            }, "blocklist")
+        self.assertEqual(error.exception.code, 1)
+        client.rai_blocklist_items.create_or_update.assert_not_called()
+
+    def test_policy_association_preserves_deployment_model_and_capacity(self):
+        sdk = CognitiveServicesManagementClient(Mock(), "subscription")
+        self.addCleanup(sdk.close)
+        deployment = Deployment(
+            sku=Sku(name="GlobalStandard", capacity=10),
+            properties=DeploymentProperties(
+                model=DeploymentModel(format="OpenAI", name="gpt-4", version="test-version"),
+                rai_policy_name="old-policy",
+            ),
+        )
+        with (
+            patch.object(sdk.rai_policies, "create_or_update") as policy,
+            patch.object(sdk.deployments, "get", return_value=deployment),
+            patch.object(sdk.deployments, "begin_create_or_update") as update,
+        ):
+            name = setup.configure_policy(sdk, "group", "account", {
+                "name": "policy",
+                "properties": {
+                    "mode": "blocking",
+                    "promptBlocklists": [{"blocklistName": "blocklist", "blocking": True}],
+                    "contentFilters": [{
+                        "name": "Hate", "source": "prompt", "allowedContentLevel": "high",
+                    }],
+                },
+            }, "blocklist", "policy")
+            setup.associate_policy_to_deployment(sdk, "group", "account", "chat", name)
+        self.assertEqual(policy.call_args.kwargs["rai_policy"]["properties"], {
+            "mode": "Blocking",
+            "customBlocklists": [{
+                "blocklistName": "blocklist", "blocking": True, "source": "Prompt",
+            }],
+            "contentFilters": [{
+                "name": "Hate", "source": "Prompt", "severityThreshold": "High",
+            }],
+        })
+        expected = deployment.as_dict()
+        expected["properties"]["raiPolicyName"] = "policy"
+        update.assert_called_once_with(
+            resource_group_name="group", account_name="account",
+            deployment_name="chat", deployment=expected,
+        )
+        self.assertEqual(expected["sku"]["capacity"], 10)
+        self.assertEqual(expected["properties"]["model"]["name"], "gpt-4")
+        update.return_value.result.assert_called_once_with()
 
 
 class FoundryEvaluationKeyTests(unittest.TestCase):
