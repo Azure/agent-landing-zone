@@ -5,6 +5,7 @@
 ### Changed
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
+- Release validation posts the result of every run to Teams when the `RELVAL_TEAMS_WEBHOOK_URL` repository secret holds a Teams Workflows webhook URL. The card shows the release, the result per provider, whether the release was promoted and a link to the run. Without the secret the step is skipped. Maintainer tooling only, no product change.
 
 ## [v7.5.16] - 2026-11-19
 
