@@ -6,7 +6,7 @@
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
 - Updates the Foundry project and Cognitive Services management SDKs and pinned GitHub Actions dependencies.
-- Pins the validated patch releases `agent-app-ui` `v3.7.3` and `agent-app-mcp` `v2.0.3`. Orchestrator and ingestion stay on their existing released versions.
+- Pins the validated dependency patch releases `agent-app-ui` `v3.7.3`, `agent-app-mcp` `v2.0.3` and `agent-app-orchestrator` `v7.2.2`. Ingestion stays on its existing released version pending coordinated migration validation.
 
 ### Fixed
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | agent-app-mcp | v2.0.3 |
 | agent-app-ui | v3.7.3 |
-| agent-app-orchestrator | v7.2.1 |
+| agent-app-orchestrator | v7.2.2 |
 | agent-app-ingestion | v3.1.3 |
 | infra / AI Landing Zone | v2.7.3 |
 

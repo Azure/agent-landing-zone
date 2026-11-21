@@ -33,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "3a95d4c5db841c91fe004839893b0a7a59dc593d" },
+      "source": { "commit": "6e7bba6aa4fd774ec544ab54b458206da77e256a" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {
