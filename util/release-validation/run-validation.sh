@@ -427,21 +427,23 @@ PROVISION_LOG_START="$(wc -c < "$RAW_LOG")"
 run user "azd-provision" azd provision --no-prompt
 PROVISION_RC=$?
 # Azure intermittently fails private endpoint operations with a bare
-# InternalServerError. azd provision is idempotent, so the operator reruns it.
+# InternalServerError, and Container Apps environment creation with
+# ManagedEnvironmentOperationFailed ("internal server error, please retry
+# later"). azd provision is idempotent, so the operator reruns it.
 # grep reads a process substitution, not a pipe: grep -q exits on the first
 # match, tail then gets SIGPIPE, and pipefail would turn the match into a miss.
 # Terraform plans list "InternalServerError" in the azapi retry settings, so a
 # bare quoted list item is not an error. awk reads the whole input (no SIGPIPE).
 provision_failed_transiently() {
   awk '{ gsub("\033\\[[0-9;?]*[A-Za-z]|\r", "") }
-    /InternalServerError/ && !/^[[:space:]]*[-+~]?[[:space:]]*"InternalServerError",?[[:space:]]*$/ { found = 1 }
+    /InternalServerError|ManagedEnvironmentOperationFailed/ && !/^[[:space:]]*[-+~]?[[:space:]]*"[A-Za-z]+",?[[:space:]]*$/ { found = 1 }
     END { exit !found }' < <(tail -c +"$(($1 + 1))" "$RAW_LOG")
 }
 PROVISION_RETRY=0
 while [ "$PROVISION_RC" -ne 0 ] && [ "$PROVISION_RETRY" -lt 2 ] \
   && provision_failed_transiently "$PROVISION_LOG_START"; do
   PROVISION_RETRY=$((PROVISION_RETRY + 1))
-  log "Rerun provisioning after a transient Azure InternalServerError (retry $PROVISION_RETRY)"
+  log "Rerun provisioning after a transient Azure internal server error (retry $PROVISION_RETRY)"
   PROVISION_LOG_START="$(wc -c < "$RAW_LOG")"
   run user "azd-provision-retry-$PROVISION_RETRY" azd provision --no-prompt
   PROVISION_RC=$?

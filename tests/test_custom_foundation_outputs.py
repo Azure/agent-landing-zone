@@ -111,7 +111,10 @@ def test_native_model_defaults_match_the_metadata_verifier():
         r"services_model_deployments = var\.deployModelDeployments \? concat\(var\.modelDeploymentList, \[for deployment in "
         r"(\[.*?\]) : deployment if", terraform, re.S,
     )[1]
-    terraform_models = hcl2.loads("locals { models = " + fallback + " }")["locals"][0]["models"]
+    terraform_models = hcl2.loads(
+        "locals { models = " + fallback + " }",
+        serialization_options=hcl2.SerializationOptions(strip_string_quotes=True),
+    )["locals"][0]["models"]
     expected = [
         {"canonical_name": canonical, "name": name,
          "model": {"format": "OpenAI", "name": name, "version": version}}
