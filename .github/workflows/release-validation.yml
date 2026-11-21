@@ -8,7 +8,9 @@ name: Release validation (network isolated)
 # promote job attaches the evidence to the release, amends its notes and makes
 # it the Latest release. "Validated" means the Latest release. Every day the
 # current Latest release is revalidated without promotion, and a failure opens
-# an issue. release-validation-cleanup.yml removes leftovers daily.
+# an issue. release-validation-cleanup.yml removes leftovers daily. When the
+# RELVAL_TEAMS_WEBHOOK_URL secret holds a Teams Workflows webhook URL, every
+# run posts its result to Teams.
 #
 # The GitHub-hosted jobs never reach private endpoints. They sign in with OIDC
 # (no stored secret), start the executor VM in the persistent validation hub,
@@ -289,6 +291,66 @@ jobs:
           latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
           [ "$latest" = "$RELEASE_TAG" ] || { echo "::error::Latest is $latest, expected $RELEASE_TAG"; exit 1; }
           echo "### $RELEASE_TAG validated with Bicep and Terraform and promoted to Latest" >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Notify Teams
+    needs: [prepare, validate, promote]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # per-provider job results
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TEAMS_WEBHOOK_URL: ${{ secrets.RELVAL_TEAMS_WEBHOOK_URL }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      PROMOTE_RESULT: ${{ needs.promote.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Post run result to Teams
+        run: |
+          set -euo pipefail
+          if [ -z "$TEAMS_WEBHOOK_URL" ]; then
+            echo "RELVAL_TEAMS_WEBHOOK_URL is not set, skipping the Teams notification."
+            exit 0
+          fi
+          jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate \
+            --jq '[.jobs[] | select(.name | startswith("Validate ")) | {name, conclusion}]' | jq -s 'add // []')"
+          facts="$(jq -c '[.[] | {title: (.name | capture("\\((?<p>[a-z]+)\\)$").p // .name), value: (.conclusion // "not finished")}]' <<< "$jobs")"
+          case "$VALIDATE_RESULT" in
+            success) headline="passed"; color="Good" ;;
+            cancelled) headline="was cancelled"; color="Warning" ;;
+            *) headline="failed"; color="Attention" ;;
+          esac
+          case "$PROMOTE_RESULT" in
+            success) promotion="Promoted to Latest" ;;
+            skipped) promotion="Not promoted" ;;
+            *) promotion="Promotion $PROMOTE_RESULT" ;;
+          esac
+          trigger="manual run by $GITHUB_ACTOR"
+          [ "$GITHUB_EVENT_NAME" = "schedule" ] && trigger="daily revalidation"
+          jq -n \
+            --arg title "Release validation ${RELEASE_TAG:-unresolved} $headline" \
+            --arg color "$color" --arg trigger "$trigger" --arg promotion "$promotion" \
+            --arg url "$RUN_URL" --argjson facts "$facts" '{
+              type: "message",
+              attachments: [{
+                contentType: "application/vnd.microsoft.card.adaptive",
+                contentUrl: null,
+                content: {
+                  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                  type: "AdaptiveCard", version: "1.4",
+                  body: [
+                    {type: "TextBlock", text: $title, weight: "Bolder", size: "Medium", color: $color, wrap: true},
+                    {type: "TextBlock", text: $trigger, isSubtle: true, spacing: "None", wrap: true},
+                    {type: "FactSet", facts: ($facts + [{title: "Release", value: $promotion}])}
+                  ],
+                  actions: [{type: "Action.OpenUrl", title: "Open run", url: $url}]
+                }
+              }]
+            }' > card.json
+          curl -sS --fail-with-body --retry 3 -H "Content-Type: application/json" -d @card.json "$TEAMS_WEBHOOK_URL" \
+            || echo "::warning::The Teams notification could not be posted."
 
   report-failure:
     name: Open issue for failed scheduled revalidation
