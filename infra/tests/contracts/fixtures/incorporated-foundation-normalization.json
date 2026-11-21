@@ -5567,8 +5567,8 @@
                   {
                     "name": "agent-app-mcp",
                     "repo": "https://github.com/Azure/agent-app-mcp.git",
-                    "tag": "v2.0.2",
-                    "commit": "e9da5d53f7ad6818a4a7ee706a6c85798af2e7ed"
+                    "tag": "v2.0.3",
+                    "commit": "a28e220e0b422650d24f854e5d924e27b3dabeb8"
                   },
                   {
                     "name": "agent-app-ui",

@@ -1,5 +1,13 @@
 # Quickstart: Validation of Native Inline Visual Output
 
+## Current CI reader binding
+
+The loaded application definition, manifest and cross-platform umbrella CI
+bind UI `v3.7.2` at `5b88f57602fba27c880b0c3c97d35259ace35de5`.
+The ordinary deployment-contract jobs exercise this reader on Linux and Windows.
+This binding is not live host acceptance or proof of deployed provider parity.
+The release qualification receipts below remain historical and unchanged.
+
 ## Coordinated v7.3.0 release qualification
 
 The release manifest, bundled application definition, reviewed component pins
