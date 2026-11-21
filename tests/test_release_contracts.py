@@ -29,12 +29,12 @@ class IntegrationPinTests(unittest.TestCase):
             "agent-app-mcp", "agent-app-orchestrator", "agent-app-ingestion", "agent-app-ui",
         }, set(components))
         for name, ref_key, ref, commit in (
-            ("agent-app-mcp", "tag", "v2.0.0",
-             "e462d929ce02a74813feff9288d155098295691c"),
+            ("agent-app-mcp", "tag", "v2.0.3",
+             "a28e220e0b422650d24f854e5d924e27b3dabeb8"),
             ("agent-app-orchestrator", "tag", "v7.2.1",
              "3a95d4c5db841c91fe004839893b0a7a59dc593d"),
             ("agent-app-ingestion", "tag", "v3.1.3", "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1"),
-            ("agent-app-ui", "tag", "v3.7.1", "818a61d5555265d5c86e2758cc8a897bcd057f54"),
+            ("agent-app-ui", "tag", "v3.7.3", "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f"),
         ):
             self.assertNotIn("tag" if ref_key == "branch" else "branch", components[name])
             self.assertEqual((ref, commit), (components[name][ref_key], components[name]["commit"]))

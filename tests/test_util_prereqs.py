@@ -5,7 +5,31 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from azure.mgmt.cognitiveservices.models import MetricName, Usage
+
 from util import prereqs
+
+
+class OpenAiUsageTests(unittest.TestCase):
+    def test_usage_lookup_preserves_sdk_quota_values_and_region(self) -> None:
+        usage = Usage(
+            name=MetricName(value="OpenAI.Standard.gpt-4"),
+            current_value=12, limit=100, unit="Count",
+        )
+        with (
+            patch("azure.mgmt.resource.ResourceManagementClient") as resource,
+            patch("azure.mgmt.cognitiveservices.CognitiveServicesManagementClient") as cognitive,
+        ):
+            resource.return_value.providers.get.return_value.registration_state = "Registered"
+            cognitive.return_value.usages.list.return_value = iter([usage])
+            usages = prereqs.get_openai_usages("East US 2", MagicMock(), "subscription")
+        resource.return_value.providers.register.assert_not_called()
+        cognitive.return_value.usages.list.assert_called_once_with(location="EastUS2")
+        self.assertEqual(usages, [usage])
+        formatted = prereqs.format_usages_console(usages)
+        self.assertIn("OpenAI.Standard.gpt-4", formatted)
+        self.assertIn("12", formatted)
+        self.assertIn("100", formatted)
 
 
 class AzureCliResolutionTests(unittest.TestCase):

@@ -185,12 +185,12 @@ def configure_blocklist(client: CognitiveServicesManagementClient, resource_grou
         # Remove existing items
         for existing in client.rai_blocklist_items.list(resource_group, account_name, bl_name):
             logging.info(f"🗑️ Deleting blocklist item: {existing.name}")
-            client.rai_blocklist_items.delete(
+            client.rai_blocklist_items.begin_delete(
                 resource_group_name=resource_group,
                 account_name=account_name,
                 rai_blocklist_name=bl_name,
                 rai_blocklist_item_name=existing.name
-            )
+            ).result()
         # Re-add items
         for idx, item in enumerate(bl_def.get("blocklistItems", [])):
             pat = item.get("pattern", "") or ""

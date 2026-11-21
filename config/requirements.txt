@@ -9,8 +9,8 @@ azure-mgmt-appcontainers==5.1.0
 
 # aifoundry
 
-azure-mgmt-cognitiveservices==13.6.0
-azure-ai-projects==2.10.0
+azure-mgmt-cognitiveservices==15.0.0
+azure-ai-projects==2.11.0
 
 # search
 
@@ -28,4 +28,4 @@ PyYAML==6.0.3
 
 # native Terraform metadata declaration inspection
 
-python-hcl2==7.3.1
+python-hcl2==8.2.0
