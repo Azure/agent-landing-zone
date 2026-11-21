@@ -5,12 +5,13 @@
 ### Changed
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
-- Updates the Foundry project SDK and pinned GitHub Actions dependencies.
-- Pins the validated patch releases `agent-app-ui` `v3.7.2` and `agent-app-mcp` `v2.0.3`. Orchestrator and ingestion stay on their existing released versions.
+- Updates the Foundry project and Cognitive Services management SDKs and pinned GitHub Actions dependencies.
+- Pins the validated patch releases `agent-app-ui` `v3.7.3` and `agent-app-mcp` `v2.0.3`. Orchestrator and ingestion stay on their existing released versions.
 
 ### Fixed
 
 - Terraform deployment metadata inspection retains its literal non-sensitive output guard and transitive declassification checks with `python-hcl2` `8.2.0`, using the parser's supported backwards-compatible string serialization.
+- Config and prerequisite utilities use the same Cognitive Services SDK version. RAI blocklist item deletion waits for the SDK's long-running operation before updating the blocklist.
 
 ### Migration
 
@@ -21,7 +22,7 @@
 | Component | Version |
 | --- | --- |
 | agent-app-mcp | v2.0.3 |
-| agent-app-ui | v3.7.2 |
+| agent-app-ui | v3.7.3 |
 | agent-app-orchestrator | v7.2.1 |
 | agent-app-ingestion | v3.1.3 |
 | infra / AI Landing Zone | v2.7.3 |
