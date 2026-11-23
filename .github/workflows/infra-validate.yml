@@ -99,7 +99,7 @@ jobs:
         with:
           repository: Azure/agent-app-ui
           # Published reader matched to manifest.json and app-definition.json.
-          ref: b5e2462adb047c4e91110a87580d2c97a0d94b84
+          ref: ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f
           path: .ci/inline-visual-ui
           sparse-checkout: src
           persist-credentials: false

@@ -8,7 +8,7 @@
       "name": "mcp",
       "kind": "containerapp",
       "path": "mcp",
-      "source": { "commit": "e462d929ce02a74813feff9288d155098295691c" },
+      "source": { "commit": "a28e220e0b422650d24f854e5d924e27b3dabeb8" },
       "profiles": [],
       "egress": [
         {
@@ -24,7 +24,7 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "818a61d5555265d5c86e2758cc8a897bcd057f54" },
+      "source": { "commit": "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f" },
       "profiles": ["blob-delegator", "retrieval-reader"],
       "egress": [],
       "ingress": "external"
@@ -33,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "3a95d4c5db841c91fe004839893b0a7a59dc593d" },
+      "source": { "commit": "6e7bba6aa4fd774ec544ab54b458206da77e256a" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {
