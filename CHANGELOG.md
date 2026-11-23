@@ -1,5 +1,21 @@
 # Changelog
 
+## [v7.5.18] - 2026-11-23
+
+### Changed
+
+- Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.3 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.17] - 2026-11-21
 
 ### Changed
