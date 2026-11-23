@@ -5,6 +5,9 @@ description: Prepares and validates Agent Landing Zone umbrella and multi-reposi
 
 # Agent Landing Zone multi-repository release
 
+For an `Azure/agent-landing-zone` umbrella release, the exact candidate must pass its required CI and applicable unit, integration, quality, security, contract, and compatibility checks before the pre-release is published. The standard live Azure validation is not a pre-release publication gate. After publication, dispatch `.github/workflows/release-validation.yml` with both providers and promotion enabled. Only that workflow may promote the release to Latest, after both Bicep and Terraform pass. Component-specific publication, validation, compatibility, rollback, and human approval requirements remain in force.
+
+
 Read `.github/copilot-instructions.md` completely before changing a release
 artifact. Its branching, versioning, changelog, and release-note requirements
 are authoritative.
@@ -25,9 +28,11 @@ are authoritative.
    `infra.source` equal to the AI Landing Zone release the in-repository
    `infra/` was incorporated from, and validate the exact `infra/` tree being
    released.
-5. Confirm that the exact pinned combination was validated and record the
-   relevant commands and Azure deployment mode without private environment or
-   resource group names.
+5. Verify the exact candidate passes required CI and applicable unit,
+   integration, quality, security, contract, and compatibility checks.
+   Record the evidence without private environment or resource group names.
+   The live Azure standard scenario is validated after pre-release
+   publication, before promotion to Latest.
 6. Replace `[Unreleased]` with `## [vX.Y.Z] - YYYY-MM-DD` for the release.
 7. Keep `CHANGELOG.md` and GitHub Release notes consistent, including the full
    required component version table.
