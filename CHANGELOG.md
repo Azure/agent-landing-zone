@@ -1,19 +1,28 @@
 # Changelog
 
-## [v7.5.18] - 2026-11-23
+## [v7.5.19] - 2026-11-23
 
 ### Changed
 
 - Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+- Pins `agent-app-mcp` to published `v2.0.4`. This updates release guidance only and does not change MCP runtime behavior.
+
+### Fixed
+
+- Pins `agent-app-ingestion` to published `v3.1.5`, including its validated dependency updates, the `pypdf` patch, and a fix for valid single-line App Configuration values in shell deployments.
+
+### Migration
+
+- No API, index, ACL, or audit contract changes. No migration or reindexing is required. For rollback, restore `v7.5.16` and its component pins.
 
 ### Validation
 
 | Component | Version |
 | --- | --- |
-| agent-app-mcp | v2.0.3 |
+| agent-app-mcp | v2.0.4 |
 | agent-app-ui | v3.7.3 |
 | agent-app-orchestrator | v7.2.2 |
-| agent-app-ingestion | v3.1.3 |
+| agent-app-ingestion | v3.1.5 |
 | infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.17] - 2026-11-21

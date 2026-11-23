@@ -8,7 +8,7 @@
       "name": "mcp",
       "kind": "containerapp",
       "path": "mcp",
-      "source": { "commit": "a28e220e0b422650d24f854e5d924e27b3dabeb8" },
+      "source": { "commit": "f53284b8d324dd005ae2ad58c4144779cd6bfcbd" },
       "profiles": [],
       "egress": [
         {
@@ -49,7 +49,7 @@
       "name": "ingestion",
       "kind": "containerapp",
       "path": "ingestion",
-      "source": { "commit": "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1" },
+      "source": { "commit": "8419868af6c194df3c73554fd4dcaf27eb0b02b5" },
       "profiles": ["model-user", "conversation-store", "ingestion-writer"],
       "egress": [
         {
