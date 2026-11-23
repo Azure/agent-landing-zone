@@ -10,6 +10,7 @@
 ### Fixed
 
 - Pins `agent-app-ingestion` to published `v3.1.5`, including its validated dependency updates, the `pypdf` patch, and a fix for valid single-line App Configuration values in shell deployments.
+- Pins `agent-app-orchestrator` to published `v7.2.3`, including updated frontend build dependencies and release validation guidance. No runtime, API, authentication, configuration, or data migration changes.
 
 ### Migration
 
@@ -21,7 +22,7 @@
 | --- | --- |
 | agent-app-mcp | v2.0.4 |
 | agent-app-ui | v3.7.3 |
-| agent-app-orchestrator | v7.2.2 |
+| agent-app-orchestrator | v7.2.3 |
 | agent-app-ingestion | v3.1.5 |
 | infra / AI Landing Zone | v2.7.3 |
 

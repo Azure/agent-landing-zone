@@ -31,8 +31,8 @@ class IntegrationPinTests(unittest.TestCase):
         for name, ref_key, ref, commit in (
             ("agent-app-mcp", "tag", "v2.0.4",
              "f53284b8d324dd005ae2ad58c4144779cd6bfcbd"),
-            ("agent-app-orchestrator", "tag", "v7.2.2",
-             "6e7bba6aa4fd774ec544ab54b458206da77e256a"),
+            ("agent-app-orchestrator", "tag", "v7.2.3",
+             "6aa650a3f2787b902ca33af3483486c405904458"),
             ("agent-app-ingestion", "tag", "v3.1.5", "8419868af6c194df3c73554fd4dcaf27eb0b02b5"),
             ("agent-app-ui", "tag", "v3.7.3", "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f"),
         ):

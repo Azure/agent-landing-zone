@@ -5579,8 +5579,8 @@
                   {
                     "name": "agent-app-orchestrator",
                     "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-                    "tag": "v7.2.2",
-                    "commit": "6e7bba6aa4fd774ec544ab54b458206da77e256a"
+                    "tag": "v7.2.3",
+                    "commit": "6aa650a3f2787b902ca33af3483486c405904458"
                   },
                   {
                     "name": "agent-app-ingestion",
