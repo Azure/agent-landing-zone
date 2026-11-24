@@ -128,7 +128,7 @@ Documentation existence is not a tested guarantee for inline SVG or embedded int
 - `config/deployment/appconfig_intent.py`.
 - `config/deployment/appconfig_ownership.json`.
 - `tests/test_app_settings_resolution.py`.
-- `.github/workflows/infra-validate.yml`.
+- `.github/workflows/quality-gate.yml`.
 
 **Selected contract**: `AGENT_PRESENTATION_SETTINGS`, compact JSON in `text/plain`, label `agent-lz`, absent/empty-map default off. This is owner-edited ordinary configuration with explicit `json_object` validation, not generated `controlled` authority. Current merge/publisher protections would reject arbitrary controlled opt-in values. [configuration.md](contracts/configuration.md) defines the shared validation/metadata/reconciliation path.
 

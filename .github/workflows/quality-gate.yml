@@ -1,0 +1,167 @@
+name: Quality gate
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform-contracts:
+    name: terraform contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.13.0
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize without Azure state
+        run: terraform init -backend=false -lockfile=readonly
+
+      - name: Validate composition
+        run: terraform validate
+
+      - name: Test deployment contracts
+        run: terraform test
+
+  deployment-contracts:
+    name: deployment and hook contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out matched presentation reader
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Azure/agent-app-ui
+          # Published reader matched to manifest.json and app-definition.json.
+          ref: b5e2462adb047c4e91110a87580d2c97a0d94b84
+          path: .ci/inline-visual-ui
+          sparse-checkout: src
+          persist-credentials: false
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check pytest click tabulate -r config/requirements.txt -r util/requirements.txt
+
+      - name: Prepare Bicep contract dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version v0.42.1
+          az bicep restore --file infra/bicep/main.bicep
+          echo "${AZURE_CONFIG_DIR:-$HOME/.azure}/bin" >> "$GITHUB_PATH"
+
+      - name: Test deployment contracts
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.ci/inline-visual-ui/src
+        run: python -m pytest tests --quiet
+
+  build-and-lint:
+    name: bicep build + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Bicep CLI
+        run: |
+          set -euo pipefail
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version v0.42.1
+          az bicep version
+
+      - name: Build infra/bicep/main.bicep
+        run: az bicep build --file infra/bicep/main.bicep --outfile "$RUNNER_TEMP/main.json"
+
+      - name: Lint infra/bicep/main.bicep
+        run: az bicep lint --file infra/bicep/main.bicep --diagnostics-format sarif > "$RUNNER_TEMP/bicep-lint.sarif"
+
+      - name: Validate compiled foundation and deployment contracts
+        shell: pwsh
+        run: ./infra/tests/Invoke-OfflineContracts.ps1
+
+      - name: Upload build and lint output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: infra-build-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/main.json
+            ${{ runner.temp }}/bicep-lint.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+  agentic-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install validator dependencies
+        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements.txt
+      - name: Validate agents, skills, and scoped instructions
+        run: python .github/scripts/validate-agentic-assets.py
+
+  quality-gate:
+    name: quality-gate
+    if: always()
+    needs: [terraform-contracts, deployment-contracts, build-and-lint, agentic-assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every prerequisite to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          expected = {"terraform-contracts", "deployment-contracts", "build-and-lint", "agentic-assets"}
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = sorted(name for name in expected if needs.get(name, {}).get("result") != "success")
+          if failed or set(needs) != expected:
+              print(f"::error::Required checks did not all succeed: {failed}; received {sorted(needs)}")
+              sys.exit(1)
+          print("All required checks passed.")
+          PY

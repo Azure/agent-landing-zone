@@ -21,7 +21,11 @@ check fails. Unique compiler/runtime scratch directories are cleaned in
 `finally`. No Azure credentials, evaluation, what-if, deployment or writes are
 required. Bicep registry dependencies must already be available for offline
 compilation. Active CI is root
-[`infra-validate.yml`](../../.github/workflows/infra-validate.yml).
+[`quality-gate.yml`](../../.github/workflows/quality-gate.yml).
+It runs both providers' offline contracts without Azure authentication.
+The optional OIDC what-if comparison is a separate, manual
+[`infra-what-if.yml`](../../.github/workflows/infra-what-if.yml) workflow and is
+not a merge prerequisite.
 
 ## What remains covered
 

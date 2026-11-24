@@ -67,11 +67,11 @@ def test_duplicate_keys_are_not_valid_contract_input():
 
 def test_ci_qualifies_the_matched_reader_on_both_platforms():
     workflow = yaml.load(
-        (ROOT / ".github/workflows/infra-validate.yml").read_text(encoding="utf-8"),
+        (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
     for event in ("pull_request", "push"):
-        assert "contracts/**" in workflow["on"][event]["paths"]
+        assert "paths" not in workflow["on"][event]
     job = workflow["jobs"]["deployment-contracts"]
     assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "windows-latest"]
     reader, = (
