@@ -935,7 +935,7 @@ Existing available-backend wheel/hash evidence below is not declared-backend
 or declared Chainlit-version qualification; those residual blockers are not
 silently promoted by this infrastructure restoration.
 
-ALZ `.github/workflows/infra-validate.yml` pins Terraform 1.13.0 and Bicep
+ALZ `.github/workflows/quality-gate.yml` pins Terraform 1.13.0 and Bicep
 0.42.1; it runs fmt, readonly/backend-disabled init, validate, tests, pytest,
 Bicep build/lint and `infra/tests/Invoke-OfflineContracts.ps1`. Its Azure-CLI
 compiler installation and what-if lanes were **not** executed locally.
@@ -1266,7 +1266,7 @@ python -m pytest tests\test_app_settings_resolution.py tests\test_appconfig_inte
 pwsh -NoProfile -File .\infra\tests\Invoke-OfflineContracts.ps1
 ```
 
-The existing `.github\workflows\infra-validate.yml` also runs `python -m pytest tests --quiet` on Windows/Linux and pinned Bicep restore/build/lint. Use that workflow for its real Bicep/provider prerequisites rather than inventing a new script.
+The existing `.github\workflows\quality-gate.yml` also runs `python -m pytest tests --quiet` on Windows/Linux and pinned Bicep restore/build/lint. Use that workflow for its real Bicep/provider prerequisites rather than inventing a new script.
 
 From `infra\terraform`:
 

@@ -109,7 +109,7 @@ terraform validate
 terraform test
 ```
 
-The existing `.github/workflows/infra-validate.yml` also runs Bicep build/lint and the full umbrella pytest suite on Windows/Linux. Preserve its explicit tool/module pins. Follow its platform-appropriate commands instead of assuming Windows PowerShell exercises shell hooks.
+The existing `.github/workflows/quality-gate.yml` also runs Bicep build/lint and the full umbrella pytest suite on Windows/Linux. Preserve its explicit tool/module pins. Follow its platform-appropriate commands instead of assuming Windows PowerShell exercises shell hooks.
 
 Exact component CI commands and environment prerequisites are now recorded in [quickstart.md](quickstart.md) from pinned source inspection. They cover existing regressions. Future feature acceptance scenarios are not represented as already existing test commands.
 

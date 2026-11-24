@@ -9,7 +9,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $sizeGate = Join-Path $repoRoot 'scripts\infra\Measure-MainJsonSize.ps1'
-$workflow = Join-Path $repoRoot '.github\workflows\infra-validate.yml'
+$workflow = Join-Path $repoRoot '.github\workflows\quality-gate.yml'
 $mainJson = Join-Path $repoRoot 'infra\bicep\main.json'
 $originalBytes = if (Test-Path $mainJson) {
     [System.IO.File]::ReadAllBytes($mainJson)
