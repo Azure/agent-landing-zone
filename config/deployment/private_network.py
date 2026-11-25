@@ -145,6 +145,7 @@ def check_endpoint(key: str, endpoint: str) -> None:
 
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         for address in addresses:
             timeout = remaining()
             # Numeric AF_INET connects cannot re-resolve DNS. Keep the original
