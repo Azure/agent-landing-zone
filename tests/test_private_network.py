@@ -210,6 +210,7 @@ class EndpointTests(unittest.TestCase):
             self.assertGreater(item.args[0], 0)
             self.assertLessEqual(item.args[0], 20)
         self.context.assert_called_once_with()
+        self.assertEqual(ssl.TLSVersion.TLSv1_2, self.context.return_value.minimum_version)
         self.context.return_value.wrap_socket.assert_called_once_with(
             self.raw_socket, server_hostname="config.azconfig.io"
         )
