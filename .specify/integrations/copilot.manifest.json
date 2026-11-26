@@ -1,17 +1,16 @@
 {
   "integration": "copilot",
-  "version": "0.16.5",
-  "installed_at": "2026-09-06T13:22:56.568157+00:00",
+  "version": "1.4.5",
+  "installed_at": "2026-11-26T14:11:36.770228+00:00",
   "files": {
-    ".github/skills/speckit-analyze/SKILL.md": "94700bef1cea3440f0ab989ef3a8bd70b37b6bee9b2e005a8e81d925ed2ed150",
-    ".github/skills/speckit-clarify/SKILL.md": "062cc3e3294a72f3415de7f767af8a299bfdf3077517963d9266e6bdb30c2bd6",
-    ".github/skills/speckit-constitution/SKILL.md": "c4697b38908964a5a7714ee7b8089e4f830d749905594821a89cb7665beb3929",
-    ".github/skills/speckit-implement/SKILL.md": "1353010d100a50debe1634943b94e86c81cdd0ccdc9e90993133755e4d4ee27f",
-    ".github/skills/speckit-converge/SKILL.md": "4ad9e48c91fabe06a97c1e94de5d19d12f346c91cfd40d5b34cba58e7617d819",
-    ".github/skills/speckit-plan/SKILL.md": "e4a78e5f356fd18ab8081f3d84222ee2304910d540bda0e84c4fd73a8c09220c",
-    ".github/skills/speckit-checklist/SKILL.md": "9a84c5d047ff4eceaa808868f451556507f76543630cb61ff90809b8fb3d6f86",
-    ".github/skills/speckit-specify/SKILL.md": "d0b83970b14be40bd1dcd5d3c15f3186c37ebebbe4617dda7e8d487763b70f79",
-    ".github/skills/speckit-tasks/SKILL.md": "b6e3808c91e9008608e377372f7a7c3cfeb077f77d5877167a8b176cae3ba138",
-    ".github/skills/speckit-taskstoissues/SKILL.md": "9ba460799fe66cffc151eaf8c7cc9aee95b8f4dd25988d5b8fc2ad01cdd7b4c4"
+    ".github/skills/speckit-analyze/SKILL.md": "d0d9bcf3a533c3c62f70eb18b89fa0f254e3de3235583946755581dd3addbde5",
+    ".github/skills/speckit-clarify/SKILL.md": "413a12d06ce74e8c0984ac669f223d9e7a46aca342cc12a3812b695cee5474ce",
+    ".github/skills/speckit-constitution/SKILL.md": "3fffb5e9635a46666392ce454e0a2fcb5fcea1d31f1614269099a489c990b1ed",
+    ".github/skills/speckit-implement/SKILL.md": "1106eedf9e380ca62e4d1dc4ee8ba9c4a77eb3a65d6678482e584a182f0eb7d6",
+    ".github/skills/speckit-converge/SKILL.md": "4961ee4b80294979986a942c9d9073ee23099a843391b3c60d12e7e4e799da81",
+    ".github/skills/speckit-plan/SKILL.md": "795dcd75712d99e2a7af4455d71fbe998482e1b330c6f1762288875dd3bddb58",
+    ".github/skills/speckit-checklist/SKILL.md": "1664843c69778c9918b789f334dfb3212ef38e3af749ac4bd83e57b62c83ac91",
+    ".github/skills/speckit-specify/SKILL.md": "fac3b26db0cbd8304d362f0fab7caae0d2198c975fcde178fdba74e44f75bab5",
+    ".github/skills/speckit-tasks/SKILL.md": "bbfc2633b324edbe201834ad25887d740aff8575c28fe0dd61b99a8570f28474"
   }
 }
