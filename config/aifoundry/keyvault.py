@@ -1,4 +1,3 @@
-import os
 from azure.identity import ChainedTokenCredential, ManagedIdentityCredential, AzureCliCredential
 from azure.keyvault.secrets import SecretClient
 from azure.core.exceptions import AzureError

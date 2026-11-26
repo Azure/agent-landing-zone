@@ -338,7 +338,7 @@ def test_server_gets_only_two_reader_containers_models_and_declared_secrets():
         AI_FOUNDRY_ACCOUNT_RESOURCE_ID=model,
     )
     with (
-        patch.object(mcp, "_config_value", side_effect=AssertionError("store discovery")),
+        patch.object(mcp, "_config_value", side_effect=AssertionError("store discovery"), create=True),
         patch.object(mcp, "ensure_cosmos_sql_role_assignment") as grant,
         patch.object(mcp, "_ensure_rbac") as rbac,
         patch.object(mcp, "grant_secrets") as secrets,
@@ -638,7 +638,7 @@ def test_empty_server_preparation_never_discovers_or_grants_sql_dependencies():
         patch.object(mcp, "stored", return_value=""),
         patch.object(mcp, "registry_resource_group"),
         patch.object(mcp, "ensure_api", return_value={}),
-        patch.object(mcp, "_config_value") as discover,
+        patch.object(mcp, "_config_value", create=True) as discover,
         patch.object(mcp, "grant_catalog") as grant,
         patch.object(mcp, "publish_settings"),
         patch.object(mcp, "persist"),

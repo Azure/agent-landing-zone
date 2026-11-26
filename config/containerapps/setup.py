@@ -19,7 +19,6 @@ from azure.identity import (
     AzureCliCredential,
     ChainedTokenCredential
 )
-from azure.appconfiguration import AzureAppConfigurationClient
 from config.deployment.setup_settings import load_setup_settings
 from azure.mgmt.appcontainers import ContainerAppsAPIClient
 from azure.core.exceptions import ResourceNotFoundError
@@ -115,7 +114,7 @@ def get_credentials():
         )
 
         # Test the credential
-        token = credential.get_token("https://management.azure.com/.default")
+        credential.get_token("https://management.azure.com/.default")
         logging.info("✅ ChainedTokenCredential validated successfully")
         return credential
         
@@ -148,6 +147,7 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
             else:
                 logging.warning(f"Attempt {attempt + 1}/{max_retries} failed for '{key}': {e}. Retrying...")
                 time.sleep(2)
+    return None
 
 
 def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential,

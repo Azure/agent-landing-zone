@@ -294,9 +294,11 @@ def test_shell_hook_propagates_guard_failure(tmp_path):
     completed = subprocess.run(
         [
             bash, "-c",
-            'if command -v cygpath >/dev/null 2>&1; then '
-            'GUARD_BIN="$(cygpath -u "$GUARD_BIN")"; fi; '
-            'export PATH="$GUARD_BIN:$PATH"; bash scripts/preDown.sh',
+            (
+                'if command -v cygpath >/dev/null 2>&1; then ' +
+                'GUARD_BIN="$(cygpath -u "$GUARD_BIN")"; fi; ' +
+                'export PATH="$GUARD_BIN:$PATH"; bash scripts/preDown.sh'
+            ),
         ],
         cwd=root, env=environment, capture_output=True,
     )

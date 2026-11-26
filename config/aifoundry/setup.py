@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
-from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
+from azure.core.exceptions import ResourceNotFoundError
 from azure.appconfiguration import AzureAppConfigurationClient
 from config.deployment.setup_settings import load_setup_settings
 from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
