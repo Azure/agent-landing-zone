@@ -470,10 +470,11 @@ def test_invalid_inputs_fail_explicitly(name, value, match):
 def test_hosted_guards_and_custom_apps_and_images_remain_common():
     with pytest.raises(ValueError, match="HOSTED_AGENT_RESOURCE_SCOPE"):
         compose_inputs(values(), {**ENVIRONMENT, "ORCHESTRATION_HOST": "hosted"})
+    existing = "example.azurecr.io/web@sha256:" + "a" * 64
     result = compose_inputs(values(), {
         **ENVIRONMENT, "AGENTLZ_APP_DEFINITION": "samples/custom-app/containerapp",
-    }, existing_images={"web": "example.azurecr.io/web@sha256:" + "a" * 64})
-    assert next(app for app in result["containerAppsList"] if app["service_name"] == "web")["image"].startswith("example.azurecr.io/")
+    }, existing_images={"web": existing})
+    assert [app["image"] for app in result["containerAppsList"] if app["service_name"] == "web"] == [existing]
 
 
 def test_group_ownership_is_explicit_and_bound_to_selected_destinations():

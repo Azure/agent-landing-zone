@@ -1,6 +1,7 @@
 """Native foundation provider contracts. Static/compiled evidence, not Azure parity."""
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -76,9 +77,30 @@ def test_terraform_real_scheduler_hub_mi_and_ingress_counterpart():
 def test_private_scheduler_contract_both_providers_and_no_new_execution_store():
     bicep = (ROOT / "infra/bicep/main.bicep").read_text()
     terraform = (ROOT / "infra/terraform/main.networking.tf").read_text()
+    # Both providers create the zone only for a selected scheduler without a
+    # BYO zone and bind the endpoint to the BYO zone when one is supplied.
+    assert re.search(
+        r"\(deployDurableTaskScheduler && empty\(existingPrivateDnsZoneDurableTaskResourceId\)\) \? \[\s*"
+        r"\{ dnsName: 'privatelink\.durabletask\.io',",
+        bicep,
+    )
+    assert re.search(
+        r"privateDnsZoneResourceId: !empty\(existingPrivateDnsZoneDurableTaskResourceId\) \? "
+        r"existingPrivateDnsZoneDurableTaskResourceId : resourceId\([^)]*"
+        r"'Microsoft\.Network/privateDnsZones', 'privatelink\.durabletask\.io'\)",
+        bicep,
+    )
+    assert re.search(
+        r'DurableTask\s*=\s*\{ name = "privatelink\.durabletask\.io", link = "durabletask", '
+        r"byo = var\.existingPrivateDnsZoneDurableTaskResourceId, enabled = var\.deployDurableTaskScheduler \}",
+        terraform,
+    )
+    assert re.search(
+        r'connection = "durableTaskConnection", subnet = "applicationPe", groups = \["scheduler"\], '
+        r'zones = \["DurableTask"\]',
+        terraform,
+    )
     for text in (bicep, terraform):
-        assert "privatelink.durabletask.io" in text
-        assert "existingPrivateDnsZoneDurableTaskResourceId" in text
         assert "durableTaskConnection" in text
         assert "'scheduler'" in text or '["scheduler"]' in text
     module = (ROOT / "infra/bicep/modules/application/durable-task.bicep").read_text()

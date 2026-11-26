@@ -49,6 +49,12 @@ def configure_logging():
     ):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+
+def redact(error: Exception, value: str) -> str:
+    """Return the error message with every occurrence of ``value`` replaced."""
+    message = str(error)
+    return message.replace(value, "[REDACTED]") if value else message
+
 # ── Environment Validation ────────────────────────────
 def check_env() -> None:
     missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
@@ -141,7 +147,11 @@ def add_ai_foundry_account_api_key_to_key_vault(
     vault_uri: str,
     secret_name: str
 ) -> bool:
-    """Store an evaluation API key only when the account allows local authentication."""
+    """Store an evaluation API key only when the account allows local authentication.
+
+    Logs identify the account and vault, never the key value or its vault entry.
+    """
+    api_key = ""
     try:
         account = mgmt_client.accounts.get(resource_group, account_name)
         if account.properties.disable_local_auth is True:
@@ -158,13 +168,16 @@ def add_ai_foundry_account_api_key_to_key_vault(
         api_key = keys.key1
         if not api_key:
             raise ValueError("The Foundry account returned an empty evaluation API key.")
-        logging.info("🔒 Storing API key in Key Vault at %s ...", vault_uri)
+        logging.info("🔒 Storing evaluation API key in Key Vault at %s ...", vault_uri)
         kv_client = KeyVaultClient(vault_uri)
         kv_client.set_secret(secret_name, api_key)
-        logging.info("✅ Secret %s set successfully in Key Vault.", secret_name)
+        logging.info("✅ Evaluation API key stored in Key Vault at %s.", vault_uri)
         return True
     except Exception as e:
-        logging.error("❗️ Failed to set secret in Key Vault: %s", e)
+        logging.error(
+            "❗️ Failed to store evaluation API key in Key Vault: %s",
+            redact(e, api_key),
+        )
         sys.exit(1)
 
 # ── Blocklist Logic ──────────────────────────────────
