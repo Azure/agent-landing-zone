@@ -126,12 +126,26 @@ class FoundryEvaluationKeyTests(unittest.TestCase):
         self.vault.assert_not_called()
 
     def test_enabled_local_auth_preserves_key_injection(self):
-        self.assertTrue(self.inject())
+        with self.assertLogs(level="INFO") as logs:
+            self.assertTrue(self.inject())
         self.client.accounts.get.assert_called_once_with("test-group", "test-foundry")
         self.client.accounts.list_keys.assert_called_once_with("test-group", "test-foundry")
         self.vault.return_value.set_secret.assert_called_once_with(
             "evaluationsModelApiKey", "test-key"
         )
+        output = "\n".join(logs.output)
+        self.assertIn("Evaluation API key stored in Key Vault", output)
+        self.assertNotIn("test-key", output)
+
+    def test_failure_messages_never_echo_the_key_value(self):
+        self.vault.return_value.set_secret.side_effect = RuntimeError(
+            "vault rejected value test-key for test-key"
+        )
+        with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit):
+            self.inject()
+        output = "\n".join(logs.output)
+        self.assertNotIn("test-key", output)
+        self.assertIn("vault rejected value [REDACTED] for [REDACTED]", output)
 
     def test_read_and_write_failures_are_not_reported_as_success(self):
         for boundary in (
