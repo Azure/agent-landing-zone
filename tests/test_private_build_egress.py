@@ -104,7 +104,7 @@ def test_build_gate_matrix_preserves_extras_and_filters_empty_rules(pool, extens
 def test_microsoft_os_packages_already_allowed_without_duplicate():
     source = _source()
     assert source.count("'packages.microsoft.com'") == 1
-    assert "packages.microsoft.com" in _array(source, "_firewallAcrTaskOsPackageFqdns")
+    assert _array(source, "_firewallAcrTaskOsPackageFqdns").count("packages.microsoft.com") == 1
     assert "packages.microsoft.com" not in _array(source, FEED_ARRAY)
     rule = _rule(source, "AllowAcrTaskOsPackages")
     assert "sourceAddresses: [devopsBuildAgentsSubnetPrefix]" in rule
