@@ -23,9 +23,6 @@ required. Bicep registry dependencies must already be available for offline
 compilation. Active CI is root
 [`quality-gate.yml`](../../.github/workflows/quality-gate.yml).
 It runs both providers' offline contracts without Azure authentication.
-The optional OIDC what-if comparison is a separate, manual
-[`infra-what-if.yml`](../../.github/workflows/infra-what-if.yml) workflow and is
-not a merge prerequisite.
 
 ## What remains covered
 

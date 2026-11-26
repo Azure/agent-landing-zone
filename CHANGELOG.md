@@ -1,11 +1,74 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.19] - 2026-11-23
+
+### Changed
+
+- Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+- Pins `agent-app-mcp` to published `v2.0.4`. This updates release guidance only and does not change MCP runtime behavior.
+
+### Fixed
+
+- Pins `agent-app-ingestion` to published `v3.1.5`, including its validated dependency updates, the `pypdf` patch, and a fix for valid single-line App Configuration values in shell deployments.
+- Pins `agent-app-orchestrator` to published `v7.2.3`, including updated frontend build dependencies and release validation guidance. No runtime, API, authentication, configuration, or data migration changes.
+
+### Migration
+
+- No API, index, ACL, or audit contract changes. No migration or reindexing is required. For rollback, restore `v7.5.16` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.4 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.3 |
+| agent-app-ingestion | v3.1.5 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.18] - 2026-11-23
+
+### Changed
+
+- Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.3 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.17] - 2026-11-21
 
 ### Changed
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
 - Release validation posts the result of every run to Teams when the `RELVAL_TEAMS_WEBHOOK_URL` repository secret holds a Teams Workflows webhook URL. The card shows the release, the result per provider, whether the release was promoted and a link to the run. Without the secret the step is skipped. Maintainer tooling only, no product change.
+- Updates the Foundry project and Cognitive Services management SDKs and pinned GitHub Actions dependencies.
+- Pins the published dependency patch releases `agent-app-ui` `v3.7.3`, `agent-app-mcp` `v2.0.3` and `agent-app-orchestrator` `v7.2.2`. Ingestion remains unchanged at `v3.1.3`; this release does not include the subsequent chunk-identifier migration or parent-deletion correction.
+
+### Fixed
+
+- Terraform deployment metadata inspection retains its literal non-sensitive output guard and transitive declassification checks with `python-hcl2` `8.2.0`, using the parser's supported backwards-compatible string serialization.
+- Config and prerequisite utilities use the same Cognitive Services SDK version. RAI blocklist item deletion waits for the SDK's long-running operation before updating the blocklist.
+
+### Migration
+
+- No deployment parameter or runtime configuration changes. For rollback, restore `v7.5.16` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.3 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.16] - 2026-11-19
 

@@ -8,7 +8,7 @@
       "name": "mcp",
       "kind": "containerapp",
       "path": "mcp",
-      "source": { "commit": "e462d929ce02a74813feff9288d155098295691c" },
+      "source": { "commit": "f53284b8d324dd005ae2ad58c4144779cd6bfcbd" },
       "profiles": [],
       "egress": [
         {
@@ -24,7 +24,7 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "818a61d5555265d5c86e2758cc8a897bcd057f54" },
+      "source": { "commit": "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f" },
       "profiles": ["blob-delegator", "retrieval-reader"],
       "egress": [],
       "ingress": "external"
@@ -33,7 +33,7 @@
       "name": "orchestrator",
       "kind": "containerapp",
       "path": "orchestrator",
-      "source": { "commit": "3a95d4c5db841c91fe004839893b0a7a59dc593d" },
+      "source": { "commit": "6aa650a3f2787b902ca33af3483486c405904458" },
       "profiles": ["model-user", "retrieval-reader"],
       "egress": [
         {
@@ -49,7 +49,7 @@
       "name": "ingestion",
       "kind": "containerapp",
       "path": "ingestion",
-      "source": { "commit": "d7f34eb040cc308ce18d0d95ee9c9cb0f07028b1" },
+      "source": { "commit": "8419868af6c194df3c73554fd4dcaf27eb0b02b5" },
       "profiles": ["model-user", "conversation-store", "ingestion-writer"],
       "egress": [
         {
