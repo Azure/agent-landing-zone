@@ -246,7 +246,7 @@ def main() -> str | None:
         if app_config_client is not None:
             seed_governance_settings(app_config_client, intent)
         logging.info("Audit is disabled and no Key Vault is selected.")
-        return
+        return None
 
     vault_uri = resolve_vault_uri(settings)
     if settings.get("AUDIT_HMAC_KEY_URI", audit_hmac_key_uri(vault_uri)) != audit_hmac_key_uri(vault_uri):

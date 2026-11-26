@@ -1,6 +1,7 @@
 """Provider-aware ownership classification must never pre-create TF groups."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -38,7 +39,8 @@ def test_fresh_groups_are_owned_existing_destinations_stay_byo_and_retry_is_stic
     ):
         result = prepare_groups(ENVIRONMENT, azure, "fixture")
     path = result["ownershipFile"]
-    assert json.loads(open(path, encoding="utf-8").read()) == {
+    ownership = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert ownership == {
         "managedResourceGroupNames": ["rg-fixture-app", "rg-fixture-network"],
     }
     assert groups.read_binding(azure, "fixture").foundry == "rg-fixture"
@@ -48,8 +50,10 @@ def test_fresh_groups_are_owned_existing_destinations_stay_byo_and_retry_is_stic
         patch.object(groups, "_exists", return_value=True),
         patch.object(groups, "_legacy_deployed", side_effect=AssertionError("No reclassification")),
     ):
-        assert prepare_groups(ENVIRONMENT, azure, "fixture")["ownershipFile"] == path
-    assert json.loads(open(path, encoding="utf-8").read())["managedResourceGroupNames"] == [
+        retry = prepare_groups(ENVIRONMENT, azure, "fixture")
+        assert retry["ownershipFile"] == path
+    ownership = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert ownership["managedResourceGroupNames"] == [
         "rg-fixture-app", "rg-fixture-network",
     ]
 

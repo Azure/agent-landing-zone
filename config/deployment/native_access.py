@@ -16,8 +16,6 @@ from config.deployment.context import bound_resource_id
 from config.deployment.hosted_access import (
     KV_REFERENCE, Role, _endpoint, _setting, run_az,
 )
-from config.deployment.resource_groups import resource_group_for
-from config.panel.setup import resolve_container_app_principal_id
 
 
 def secret_names(environment: Mapping[str, str], keys: tuple[str, ...], *, run=run_az) -> tuple[str, ...]:

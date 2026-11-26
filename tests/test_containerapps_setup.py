@@ -25,7 +25,7 @@ def test_selected_apps_are_actually_configured_without_store_discovery(mode):
     with (
         patch.object(setup, "load_setup_settings", return_value=settings, create=True),
         patch.object(setup, "get_credentials", return_value="credential"),
-        patch.object(setup, "AzureAppConfigurationClient") as store,
+        patch.object(setup, "AzureAppConfigurationClient", create=True) as store,
         patch.object(setup, "update_single_container_app",
                      return_value=("mapped-worker", True, "ok")) as update,
     ):

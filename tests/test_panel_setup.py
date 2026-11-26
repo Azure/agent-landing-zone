@@ -20,7 +20,7 @@ class PanelPublishedDatabaseTests(unittest.TestCase):
             "DATABASE_NAME": "test-database",
             "FRONTEND_APP_NAME": "mapped-frontend",
         }
-        loader = patch.object(setup_settings, "load_setup_settings", side_effect=lambda env: dict(env))
+        loader = patch.object(setup_settings, "load_setup_settings", side_effect=dict)
         loader.start()
         self.addCleanup(loader.stop)
 

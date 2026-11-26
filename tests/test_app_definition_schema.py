@@ -322,7 +322,7 @@ class CapabilityProfileTests(unittest.TestCase):
     def test_base_is_implicit_and_assignments_are_deduplicated(self) -> None:
         assignments = expand_profiles(["retrieval-reader", "blob-delegator"])
         self.assertEqual(len(assignments), len(set(assignments)))
-        self.assertTrue(self.EXPECTED["base"] <= {a.role for a in assignments})
+        self.assertLessEqual(self.EXPECTED["base"], {a.role for a in assignments})
 
     def test_unknown_profile_fails(self) -> None:
         with self.assertRaises(ValueError):

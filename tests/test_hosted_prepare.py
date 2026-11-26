@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-import copy
 import json
-import os
 import subprocess
 import unittest
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
-import tempfile
 from unittest.mock import MagicMock, patch
 
 from config.deployment.composition import hosted_startup_command_sha256
 from config.deployment.hosted_prepare import (
     persist_digest,
     prepare_environment,
-    main,
 )
 from config.deployment.private_network import PrivateNetworkError
 

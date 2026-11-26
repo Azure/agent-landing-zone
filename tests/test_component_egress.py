@@ -16,7 +16,7 @@ from config.appdefinition import AppDefinition, collect_issues, load_definition
 from config.appdefinition.egress import validate_requirement
 from config.deployment import egress
 from config.deployment.egress_plan import (
-    GROUP_NAME, GROUP_PRIORITY, canonical, collection_name, declaration_plan, reconcile,
+    GROUP_NAME, GROUP_PRIORITY, canonical, declaration_plan, reconcile,
 )
 
 ROOT = Path(__file__).resolve().parents[1]

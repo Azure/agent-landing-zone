@@ -52,8 +52,10 @@ def test_bad_shapes_do_not_disclose_values(candidate, change):
     'output "DEPLOYMENT_METADATA" { value = {} sensitive = true }',
     'output "DEPLOYMENT_METADATA" { value = {} sensitive = var.safe }',
     'output "DEPLOYMENT_METADATA" { value = {} sensitive = "false" }',
-    'output "DEPLOYMENT_METADATA" { value = {} sensitive = false }\n'
-    'output "DEPLOYMENT_METADATA" { value = {} sensitive = false }',
+    (
+        'output "DEPLOYMENT_METADATA" { value = {} sensitive = false }\n' +
+        'output "DEPLOYMENT_METADATA" { value = {} sensitive = false }'
+    ),
     'output "DEPLOYMENT_METADATA" { value = nonsensitive(var.secret) sensitive = false }',
     'output "DEPLOYMENT_METADATA" { value = ',
 ])

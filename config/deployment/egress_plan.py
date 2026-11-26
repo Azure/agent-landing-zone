@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
-from config.appdefinition import load_definition, load_selected_definition, validate_definition
+from config.appdefinition import load_selected_definition, validate_definition
 from config.appdefinition.egress import Destination, validate_requirement
 from config.appdefinition.loader import component_service_name, effective_components
 from config.deployment.composition import (

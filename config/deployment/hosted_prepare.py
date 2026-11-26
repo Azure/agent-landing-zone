@@ -13,7 +13,6 @@ from typing import Mapping
 
 from config.deployment.composition import (
     HOSTED_AGENT_NAME_DEFAULT,
-    hosted_agent_configuration,
     hosted_startup_command,
     hosted_startup_command_sha256,
     is_truthy,
