@@ -5585,8 +5585,8 @@
                   {
                     "name": "agent-app-ingestion",
                     "repo": "https://github.com/Azure/agent-app-ingestion.git",
-                    "tag": "v3.1.5",
-                    "commit": "8419868af6c194df3c73554fd4dcaf27eb0b02b5"
+                    "tag": "v3.1.7",
+                    "commit": "d7d005551cafa74fd2f99c9fe32c4b6134f0c992"
                   }
                 ]
               },

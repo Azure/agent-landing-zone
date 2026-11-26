@@ -9,11 +9,12 @@
 
 ### Changed
 
+- Pins `agent-app-ingestion` to published `v3.1.7`. Reindexing Blob and SharePoint documents now deletes all matching chunks of the replaced parent without skipping pages, and stops on unconfirmed deletes or stalled Search results instead of reporting a completed replacement. No index schema, ACL metadata, parent ID or chunk ID changes. It also generates a sanitizer test credential at runtime.
 - Pins `agent-app-orchestrator` to published `v7.2.4`. It removes a secret-like test fixture and updates repository quality checks. No runtime, API, authentication, configuration, or data migration changes.
 
 ### Migration
 
-- None. Drop-in update from `v7.5.19` for both Bicep and Terraform. For rollback, restore `v7.5.19` and its component pins.
+- None for configuration or index schema. Drop-in update from `v7.5.19` for both Bicep and Terraform. Long parent names (over 128 characters after sanitization) may still have duplicate or orphaned chunks from the earlier `agent-app-ingestion` chunk ID transition, and a version rollback does not repair them. Review affected parents and reindex them from source when needed. For rollback, restore `v7.5.19` and its component pins.
 
 ### Validation
 
@@ -22,7 +23,7 @@
 | agent-app-mcp | v2.0.5 |
 | agent-app-ui | v3.7.3 |
 | agent-app-orchestrator | v7.2.4 |
-| agent-app-ingestion | v3.1.5 |
+| agent-app-ingestion | v3.1.7 |
 | infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.19] - 2026-11-23
