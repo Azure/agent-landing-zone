@@ -1,0 +1,98 @@
+name: Update Spec Kit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-speckit
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          persist-credentials: false
+
+      - name: Resolve latest stable release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/github/spec-kit/releases/latest --jq .tag_name)"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::Unexpected Spec Kit release tag: $tag"
+            exit 1
+          }
+          installed="$(python -c 'import json; print(json.load(open(".specify/integration.json"))["version"])')"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == "v$installed" ]]; then
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          else
+            commit="$(gh api "repos/github/spec-kit/commits/$tag" --jq .sha)"
+            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        if: steps.release.outputs.update == 'true'
+
+      - name: Upgrade managed Copilot skills and shared assets
+        if: steps.release.outputs.update == 'true'
+        env:
+          SPECKIT_COMMIT: ${{ steps.release.outputs.commit }}
+          SPECKIT_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uvx --from "git+https://github.com/github/spec-kit.git@$SPECKIT_COMMIT" \
+            specify integration upgrade copilot --script ps --integration-options="--skills"
+          python -c 'import json, os; version = json.load(open(".specify/integration.json"))["version"]; assert "v" + version == os.environ["SPECKIT_TAG"], "Installed Spec Kit version does not match the resolved release"'
+          git diff --exit-code -- .specify/memory .github/agents .github/copilot-instructions.md
+          uv run --no-project --with pytest python -m pytest tests/test_speckit_installation.py --quiet
+
+      - name: Open or update review pull request
+        if: steps.release.outputs.update == 'true'
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          token: ${{ secrets.SPECKIT_UPDATE_TOKEN || github.token }}
+          base: develop
+          branch: feature/update-speckit
+          title: "chore: update Spec Kit to ${{ steps.release.outputs.tag }}"
+          commit-message: |
+            chore: update Spec Kit to ${{ steps.release.outputs.tag }}
+
+            Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>
+          body: |
+            Updates the repository's Spec Kit Copilot skills and shared assets to the latest stable upstream release.
+
+            - Release: https://github.com/github/spec-kit/releases/tag/${{ steps.release.outputs.tag }}
+            - Source commit: `${{ steps.release.outputs.commit }}`
+            - Preserves the repository constitution and custom agent instructions.
+            - Verifies generated file hashes and consistent installation metadata.
+            - No application, Bicep, Terraform, or azd lifecycle changes.
+
+            Review required. This workflow does not merge the update.
+          add-paths: |
+            .github/skills/speckit-*
+            .specify/init-options.json
+            .specify/integration.json
+            .specify/integrations
+            .specify/scripts
+            .specify/templates
+            .specify/workflows
+            .specify/.gitignore
