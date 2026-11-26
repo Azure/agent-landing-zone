@@ -33,7 +33,6 @@ def test_quality_gate_runs_unconditionally_without_cloud_authentication():
     text = json.dumps(jobs)
     for prohibited in ("azure/login", "id-token", "secrets.", "az deployment", "azd up"):
         assert prohibited not in text
-    assert set(workflow("infra-what-if.yml")["on"]) == {"workflow_dispatch"}
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", None])

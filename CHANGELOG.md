@@ -1,11 +1,101 @@
 # Changelog
 
-## [Unreleased]
+## [v7.5.20] - 2026-11-26
+
+### Security
+
+- The post-provision private network probe requires TLS 1.2 or later when it checks private endpoints. Before this fix, the probe used the Python default TLS context without an explicit minimum version (CodeQL `py/insecure-protocol`, #973). The shared Python path serves both Bicep and Terraform, and no templates change.
+- Pins `agent-app-mcp` to published `v2.0.5`. It upgrades the locked `cryptography` (50.0.2) and `starlette` (1.10.0) dependencies to address known security advisories. No API, configuration, or data migration changes.
+- Pins `agent-app-ui` to published `v3.7.5`. It parses ARM and Graph OAuth scope hosts instead of matching domain text anywhere in a scope, so resource denials stay exact. It also updates repository quality checks and CI dependencies. No API, configuration, or data migration changes.
+
+### Changed
+
+- Pins `agent-app-ingestion` to published `v3.1.7`. Reindexing Blob and SharePoint documents now deletes all matching chunks of the replaced parent without skipping pages, and stops on unconfirmed deletes or stalled Search results instead of reporting a completed replacement. No index schema, ACL metadata, parent ID or chunk ID changes. It also generates a sanitizer test credential at runtime.
+- Pins `agent-app-orchestrator` to published `v7.2.4`. It removes a secret-like test fixture and updates repository quality checks. No runtime, API, authentication, configuration, or data migration changes.
+
+### Migration
+
+- None for configuration or index schema. Drop-in update from `v7.5.19` for both Bicep and Terraform. Long parent names (over 128 characters after sanitization) may still have duplicate or orphaned chunks from the earlier `agent-app-ingestion` chunk ID transition, and a version rollback does not repair them. Review affected parents and reindex them from source when needed. For rollback, restore `v7.5.19` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.5 |
+| agent-app-ui | v3.7.5 |
+| agent-app-orchestrator | v7.2.4 |
+| agent-app-ingestion | v3.1.7 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.19] - 2026-11-23
+
+### Changed
+
+- Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+- Pins `agent-app-mcp` to published `v2.0.4`. This updates release guidance only and does not change MCP runtime behavior.
+
+### Fixed
+
+- Pins `agent-app-ingestion` to published `v3.1.5`, including its validated dependency updates, the `pypdf` patch, and a fix for valid single-line App Configuration values in shell deployments.
+- Pins `agent-app-orchestrator` to published `v7.2.3`, including updated frontend build dependencies and release validation guidance. No runtime, API, authentication, configuration, or data migration changes.
+
+### Migration
+
+- No API, index, ACL, or audit contract changes. No migration or reindexing is required. For rollback, restore `v7.5.16` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.4 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.3 |
+| agent-app-ingestion | v3.1.5 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.18] - 2026-11-23
+
+### Changed
+
+- Clarifies that an umbrella pre-release follows required candidate CI and source-level checks, while the paired-provider Azure validation runs after publication and gates promotion to Latest.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.3 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
+
+## [v7.5.17] - 2026-11-21
 
 ### Changed
 
 - Release validation reruns `azd provision` when Azure fails a Container Apps environment with `ManagedEnvironmentOperationFailed` (internal server error, please retry later), the same way it already reruns a bare `InternalServerError`. Before this change, that transient Azure error failed the whole Bicep validation. Maintainer tooling only, no product change.
 - Release validation posts the result of every run to Teams when the `RELVAL_TEAMS_WEBHOOK_URL` repository secret holds a Teams Workflows webhook URL. The card shows the release, the result per provider, whether the release was promoted and a link to the run. Without the secret the step is skipped. Maintainer tooling only, no product change.
+- Updates the Foundry project and Cognitive Services management SDKs and pinned GitHub Actions dependencies.
+- Pins the published dependency patch releases `agent-app-ui` `v3.7.3`, `agent-app-mcp` `v2.0.3` and `agent-app-orchestrator` `v7.2.2`. Ingestion remains unchanged at `v3.1.3`; this release does not include the subsequent chunk-identifier migration or parent-deletion correction.
+
+### Fixed
+
+- Terraform deployment metadata inspection retains its literal non-sensitive output guard and transitive declassification checks with `python-hcl2` `8.2.0`, using the parser's supported backwards-compatible string serialization.
+- Config and prerequisite utilities use the same Cognitive Services SDK version. RAI blocklist item deletion waits for the SDK's long-running operation before updating the blocklist.
+
+### Migration
+
+- No deployment parameter or runtime configuration changes. For rollback, restore `v7.5.16` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.3 |
+| agent-app-ui | v3.7.3 |
+| agent-app-orchestrator | v7.2.2 |
+| agent-app-ingestion | v3.1.3 |
+| infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.16] - 2026-11-19
 
