@@ -24,7 +24,7 @@
       "name": "ui",
       "kind": "containerapp",
       "path": "ui",
-      "source": { "commit": "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f" },
+      "source": { "commit": "209bbc03f9f433717346c6fa3752dc6b88244616" },
       "profiles": ["blob-delegator", "retrieval-reader"],
       "egress": [],
       "ingress": "external"

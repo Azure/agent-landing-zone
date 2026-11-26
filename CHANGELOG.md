@@ -6,6 +6,7 @@
 
 - The post-provision private network probe requires TLS 1.2 or later when it checks private endpoints. Before this fix, the probe used the Python default TLS context without an explicit minimum version (CodeQL `py/insecure-protocol`, #973). The shared Python path serves both Bicep and Terraform, and no templates change.
 - Pins `agent-app-mcp` to published `v2.0.5`. It upgrades the locked `cryptography` (50.0.2) and `starlette` (1.10.0) dependencies to address known security advisories. No API, configuration, or data migration changes.
+- Pins `agent-app-ui` to published `v3.7.5`. It parses ARM and Graph OAuth scope hosts instead of matching domain text anywhere in a scope, so resource denials stay exact. It also updates repository quality checks and CI dependencies. No API, configuration, or data migration changes.
 
 ### Changed
 
@@ -21,7 +22,7 @@
 | Component | Version |
 | --- | --- |
 | agent-app-mcp | v2.0.5 |
-| agent-app-ui | v3.7.3 |
+| agent-app-ui | v3.7.5 |
 | agent-app-orchestrator | v7.2.4 |
 | agent-app-ingestion | v3.1.7 |
 | infra / AI Landing Zone | v2.7.3 |

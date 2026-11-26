@@ -34,7 +34,7 @@ class IntegrationPinTests(unittest.TestCase):
             ("agent-app-orchestrator", "tag", "v7.2.4",
              "e71d2075a52a0dd20fc2dfe49263205a1e0046f5"),
             ("agent-app-ingestion", "tag", "v3.1.7", "d7d005551cafa74fd2f99c9fe32c4b6134f0c992"),
-            ("agent-app-ui", "tag", "v3.7.3", "ae9b5674f37dfb4ece96ba35ae6b0d0cfe29f01f"),
+            ("agent-app-ui", "tag", "v3.7.5", "209bbc03f9f433717346c6fa3752dc6b88244616"),
         ):
             self.assertNotIn("tag" if ref_key == "branch" else "branch", components[name])
             self.assertEqual((ref, commit), (components[name][ref_key], components[name]["commit"]))
