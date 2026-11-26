@@ -1,5 +1,32 @@
 # Changelog
 
+## [v7.5.20] - 2026-11-26
+
+### Security
+
+- The post-provision private network probe requires TLS 1.2 or later when it checks private endpoints. Before this fix, the probe used the Python default TLS context without an explicit minimum version (CodeQL `py/insecure-protocol`, #973). The shared Python path serves both Bicep and Terraform, and no templates change.
+- Pins `agent-app-mcp` to published `v2.0.5`. It upgrades the locked `cryptography` (50.0.2) and `starlette` (1.10.0) dependencies to address known security advisories. No API, configuration, or data migration changes.
+- Pins `agent-app-ui` to published `v3.7.5`. It parses ARM and Graph OAuth scope hosts instead of matching domain text anywhere in a scope, so resource denials stay exact. It also updates repository quality checks and CI dependencies. No API, configuration, or data migration changes.
+
+### Changed
+
+- Pins `agent-app-ingestion` to published `v3.1.7`. Reindexing Blob and SharePoint documents now deletes all matching chunks of the replaced parent without skipping pages, and stops on unconfirmed deletes or stalled Search results instead of reporting a completed replacement. No index schema, ACL metadata, parent ID or chunk ID changes. It also generates a sanitizer test credential at runtime.
+- Pins `agent-app-orchestrator` to published `v7.2.4`. It removes a secret-like test fixture and updates repository quality checks. No runtime, API, authentication, configuration, or data migration changes.
+
+### Migration
+
+- None for configuration or index schema. Drop-in update from `v7.5.19` for both Bicep and Terraform. Long parent names (over 128 characters after sanitization) may still have duplicate or orphaned chunks from the earlier `agent-app-ingestion` chunk ID transition, and a version rollback does not repair them. Review affected parents and reindex them from source when needed. For rollback, restore `v7.5.19` and its component pins.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.5 |
+| agent-app-ui | v3.7.5 |
+| agent-app-orchestrator | v7.2.4 |
+| agent-app-ingestion | v3.1.7 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.19] - 2026-11-23
 
 ### Changed
