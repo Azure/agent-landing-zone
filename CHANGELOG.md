@@ -1,5 +1,35 @@
 # Changelog
 
+## [v7.5.21] - 2026-11-26
+
+### Security
+
+- Foundry evaluation API-key setup no longer logs the Key Vault entry name, and it redacts the key value from failure messages before logging (CodeQL `py/clear-text-logging-sensitive-data`, #976). The shared Python post-provision path serves both Bicep and Terraform, and no templates change.
+
+### Changed
+
+- Infrastructure contract tests replace host substring checks with exact or structural assertions: the preserved image reference including its digest, a single `packages.microsoft.com` OS package entry, and the Durable Task private DNS zone binding in both Bicep and Terraform (CodeQL `py/incomplete-url-substring-sanitization`, #976). Tests only; no template changes.
+- Updates the repository-managed Spec Kit Copilot skills and PowerShell helpers from `0.16.5` to `1.4.5`, preserving the constitution and custom engineering agents (#977). Contributor tooling only; runtime component and foundation pins are unchanged.
+
+### Added
+
+- A weekly Spec Kit update workflow checks the latest stable upstream release every Monday at 09:00 UTC and opens review pull requests against `develop`, without automatic merging (#977). Installation regression checks and LF line endings preserve managed-file hash integrity.
+
+### Migration
+
+- None. Drop-in update from `v7.5.20` for both Bicep and Terraform. The post-provision log line for the evaluation API key now names the vault instead of the secret entry. For rollback, restore `v7.5.20` and its component pins.
+- Maintainers: the Spec Kit schedule becomes active when the workflow reaches `main`. Repository Actions permissions must allow pull request creation; an optional `SPECKIT_UPDATE_TOKEN` enables normal CI on bot-created pull requests. See `CONTRIBUTING.md` for setup and the manual CI fallback.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.5 |
+| agent-app-ui | v3.7.5 |
+| agent-app-orchestrator | v7.2.4 |
+| agent-app-ingestion | v3.1.7 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.20] - 2026-11-26
 
 ### Security
