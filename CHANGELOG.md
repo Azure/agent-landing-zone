@@ -1,5 +1,23 @@
 # Changelog
 
+## [v7.5.22] - 2026-11-27
+
+### Changed
+
+- Normalizes symbolic numeric nodes consistently in infrastructure contract tests and removes unused imports and assignments in configuration and validation helpers. Runtime component pins and foundation source remain unchanged in this preparation commit.
+
+### Validation
+
+Preparation only: the component table below records the current manifest, not the final corrected component combination. This candidate must not be merged or published until approved component releases are available, their tags and commits are aligned in the manifest, application definition and pin-review fixture, and the exact combination passes its required checks.
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.5 |
+| agent-app-ui | v3.7.5 |
+| agent-app-orchestrator | v7.2.4 |
+| agent-app-ingestion | v3.1.7 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.21] - 2026-11-26
 
 ### Security
