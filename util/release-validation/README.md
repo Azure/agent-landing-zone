@@ -25,7 +25,7 @@ change the file only through a reviewed pull request.
 
 ## How it works
 
-1. The workflow runs manually (`workflow_dispatch`) with:
+1. The workflow runs daily (see below) or manually (`workflow_dispatch`) with:
    - `release_tag`: the tag to validate. Empty means the Latest release.
    - `providers`: `both` (default), `bicep` or `terraform`.
    - `location`, `hosted_agent_resource_scope` and `keep_environment`.
@@ -54,13 +54,22 @@ change the file only through a reviewed pull request.
    `## Validation` in the release notes (`evidence.py amend-notes`) and runs
    `gh release edit <tag> --prerelease=false --latest`.
 
-## Daily revalidation
+## Daily validation
 
-Every day at 09:00 UTC the workflow revalidates the Latest release with both
-providers and without promotion. A failure opens a GitHub issue, or comments on
-the open one. Fix it on a feature branch, cut a patch release as a pre-release
-and validate it. Each run creates and removes two spokes, so it costs about
-the hourly price of one standard scenario for a few hours a day.
+Every day at 09:00 UTC the workflow picks its target with both providers:
+
+- When a pre-release with a higher `vX.Y.Z` than the Latest release exists, it
+  validates the newest one and promotes it to Latest when both providers pass.
+  A failure opens no issue, because the release is still a candidate.
+- Otherwise it revalidates the Latest release without promotion. A pass adds a
+  compact line (date, providers, workflow run) under `## Validation` in the
+  release notes (`evidence.py amend-history`), after the promotion evidence.
+  Only the last 30 lines are kept. A failure opens a GitHub issue, or comments
+  on the open one. Fix it on a feature branch, cut a patch release as a
+  pre-release and the next daily run validates it.
+
+Each run creates and removes two spokes, so it costs about the hourly price of
+one standard scenario for a few hours a day.
 
 ## Daily cleanup
 
