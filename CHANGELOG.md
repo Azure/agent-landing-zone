@@ -1,5 +1,43 @@
 # Changelog
 
+## [v7.5.23] - 2026-11-27
+
+### Changed
+
+- The daily release validation validates the newest pre-release that is newer than Latest with Bicep and Terraform and promotes it to Latest when both pass (#987). Without such a pre-release it revalidates Latest without promotion. A passing revalidation adds a compact entry to the `## Validation` history of the release notes (last 30 kept), and a failure opens an issue.
+- Removes the Teams notification from the release validation workflow (#987).
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.6 |
+| agent-app-ui | v3.7.6 |
+| agent-app-orchestrator | v7.2.5 |
+| agent-app-ingestion | v3.1.10 |
+| infra / AI Landing Zone | v2.7.3 |
+
+### Migration
+
+- None. Drop-in update from `v7.5.22` for both Bicep and Terraform. Templates and component pins are unchanged. The `RELVAL_TEAMS_WEBHOOK_URL` secret is no longer used and can be deleted.
+## [v7.5.22] - 2026-11-27
+
+### Changed
+
+- Normalizes symbolic numeric nodes consistently in infrastructure contract tests and removes unused imports and assignments in configuration and validation helpers.
+- Pins UI to published `v3.7.6`, orchestrator to `v7.2.5`, and MCP to `v2.0.6`, incorporating their quality and reliability fixes.
+- Pins ingestion to published `v3.1.10`, including fixes for SharePoint subsite scope and per-document blob cost-estimation failures.
+
+### Validation
+
+| Component | Version |
+| --- | --- |
+| agent-app-mcp | v2.0.6 |
+| agent-app-ui | v3.7.6 |
+| agent-app-orchestrator | v7.2.5 |
+| agent-app-ingestion | v3.1.10 |
+| infra / AI Landing Zone | v2.7.3 |
+
 ## [v7.5.21] - 2026-11-26
 
 ### Security
