@@ -7,10 +7,11 @@ name: Release validation (network isolated)
 # A release is published as a pre-release. When both providers pass, the
 # promote job attaches the evidence to the release, amends its notes and makes
 # it the Latest release. "Validated" means the Latest release. Every day the
-# current Latest release is revalidated without promotion, and a failure opens
-# an issue. release-validation-cleanup.yml removes leftovers daily. When the
-# RELVAL_TEAMS_WEBHOOK_URL secret holds a Teams Workflows webhook URL, every
-# run posts its result to Teams.
+# workflow validates the newest pre-release that is newer than Latest and
+# promotes it when both providers pass. Without such a pre-release it
+# revalidates Latest without promotion: a pass adds a compact line to the
+# release notes history and a failure opens an issue.
+# release-validation-cleanup.yml removes leftovers daily.
 #
 # The GitHub-hosted jobs never reach private endpoints. They sign in with OIDC
 # (no stored secret), start the executor VM in the persistent validation hub,
@@ -57,8 +58,8 @@ on:
         default: false
         type: boolean
   schedule:
-    # Daily revalidation of the Latest release, both providers, no promotion.
-    # Kept away from the nightly governance shutdown window (about 00:00-05:00
+    # Daily validation of the newest pre-release newer than Latest (promoted on
+    # success), otherwise revalidation of Latest without promotion. Kept away from the nightly governance shutdown window (about 00:00-05:00
     # UTC) that deallocates the executor VM in some subscriptions.
     - cron: "0 9 * * *"
 
@@ -79,6 +80,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       providers: ${{ steps.resolve.outputs.providers }}
       promote: ${{ steps.resolve.outputs.promote }}
+      revalidation: ${{ steps.resolve.outputs.revalidation }}
     env:
       GH_TOKEN: ${{ github.token }}
       INPUT_TAG: ${{ inputs.release_tag }}
@@ -89,8 +91,22 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
+          revalidation=false
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            INPUT_TAG=""; INPUT_PROVIDERS="both"; INPUT_PROMOTE="false"
+            INPUT_PROVIDERS="both"
+            latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+            [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Latest release tag must look like vX.Y.Z (got '$latest')"; exit 1; }
+            newest="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 \
+              --json tagName,isPrerelease -q '.[] | select(.isPrerelease) | .tagName' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+            if [ -n "$newest" ] && [ "$newest" != "$latest" ] \
+              && [ "$(printf '%s\n%s\n' "$latest" "$newest" | sort -V | tail -n 1)" = "$newest" ]; then
+              INPUT_TAG="$newest"; INPUT_PROMOTE="true"
+              echo "Pre-release $newest is newer than Latest $latest: validate and promote it."
+            else
+              INPUT_TAG="$latest"; INPUT_PROMOTE="false"; revalidation=true
+              echo "No pre-release newer than Latest $latest: revalidate Latest."
+            fi
           fi
           tag="$INPUT_TAG"
           if [ -z "$tag" ]; then
@@ -109,6 +125,7 @@ jobs:
             echo "tag=$tag"
             echo "providers=$providers"
             echo "promote=${INPUT_PROMOTE:-false}"
+            echo "revalidation=$revalidation"
           } >> "$GITHUB_OUTPUT"
 
   validate:
@@ -282,7 +299,7 @@ jobs:
           echo "Headings at line start: before $before, after $after"
           grep -qx '## Validation' published.md || { echo "::error::Release notes lost the ## Validation heading"; exit 1; }
           [ "$after" -ge "$before" ] && [ "$after" -ge 1 ] || { echo "::error::Release notes formatting changed"; exit 1; }
-          [ "$(grep -c '<!-- release-validation:' published.md)" -eq 2 ] || { echo "::error::Expected one evidence line per provider"; exit 1; }
+          [ "$(grep -cE '<!-- release-validation:(bicep|terraform) -->' published.md)" -eq 2 ] || { echo "::error::Expected one evidence line per provider"; exit 1; }
 
       - name: Make the release Latest
         run: |
@@ -292,70 +309,53 @@ jobs:
           [ "$latest" = "$RELEASE_TAG" ] || { echo "::error::Latest is $latest, expected $RELEASE_TAG"; exit 1; }
           echo "### $RELEASE_TAG validated with Bicep and Terraform and promoted to Latest" >> "$GITHUB_STEP_SUMMARY"
 
-  notify:
-    name: Notify Teams
-    needs: [prepare, validate, promote]
-    if: always()
+  record-revalidation:
+    name: Record revalidation of ${{ needs.prepare.outputs.tag }} in release notes
+    needs: [prepare, validate]
+    if: >-
+      needs.prepare.outputs.revalidation == 'true' &&
+      needs.validate.result == 'success'
     runs-on: ubuntu-latest
     permissions:
-      actions: read # per-provider job results
+      contents: write # release notes
     env:
-      GH_TOKEN: ${{ github.token }}
-      TEAMS_WEBHOOK_URL: ${{ secrets.RELVAL_TEAMS_WEBHOOK_URL }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-      VALIDATE_RESULT: ${{ needs.validate.result }}
-      PROMOTE_RESULT: ${{ needs.promote.result }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Post run result to Teams
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: util/release-validation
+          persist-credentials: false
+
+      - name: Download evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-validation-${{ needs.prepare.outputs.tag }}-*-${{ github.run_id }}
+          path: artifacts
+
+      - name: Append revalidation history
         run: |
           set -euo pipefail
-          if [ -z "$TEAMS_WEBHOOK_URL" ]; then
-            echo "RELVAL_TEAMS_WEBHOOK_URL is not set, skipping the Teams notification."
-            exit 0
-          fi
-          jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate \
-            --jq '[.jobs[] | select(.name | startswith("Validate ")) | {name, conclusion}]' | jq -s 'add // []')"
-          facts="$(jq -c '[.[] | {title: (.name | capture("\\((?<p>[a-z]+)\\)$").p // .name), value: (.conclusion // "not finished")}]' <<< "$jobs")"
-          case "$VALIDATE_RESULT" in
-            success) headline="passed"; color="Good" ;;
-            cancelled) headline="was cancelled"; color="Warning" ;;
-            *) headline="failed"; color="Attention" ;;
-          esac
-          case "$PROMOTE_RESULT" in
-            success) promotion="Promoted to Latest" ;;
-            skipped) promotion="Not promoted" ;;
-            *) promotion="Promotion $PROMOTE_RESULT" ;;
-          esac
-          trigger="manual run by $GITHUB_ACTOR"
-          [ "$GITHUB_EVENT_NAME" = "schedule" ] && trigger="daily revalidation"
-          jq -n \
-            --arg title "Release validation ${RELEASE_TAG:-unresolved} $headline" \
-            --arg color "$color" --arg trigger "$trigger" --arg promotion "$promotion" \
-            --arg url "$RUN_URL" --argjson facts "$facts" '{
-              type: "message",
-              attachments: [{
-                contentType: "application/vnd.microsoft.card.adaptive",
-                contentUrl: null,
-                content: {
-                  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                  type: "AdaptiveCard", version: "1.4",
-                  body: [
-                    {type: "TextBlock", text: $title, weight: "Bolder", size: "Medium", color: $color, wrap: true},
-                    {type: "TextBlock", text: $trigger, isSubtle: true, spacing: "None", wrap: true},
-                    {type: "FactSet", facts: ($facts + [{title: "Release", value: $promotion}])}
-                  ],
-                  actions: [{type: "Action.OpenUrl", title: "Open run", url: $url}]
-                }
-              }]
-            }' > card.json
-          curl -sS --fail-with-body --retry 3 -H "Content-Type: application/json" -d @card.json "$TEAMS_WEBHOOK_URL" \
-            || echo "::warning::The Teams notification could not be posted."
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > notes.md
+          before="$(grep -c '^## ' notes.md || true)"
+          args=()
+          for provider in bicep terraform; do
+            args+=(--status "artifacts/release-validation-$RELEASE_TAG-$provider-$GITHUB_RUN_ID/status.json")
+          done
+          python3 util/release-validation/evidence.py amend-history --notes notes.md --run-url "$RUN_URL" "${args[@]}"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body > published.md
+          after="$(grep -c '^## ' published.md || true)"
+          grep -qx '## Validation' published.md || { echo "::error::Release notes lost the ## Validation heading"; exit 1; }
+          [ "$after" -ge "$before" ] && [ "$after" -ge 1 ] || { echo "::error::Release notes formatting changed"; exit 1; }
+          grep -qF "$RUN_URL" published.md || { echo "::error::Revalidation entry is missing"; exit 1; }
+          echo "### $RELEASE_TAG revalidated with Bicep and Terraform, recorded in the release notes" >> "$GITHUB_STEP_SUMMARY"
 
   report-failure:
     name: Open issue for failed scheduled revalidation
     needs: [prepare, validate]
-    if: failure() && github.event_name == 'schedule'
+    if: failure() && github.event_name == 'schedule' && needs.prepare.outputs.revalidation == 'true'
     runs-on: ubuntu-latest
     permissions:
       issues: write

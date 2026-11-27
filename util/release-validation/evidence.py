@@ -17,6 +17,8 @@ LOGGER = logging.getLogger(__name__)
 PROVIDER_TITLES = {"bicep": "Bicep", "terraform": "Terraform"}
 PRIVATE_ENV = re.compile(r"(rg-)?gptrag-\d{10}")
 TRANSCRIPT_TAIL = 400
+HISTORY_MARKER = "<!-- release-validation:history -->"
+HISTORY_KEEP = 30
 
 
 def provider_title(status: dict) -> str:
@@ -87,20 +89,40 @@ def amend_notes(notes: str, status: dict, run_url: str, asset_url: str) -> str:
         f"Evidence: [workflow run]({run_url}), [commands and transcript]({asset_url}). {marker(status)}"
     )
     lines = [line for line in notes.replace("\r\n", "\n").split("\n") if marker(status) not in line]
+    return _insert_in_validation(lines, [bullet], before_history=True)
+
+
+def _insert_in_validation(lines: list[str], bullets: list[str], before_history: bool) -> str:
+    """Insert bullets at the end of ## Validation, or before its history when asked."""
     try:
         start = next(i for i, line in enumerate(lines) if line.strip() == "## Validation")
     except StopIteration:
         while lines and not lines[-1].strip():
             lines.pop()
-        return "\n".join(lines + ["", "## Validation", bullet]) + "\n"
+        return "\n".join(lines + ["", "## Validation"] + bullets) + "\n"
     end = next(
         (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines)
     )
     insert = end
     while insert > start + 1 and not lines[insert - 1].strip():
         insert -= 1
-    lines.insert(insert, bullet)
+    if before_history:
+        insert = next(
+            (i for i in range(start + 1, insert) if HISTORY_MARKER in lines[i]), insert
+        )
+    lines[insert:insert] = bullets
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def amend_history(notes: str, statuses: list[dict], run_url: str, keep: int = HISTORY_KEEP) -> str:
+    """Append a compact revalidation entry under ## Validation and keep the last `keep`."""
+    date = max((status.get("updated") or "")[:10] for status in statuses)
+    providers = " and ".join(provider_title(status) for status in statuses)
+    entry = f"- Revalidated on {date}: {providers} passed ([workflow run]({run_url})). {HISTORY_MARKER}"
+    lines = notes.replace("\r\n", "\n").split("\n")
+    history = [line for line in lines if HISTORY_MARKER in line and run_url not in line]
+    lines = [line for line in lines if HISTORY_MARKER not in line]
+    return _insert_in_validation(lines, (history + [entry])[-keep:], before_history=False)
 
 
 def main() -> int:
@@ -118,6 +140,10 @@ def main() -> int:
     notes.add_argument("--status", type=Path, required=True)
     notes.add_argument("--run-url", required=True)
     notes.add_argument("--asset-url", required=True)
+    history = sub.add_parser("amend-history")
+    history.add_argument("--notes", type=Path, required=True)
+    history.add_argument("--status", type=Path, action="append", required=True)
+    history.add_argument("--run-url", required=True)
     args = parser.parse_args()
 
     if args.command == "report":
@@ -127,6 +153,17 @@ def main() -> int:
             with args.summary.open("a", encoding="utf-8") as handle:
                 handle.write(summary)
         LOGGER.info("Wrote %s", args.evidence_dir / "report.md")
+        return 0
+    if args.command == "amend-history":
+        statuses = [json.loads(path.read_text(encoding="utf-8")) for path in args.status]
+        if any(status.get("result") != "passed" for status in statuses):
+            LOGGER.error("Release notes history is amended only when every provider passed.")
+            return 1
+        args.notes.write_text(
+            amend_history(args.notes.read_text(encoding="utf-8"), statuses, args.run_url),
+            encoding="utf-8",
+        )
+        LOGGER.info("Amended history in %s", args.notes)
         return 0
     status = json.loads(args.status.read_text(encoding="utf-8"))
     if status.get("result") != "passed":
