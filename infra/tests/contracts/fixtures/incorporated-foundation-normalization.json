@@ -5567,20 +5567,20 @@
                   {
                     "name": "agent-app-mcp",
                     "repo": "https://github.com/Azure/agent-app-mcp.git",
-                    "tag": "v2.0.5",
-                    "commit": "178f44c0165c49385e5577f12cb69e80b14e0e71"
+                    "tag": "v2.0.6",
+                    "commit": "d7bbc62aad10e15a0aa62d344a2ff7a7ccb295c4"
                   },
                   {
                     "name": "agent-app-ui",
                     "repo": "https://github.com/Azure/agent-app-ui.git",
-                    "tag": "v3.7.5",
-                    "commit": "209bbc03f9f433717346c6fa3752dc6b88244616"
+                    "tag": "v3.7.6",
+                    "commit": "b15b4875c6dc156794ae4813c657f7e8b4efd84b"
                   },
                   {
                     "name": "agent-app-orchestrator",
                     "repo": "https://github.com/Azure/agent-app-orchestrator.git",
-                    "tag": "v7.2.4",
-                    "commit": "e71d2075a52a0dd20fc2dfe49263205a1e0046f5"
+                    "tag": "v7.2.5",
+                    "commit": "e9ac2ffd328301fe1aebe0a036a4e8c828ce6f51"
                   },
                   {
                     "name": "agent-app-ingestion",
