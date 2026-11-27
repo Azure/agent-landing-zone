@@ -198,7 +198,7 @@ def build_settings(
     subscription = (environment.get("AZURE_SUBSCRIPTION_ID") or environment.get("SUBSCRIPTION_ID") or "").strip()
     deployment_context = context_settings(environment)
     resource_token = _required(environment, "RESOURCE_TOKEN")
-    prepare_hosted = requires_hosted_foundation(
+    requires_hosted_foundation(
         environment, hosted_orchestration=hosted
     )
 

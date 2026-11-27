@@ -30,7 +30,7 @@ def expression(text, isolated):
         if token.startswith("'"):
             result = token[1:-1].replace("''", "'")
         elif re.fullmatch(r"-?\d+(?:\.\d+)?", token):
-            result = ("number", token)
+            result = ("number", token, None)
         else:
             name = token
             # Namespaced user functions, if present, remain opaque calls.

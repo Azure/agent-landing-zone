@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from config.deployment.composition import is_bundled_application, is_truthy, requires_hosted_foundation, resolve_mode
 from config.deployment.native import OrchestrationHost
-from config.deployment.native import resolve_application, scheduler_settings, selected as native_selected
+from config.deployment.native import resolve_application, scheduler_settings
 
 
 LOGGER = logging.getLogger(__name__)

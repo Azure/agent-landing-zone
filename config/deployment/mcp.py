@@ -20,10 +20,8 @@ from config.appdefinition.loader import load_selected_definition
 from config.deployment import mcp_config
 from config.deployment.appconfig import _container_app, _run_az, publish_settings
 from config.deployment.context import bound_resource_id, registry_resource_group
-from config.deployment.egress import selected_environment
 from config.deployment.hosted_access import (
     Role,
-    _config_value,
     _setting,
     discover_instance,
     run_az,

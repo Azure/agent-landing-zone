@@ -21,14 +21,12 @@ import argparse
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from config import find_repo_root
 from config.deployment.composition import APP_CONFIG_LABEL, is_truthy
-from config.deployment.context import bound_resource_id, context_settings
-from config.deployment.resource_groups import resource_group_for
+from config.deployment.context import context_settings
 from config.deployment.postgresql import discovery_settings
 from config.deployment.metadata import VerifiedMetadata, aliases, load_metadata, run_json
 

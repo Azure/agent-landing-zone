@@ -4,7 +4,23 @@ from pathlib import Path
 import re
 import subprocess
 
+from infra.tests.contracts.postgresql_disabled_ast import comparable, expression
+
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_disabled_graph_expression_normalization():
+    assert expression("123", False) == ("number", "123", None)
+    assert expression("-1.5", False) == ("number", "-1.5", None)
+    assert expression("parameters('deployPostgreSql')", False) is False
+    assert expression("parameters('networkIsolation')", True) is True
+    assert expression("if(parameters('deployPostgreSql'), 1, 2)", False) == expression("2", False)
+    assert expression("someFunction(1).property[2]", False) == (
+        "index", ("property", ("call", "someFunction", (("number", "1", None),)), "property"),
+        ("number", "2", None),
+    )
+    assert comparable("[someFunction(1)]", False) == comparable("[someFunction(1)]", True)
+    assert comparable("[someFunction(1)]", False) != comparable("[someFunction(2)]", False)
 
 
 def test_native_postgresql_seed_contract():

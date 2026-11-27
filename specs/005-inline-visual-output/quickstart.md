@@ -3,7 +3,7 @@
 ## Current CI reader binding
 
 The loaded application definition, manifest and cross-platform umbrella CI
-bind UI `v3.7.5` at `209bbc03f9f433717346c6fa3752dc6b88244616`.
+bind UI `v3.7.6` at `b15b4875c6dc156794ae4813c657f7e8b4efd84b`.
 The ordinary deployment-contract jobs exercise this reader on Linux and Windows.
 This binding is not live host acceptance or proof of deployed provider parity.
 The release qualification receipts below remain historical and unchanged.

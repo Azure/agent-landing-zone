@@ -45,7 +45,7 @@ class AmendNotesTests(unittest.TestCase):
 
     def test_appends_validation_section_when_missing(self):
         notes = self.amend("## Changed\n- Fix.\n\n", "terraform")
-        self.assertTrue(notes.splitlines()[-2:][0] == "## Validation")
+        self.assertEqual(notes.splitlines()[-2:][0], "## Validation")
         self.assertIn("<!-- release-validation:terraform -->", notes.splitlines()[-1])
 
 

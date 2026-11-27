@@ -6,7 +6,6 @@ import pytest
 from unittest.mock import Mock, patch
 import subprocess
 import shutil
-import os
 import yaml
 
 from config.deployment.native import (

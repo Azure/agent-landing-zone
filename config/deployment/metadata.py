@@ -611,13 +611,13 @@ def verify_live(
 
     def show(resource: Mapping[str, Any]) -> dict[str, Any]:
         row = az(["resource", "show", "--ids", resource["resourceId"], "--query",
-                  "{id:id,name:name,type:type,identity:identity,properties:{"
-                  "provisioningState:properties.provisioningState,customSubDomainName:properties.customSubDomainName,"
-                  "endpoint:properties.endpoint,endpoints:properties.endpoints,loginServer:properties.loginServer,"
-                  "vaultUri:properties.vaultUri,primaryEndpoints:properties.primaryEndpoints,"
-                  "documentEndpoint:properties.documentEndpoint,model:properties.model,"
-                  "managedEnvironmentId:properties.managedEnvironmentId,configuration:{"
-                  "ingress:properties.configuration.ingress,registries:properties.configuration.registries}}}"])
+                  ("{id:id,name:name,type:type,identity:identity,properties:{" +
+                   "provisioningState:properties.provisioningState,customSubDomainName:properties.customSubDomainName," +
+                   "endpoint:properties.endpoint,endpoints:properties.endpoints,loginServer:properties.loginServer," +
+                   "vaultUri:properties.vaultUri,primaryEndpoints:properties.primaryEndpoints," +
+                   "documentEndpoint:properties.documentEndpoint,model:properties.model," +
+                   "managedEnvironmentId:properties.managedEnvironmentId,configuration:{" +
+                   "ingress:properties.configuration.ingress,registries:properties.configuration.registries}}}")])
         if not isinstance(row, dict) or str(row.get("id", "")).casefold() != resource["resourceId"].casefold():
             raise MetadataError("resource.identity: Live ARM ID mismatch or unavailable target.")
         expected_type = parse_resource_id(resource["resourceId"]).resource_type
