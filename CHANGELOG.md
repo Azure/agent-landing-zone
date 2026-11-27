@@ -6,17 +6,16 @@
 
 - Normalizes symbolic numeric nodes consistently in infrastructure contract tests and removes unused imports and assignments in configuration and validation helpers.
 - Pins UI to published `v3.7.6`, orchestrator to `v7.2.5`, and MCP to `v2.0.6`, incorporating their quality and reliability fixes.
+- Pins ingestion to published `v3.1.10`, including fixes for SharePoint subsite scope and per-document blob cost-estimation failures.
 
 ### Validation
-
-Preparation only: ingestion remains pinned to the existing published `v3.1.7` pending publication of `v3.1.10`. This table is an intermediate manifest snapshot, not a validated release combination. Do not merge or publish until the ingestion tag and commit are aligned across the manifest, application definition and pin-review fixture, and the exact combination passes its required checks.
 
 | Component | Version |
 | --- | --- |
 | agent-app-mcp | v2.0.6 |
 | agent-app-ui | v3.7.6 |
 | agent-app-orchestrator | v7.2.5 |
-| agent-app-ingestion | v3.1.7 |
+| agent-app-ingestion | v3.1.10 |
 | infra / AI Landing Zone | v2.7.3 |
 
 ## [v7.5.21] - 2026-11-26
