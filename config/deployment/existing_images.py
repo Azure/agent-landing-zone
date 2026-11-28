@@ -60,6 +60,17 @@ def parse_container_app_images(
     return images
 
 
+def _log_cli_failure(command: Sequence[str], completed: object) -> None:
+    """Surface the Azure CLI error (e.g. an unregistered resource provider) before failing closed.
+
+    Logging must never replace the fail-closed RuntimeError, so tolerate partial results.
+    """
+    output = getattr(completed, "stderr", None) or getattr(completed, "stdout", None) or ""
+    detail = str(output).strip()[:2000] or "no output"
+    LOGGER.error("%s failed with exit code %s: %s", " ".join(command[1:3]),
+                 getattr(completed, "returncode", "unknown"), detail)
+
+
 def discover_existing_images(
     resource_group: str,
     subscription: str | None = None,
@@ -79,6 +90,7 @@ def discover_existing_images(
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError("Cannot verify application resource group before preserving images.") from error
     if existence.returncode or existence.stdout.strip().lower() not in {"true", "false"}:
+        _log_cli_failure(exists_command, existence)
         raise RuntimeError("Cannot verify application resource group; existing images have not been read.")
     if existence.stdout.strip().lower() == "false":
         return {}
@@ -103,6 +115,7 @@ def discover_existing_images(
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError("Cannot read existing application images; refusing to reset them.") from error
     if completed.returncode != 0:
+        _log_cli_failure(command, completed)
         raise RuntimeError("Cannot read existing application images; refusing to reset them.")
     try:
         payload = json.loads(completed.stdout or "[]")
