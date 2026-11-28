@@ -1,7 +1,10 @@
 import io
 import json
+import subprocess
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
+
+import pytest
 
 from config.deployment import existing_images
 from config.deployment.existing_images import (
@@ -102,3 +105,29 @@ def test_cli_reports_plan_and_fails_closed_on_invalid_definition(tmp_path, caplo
     ), redirect_stderr(io.StringIO()):
         assert existing_images.main([]) == 1
     assert "does not exist" in caplog.text
+
+
+def _completed(returncode, stdout="", stderr=""):
+    return subprocess.CompletedProcess(args=["az"], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_discovery_logs_cli_error_and_fails_closed(caplog):
+    # An unregistered provider must be visible, not hidden behind a generic error.
+    provider_error = "ERROR: Subscription 0000 is not registered for the Microsoft.App resource provider."
+    with patch.object(existing_images, "resolve_az_command", return_value="az"), \
+            patch.object(existing_images.subprocess, "run",
+                         side_effect=[_completed(0, "true\n"), _completed(1, stderr=provider_error)]):
+        with pytest.raises(RuntimeError, match="Cannot read existing application images"):
+            existing_images.discover_existing_images("rg-test", "0000", "env")
+    assert "Microsoft.App resource provider" in caplog.text
+    assert "containerapp list failed with exit code 1" in caplog.text
+
+
+def test_group_check_logs_cli_error_and_fails_closed(caplog):
+    with patch.object(existing_images, "resolve_az_command", return_value="az"), \
+            patch.object(existing_images.subprocess, "run",
+                         return_value=_completed(1, stderr="ERROR: AADSTS700082: The refresh token has expired.")):
+        with pytest.raises(RuntimeError, match="Cannot verify application resource group"):
+            existing_images.discover_existing_images("rg-test")
+    assert "AADSTS700082" in caplog.text
+    assert "group exists failed with exit code 1" in caplog.text
